@@ -43,5 +43,7 @@ public interface IEmailSender
 public interface IDigestStore
 {
     Task<IReadOnlyList<OpportunityDigestItem>> GetDigestItemsAsync(int minScore, CancellationToken ct);
+    /// <summary>Active candidate's name (for greeting the recipient), or null.</summary>
+    Task<string?> GetCandidateNameAsync(CancellationToken ct);
     Task SaveExecutionRunAsync(Domain.Entities.ExecutionRun run, CancellationToken ct);
 }

@@ -26,12 +26,12 @@ public static class DatabaseSeeder
                          "financeiros — pagamentos online, PIX, Open Finance e gateways — aplicando DDD, " +
                          "Clean Architecture, SOLID e TDD. Inglês B2 (leitura e escrita técnica fluentes).",
                 location: "Rio de Janeiro, Brasil (Remoto)",
-                seniority: "Sênior",
+                seniority: "Pleno/Sênior",
                 preferredLanguage: "pt-BR",
                 coreSkills: new[] { ".NET", "C#", "ASP.NET Core", "Microsserviços", "Event-Driven Architecture", "Kafka", "RabbitMQ", "Azure", "AWS", "Docker", "Kubernetes", "PostgreSQL", "SQL Server" },
                 secondarySkills: new[] { "Entity Framework", "Dapper", "Azure Service Bus", "Amazon SQS", "SNS", "DynamoDB", "Redis", "Oracle/PL-SQL", "Node.js", "TypeScript", "Python", "DDD", "CQRS", "Clean Architecture", "Hexagonal Architecture", "SOLID", "TDD", "xUnit", "NUnit", "SonarQube", "Azure DevOps", "CI/CD" },
                 domains: new[] { "Pagamentos", "PIX", "Open Finance", "Gateways de pagamento", "Fintech", "Banking", "Mensageria", "Sistemas distribuídos", "Alta criticidade" },
-                preferredRoles: new[] { "Senior Backend Engineer", "Backend Engineer .NET", "Software Engineer C#", "Payments Engineer", "Fintech Backend Developer" },
+                preferredRoles: new[] { "Backend Engineer .NET (Pleno/Sênior)", "Desenvolvedor .NET Pleno", "Senior Backend Engineer", "Software Engineer C#", "Payments Engineer", "Fintech Backend Developer" },
                 preferredContractTypes: new[] { "CLT", "PJ", "Contractor" },
                 preferredLocations: new[] { "Remote", "Brazil", "LATAM", "Global" },
                 experiences: BuildExperiences()));

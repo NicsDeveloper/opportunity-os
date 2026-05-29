@@ -11,12 +11,13 @@ namespace OpportunityOS.Application.Digest;
 /// </summary>
 public static class DigestRenderer
 {
-    public static DigestPreview Render(IReadOnlyList<OpportunityDigestItem> items)
+    public static DigestPreview Render(IReadOnlyList<OpportunityDigestItem> items, string? candidateName = null)
     {
         var ordered = items.OrderByDescending(i => i.OverallScore).ToList();
         var strategic = ordered.Count(i => i.Recommendation == "Strategic");
         var prioritize = ordered.Count(i => i.Recommendation == "Prioritize");
         var apply = ordered.Count(i => i.Recommendation == "Apply");
+        var firstName = FirstName(candidateName);
 
         var subject = ordered.Count == 0
             ? "Opportunity OS — Digest diário (nenhuma oportunidade relevante)"
@@ -24,17 +25,28 @@ public static class DigestRenderer
 
         return new DigestPreview(
             subject,
-            BuildMarkdown(ordered, strategic, prioritize, apply),
-            BuildHtml(ordered, strategic, prioritize, apply),
+            BuildMarkdown(ordered, strategic, prioritize, apply, firstName),
+            BuildHtml(ordered, strategic, prioritize, apply, firstName),
             ordered.Count, strategic, prioritize, apply);
+    }
+
+    private static string Greeting(string? firstName) =>
+        firstName is null ? "Aqui estão suas oportunidades de hoje." : $"Olá, {firstName}! Aqui estão suas oportunidades de hoje.";
+
+    private static string? FirstName(string? fullName)
+    {
+        if (string.IsNullOrWhiteSpace(fullName)) return null;
+        var first = fullName.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+        return string.IsNullOrWhiteSpace(first) ? null : first;
     }
 
     // ---------- Markdown (preview / plain text) ----------
 
-    private static string BuildMarkdown(IReadOnlyList<OpportunityDigestItem> items, int strategic, int prioritize, int apply)
+    private static string BuildMarkdown(IReadOnlyList<OpportunityDigestItem> items, int strategic, int prioritize, int apply, string? firstName)
     {
         var sb = new StringBuilder();
         sb.AppendLine("# Opportunity OS — Digest diário").AppendLine();
+        sb.AppendLine(Greeting(firstName)).AppendLine();
 
         if (items.Count == 0)
         {
@@ -67,7 +79,7 @@ public static class DigestRenderer
 
     // ---------- HTML (email) ----------
 
-    private static string BuildHtml(IReadOnlyList<OpportunityDigestItem> items, int strategic, int prioritize, int apply)
+    private static string BuildHtml(IReadOnlyList<OpportunityDigestItem> items, int strategic, int prioritize, int apply, string? firstName)
     {
         const string font = "font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif";
         var sb = new StringBuilder();
@@ -83,7 +95,7 @@ public static class DigestRenderer
         // Header
         sb.Append("<div style=\"padding:20px 4px 8px\">")
           .Append("<div style=\"font-size:20px;font-weight:700;color:#111827\">Opportunity OS</div>")
-          .Append("<div style=\"font-size:13px;color:#6b7280\">Digest diário de oportunidades</div>")
+          .Append($"<div style=\"font-size:14px;color:#374151;margin-top:2px\">{E(Greeting(firstName))}</div>")
           .Append("</div>");
 
         if (items.Count == 0)

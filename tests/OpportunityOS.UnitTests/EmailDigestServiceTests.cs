@@ -91,4 +91,16 @@ public sealed class EmailDigestServiceTests
         Assert.Equal(0, preview.Total);
         Assert.Contains("Nenhuma oportunidade", preview.Markdown);
     }
+
+    [Fact]
+    public async Task Preview_GreetsTheRecipientByFirstName_InSecondPerson()
+    {
+        var store = new FakeDigestStore(new[] { FakeEmailSender.Item(90) }) { CandidateName = "Nícolas Serrano" };
+        var preview = await Build(store, new FakeEmailSender()).BuildPreviewAsync(60, CancellationToken.None);
+
+        // Markdown keeps accents raw; HTML encodes them but still greets in 2nd person.
+        Assert.Contains("Olá, Nícolas!", preview.Markdown);
+        Assert.Contains("suas oportunidades", preview.Html);
+        Assert.Contains("suas oportunidades", preview.Markdown);
+    }
 }
