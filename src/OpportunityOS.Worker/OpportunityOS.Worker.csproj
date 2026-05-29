@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-OpportunityOS.Worker-42355f43-07ad-4d5b-8c65-652a7554a912</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Hangfire.AspNetCore" Version="1.8.23" />
+    <PackageReference Include="Hangfire.PostgreSql" Version="1.21.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OpportunityOS.Application\OpportunityOS.Application.csproj" />
+    <ProjectReference Include="..\OpportunityOS.Infrastructure\OpportunityOS.Infrastructure.csproj" />
+    <ProjectReference Include="..\OpportunityOS.Domain\OpportunityOS.Domain.csproj" />
+  </ItemGroup>
+</Project>

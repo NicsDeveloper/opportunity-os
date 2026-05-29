@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using OpportunityOS.Application.Discovery;
 using OpportunityOS.Application.Matching;
 using OpportunityOS.Application.Normalization;
+using OpportunityOS.Contracts;
 using OpportunityOS.Infrastructure.Persistence;
 
 namespace OpportunityOS.Api.Endpoints;
@@ -23,6 +25,17 @@ public static class JobEndpoints
         {
             var job = await db.JobPostings.FindAsync([id], ct);
             return job is null ? Results.NotFound() : Results.Ok(job.ToResponse());
+        });
+
+        // Manual discovery run: pull public postings from ATS providers and persist
+        // them (dedup by SourceProvider + ExternalId). Optionally scoped to one company.
+        group.MapPost("/discover", async (
+            DiscoverRequest? req, IJobDiscoveryService discovery, CancellationToken ct) =>
+        {
+            var result = await discovery.DiscoverAsync(req?.CompanyId, ct);
+            return Results.Ok(new DiscoveryResultResponse(
+                result.ExecutionRunId, result.Status, result.CompaniesProcessed,
+                result.ProvidersInvoked, result.JobsDiscovered, result.JobsUpdated, result.Errors));
         });
 
         // Manual analysis run: normalize + score against the active profile.

@@ -39,6 +39,33 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     }
 
     [DbFact]
+    public async Task DiscoverEndpoint_PersistsJobs_AndDedupesOnSecondRun()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        await client.PostAsJsonAsync("/api/companies", new CompanyRequest(
+            "Acme", null, "https://boards.greenhouse.io/acme", null, "Fintech", "Brazil",
+            Priority: 3, Tags: null));
+
+        var first = await client.PostAsJsonAsync("/api/jobs/discover", new DiscoverRequest(null));
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var firstResult = await first.Content.ReadFromJsonAsync<DiscoveryResultResponse>();
+        Assert.Equal(1, firstResult!.JobsDiscovered);
+        Assert.Equal(0, firstResult.JobsUpdated);
+
+        // Second run: same posting is refreshed, not duplicated.
+        var second = await client.PostAsJsonAsync("/api/jobs/discover", new DiscoverRequest(null));
+        var secondResult = await second.Content.ReadFromJsonAsync<DiscoveryResultResponse>();
+        Assert.Equal(0, secondResult!.JobsDiscovered);
+        Assert.Equal(1, secondResult.JobsUpdated);
+
+        var jobs = await client.GetFromJsonAsync<List<JobPostingResponse>>("/api/jobs");
+        Assert.Single(jobs!);
+        Assert.Equal("Test", jobs![0].SourceProvider);
+    }
+
+    [DbFact]
     public async Task MatchEndpoint_PersistsHighScoreForFintechDotNetJob()
     {
         await _factory.ResetDatabaseAsync();
