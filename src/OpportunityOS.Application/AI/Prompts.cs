@@ -38,7 +38,10 @@ public static class Prompts
     public static LlmRequest Fit(CandidateProfile profile, JobAnalysisResult analysis) => new(
         SystemPrompt:
             "Você é um avaliador de compatibilidade entre candidato e vaga. Penalize stacks distantes; " +
-            "valorize pagamentos, PIX, Open Finance, fintech, banking, mensageria, cloud e .NET. " + NoInvention,
+            "valorize pagamentos, PIX, Open Finance, fintech, banking, mensageria, cloud e .NET. " +
+            "Trate Pleno e Sênior como igualmente adequados (o candidato busca ambos); não penalize vagas Pleno. " +
+            "Escreva 'rationale', 'strengths', 'risks' e 'missingRequirements' dirigindo-se ao candidato em " +
+            "SEGUNDA PESSOA ('você', 'seu'); nunca se refira ao candidato pelo nome ou em terceira pessoa. " + NoInvention,
         UserPrompt:
             $$"""
             Retorne JSON com EXATAMENTE estas chaves (scores 0-100, recommendation um de

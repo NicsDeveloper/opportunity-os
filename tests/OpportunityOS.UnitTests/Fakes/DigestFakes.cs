@@ -11,9 +11,13 @@ public sealed class FakeDigestStore : IDigestStore
     public FakeDigestStore(IEnumerable<OpportunityDigestItem>? items = null) =>
         _items = items?.ToList() ?? new();
 
+    public string? CandidateName { get; set; } = "Nícolas Serrano";
+
     public Task<IReadOnlyList<OpportunityDigestItem>> GetDigestItemsAsync(int minScore, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<OpportunityDigestItem>>(
             _items.Where(i => i.OverallScore >= minScore).ToList());
+
+    public Task<string?> GetCandidateNameAsync(CancellationToken ct) => Task.FromResult(CandidateName);
 
     public Task SaveExecutionRunAsync(ExecutionRun run, CancellationToken ct)
     {

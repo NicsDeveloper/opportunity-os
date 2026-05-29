@@ -50,6 +50,12 @@ public sealed class EfDigestStore : IDigestStore
         return items;
     }
 
+    public async Task<string?> GetCandidateNameAsync(CancellationToken ct) =>
+        await _db.CandidateProfiles
+            .OrderByDescending(p => p.CreatedAtUtc)
+            .Select(p => p.FullName)
+            .FirstOrDefaultAsync(ct);
+
     public async Task SaveExecutionRunAsync(ExecutionRun run, CancellationToken ct)
     {
         await _db.ExecutionRuns.AddAsync(run, ct);

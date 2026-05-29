@@ -32,13 +32,15 @@ public sealed class EmailDigestService : IEmailDigestService
     public async Task<DigestPreview> BuildPreviewAsync(int minScore, CancellationToken ct)
     {
         var items = await _store.GetDigestItemsAsync(minScore, ct);
-        return DigestRenderer.Render(items);
+        var name = await _store.GetCandidateNameAsync(ct);
+        return DigestRenderer.Render(items, name);
     }
 
     public async Task<DigestSendResult> SendDailyDigestAsync(int minScore, CancellationToken ct)
     {
         var run = ExecutionRun.Start("SendDailyDigest");
         var items = await _store.GetDigestItemsAsync(minScore, ct);
+        var candidateName = await _store.GetCandidateNameAsync(ct);
 
         // No relevant opportunities: record the run without error and don't send.
         if (items.Count == 0)
@@ -57,7 +59,7 @@ public sealed class EmailDigestService : IEmailDigestService
             return new DigestSendResult(false, "SMTP not configured; use the preview or set Email:Smtp:*.", items.Count, run.Id);
         }
 
-        var preview = DigestRenderer.Render(items);
+        var preview = DigestRenderer.Render(items, candidateName);
         try
         {
             await _sender.SendAsync(preview.Subject, preview.Html, ct);
