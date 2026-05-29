@@ -23,12 +23,20 @@ public sealed class RecurringJobScheduler : IHostedService
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        var cron = _config.GetValue<string>("Jobs:DailyDiscoveryCron") ?? "0 8 * * *";
+        var discoveryCron = _config.GetValue<string>("Jobs:DailyDiscoveryCron") ?? "0 8 * * *";
         _recurring.AddOrUpdate<DiscoverJobsJob>(
             "discover-jobs",
             job => job.RunAsync(CancellationToken.None),
-            cron);
-        _logger.LogInformation("Scheduled recurring job 'discover-jobs' with cron {Cron}", cron);
+            discoveryCron);
+        _logger.LogInformation("Scheduled recurring job 'discover-jobs' with cron {Cron}", discoveryCron);
+
+        var digestCron = _config.GetValue<string>("Jobs:DailyDigestCron") ?? "0 9 * * *";
+        _recurring.AddOrUpdate<SendDailyDigestJob>(
+            "send-daily-digest",
+            job => job.RunAsync(CancellationToken.None),
+            digestCron);
+        _logger.LogInformation("Scheduled recurring job 'send-daily-digest' with cron {Cron}", digestCron);
+
         return Task.CompletedTask;
     }
 

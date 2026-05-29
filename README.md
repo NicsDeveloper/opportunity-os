@@ -9,7 +9,7 @@ revisáveis e envia um digest por e-mail para **revisão humana**.
 
 Este repositório está sendo construído por fases (Spec-Driven Development). **Esta entrega
 cobre as Fases 1 (Core funcional), 2 (Automação diária / descoberta), 3 (AI Copilot Layer)
-e 4 (CRM de oportunidades).**
+, 4 (CRM de oportunidades) e 5 (Email Digest). O roadmap planejado está completo.**
 
 ---
 
@@ -122,6 +122,8 @@ Desabilite com `"SeedOnStartup": false` em `appsettings.json` ou via env var
 | POST   | `/api/recruiters` | Cria recruiter lead |
 | PUT    | `/api/recruiters/{id}` | Atualiza recruiter lead |
 | DELETE | `/api/recruiters/{id}` | Remove recruiter lead |
+| GET    | `/api/digest/preview` | Renderiza o digest (Markdown + HTML) **sem enviar**. Query opcional `?minScore=60` |
+| POST   | `/api/digest/send` | Envia o digest por e-mail (registra `ExecutionRun`). Sem SMTP → não envia e avisa |
 
 ### Exemplo: rodar análise manual
 
@@ -204,6 +206,28 @@ Quando um match atinge **score ≥ 70**, o sistema cria automaticamente uma `Opp
 nunca raspa o LinkedIn. Follow-ups: defina `NextFollowUpAtUtc` e consulte os pendentes
 em `GET /api/opportunities/follow-ups`.
 
+## Email Digest (Fase 5)
+
+Resumo das melhores oportunidades (score ≥ 60 por padrão), ordenadas por score, com
+empresa, vaga, link, recomendação, pontos fortes, riscos e — quando houver — mensagem
+curta, carta e notas de CV.
+
+- `GET /api/digest/preview` renderiza Markdown + HTML **sem enviar**.
+- `POST /api/digest/send` envia via SMTP e registra um `ExecutionRun`. O `SendDailyDigestJob`
+  (Worker) agenda o envio diário (`Jobs:DailyDigestCron`, padrão `0 9 * * *`).
+- **Sem oportunidades relevantes** → registra o `ExecutionRun` sem erro e **não envia**.
+- **Sem SMTP configurado** → não envia e retorna aviso (o preview continua funcionando).
+- Sem anexos; nenhuma candidatura é enviada; o envio só ocorre quando o endpoint/job é acionado.
+
+**Configuração SMTP** (via User Secrets — nunca no repositório):
+```bash
+cd src/OpportunityOS.Api      # e idem em src/OpportunityOS.Worker p/ o job diário
+dotnet user-secrets set "Email:Smtp:Host" "smtp.gmail.com"
+dotnet user-secrets set "Email:Smtp:Port" "587"
+dotnet user-secrets set "Email:Smtp:Username" "voce@gmail.com"
+dotnet user-secrets set "Email:Smtp:Password" "<Gmail App Password (requer 2FA)>"
+```
+
 ## Match Engine (heurístico, v1)
 
 Sem LLM nesta fase — o score é **transparente e explicável** (ver
@@ -280,13 +304,10 @@ de ambiente.
 - ✅ **Fase 4 — CRM de oportunidades**: entidades `Opportunity` e `RecruiterLead`,
   criação automática de oportunidade quando score ≥ 70, status manual (gate de revisão
   humana), `NextFollowUpAtUtc` + follow-ups pendentes, CRUD de recruiter leads, testes.
-- ⏳ Fase 5 — Digest por e-mail.
+- ✅ **Fase 5 — Email Digest**: `IEmailDigestService` + SMTP, `GET /api/digest/preview`,
+  `POST /api/digest/send`, template Markdown/HTML, `SendDailyDigestJob` (cron diário),
+  skip sem oportunidades/sem SMTP, testes com fake sender.
 
-## Próximos passos sugeridos (Fase 5)
-
-1. `IEmailDigestService` + provider SMTP.
-2. `GET /api/digest/preview` e `POST /api/digest/send`.
-3. Template Markdown/HTML com empresa, vaga, score, recomendação, pontos fortes/riscos,
-   mensagem curta, carta e notas de CV.
-4. Job diário (`SendDailyDigestJob`); se não houver oportunidades relevantes, registrar
-   `ExecutionRun` sem erro (sem enviar e-mail).
+**Roadmap planejado concluído.** Próximas ideias (fora do roadmap original): dashboard
+React, integração Banco Central / participantes Pix, Google Custom Search, crawler
+Playwright para páginas com JS, e tailoring de CV em PDF/DOCX.

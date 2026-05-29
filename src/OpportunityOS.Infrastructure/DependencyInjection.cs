@@ -4,11 +4,13 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using OpportunityOS.Application.AI;
+using OpportunityOS.Application.Digest;
 using OpportunityOS.Application.Discovery;
 using OpportunityOS.Application.Matching;
 using OpportunityOS.Application.Normalization;
 using OpportunityOS.Application.Pipeline;
 using OpportunityOS.Infrastructure.Ai;
+using OpportunityOS.Infrastructure.Email;
 using OpportunityOS.Infrastructure.Persistence;
 using OpportunityOS.Infrastructure.Providers;
 
@@ -35,6 +37,13 @@ public static class DependencyInjection
 
         services.AddScoped<IOpportunityStore, EfOpportunityStore>();
         services.AddScoped<IOpportunityPipeline, OpportunityPipeline>();
+
+        var emailOptions = new EmailOptions();
+        config.GetSection("Email").Bind(emailOptions);
+        services.AddSingleton(emailOptions);
+        services.AddScoped<IEmailSender, SmtpEmailSender>();
+        services.AddScoped<IDigestStore, EfDigestStore>();
+        services.AddScoped<IEmailDigestService, EmailDigestService>();
 
         if (config.GetValue("FeatureFlags:EnableGreenhouseProvider", true))
             services.AddHttpClient<IJobSourceProvider, GreenhouseJobSourceProvider>(ConfigureClient);
