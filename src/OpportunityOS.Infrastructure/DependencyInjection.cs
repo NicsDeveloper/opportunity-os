@@ -57,6 +57,8 @@ public static class DependencyInjection
             services.AddHttpClient<IJobSearchProvider, GupyJobSearchProvider>(ConfigureClient);
 
         services.AddHttpClient<IAtsDetector, AtsDetector>(ConfigureClient);
+        services.AddHttpClient<ICompanyWebsiteDiscoverer, CompanyWebsiteDiscoverer>(ConfigureClient);
+        services.AddScoped<ICompanyOnboardingService, CompanyOnboardingService>();
 
         var bacenOptions = new BacenOptions();
         config.GetSection("Bacen").Bind(bacenOptions);

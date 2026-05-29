@@ -74,6 +74,12 @@ public sealed class Company
         if (!string.IsNullOrWhiteSpace(careersUrl)) CareersUrl = careersUrl;
     }
 
+    /// <summary>Set the official website discovered by website discovery.</summary>
+    public void SetWebsiteUrl(string websiteUrl)
+    {
+        if (!string.IsNullOrWhiteSpace(websiteUrl)) WebsiteUrl = websiteUrl;
+    }
+
     public void AddTag(string tag)
     {
         if (!string.IsNullOrWhiteSpace(tag) && !Tags.Contains(tag)) Tags.Add(tag);

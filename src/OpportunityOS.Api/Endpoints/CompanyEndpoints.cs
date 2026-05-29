@@ -83,6 +83,30 @@ public static class CompanyEndpoints
                 r.Detected, r.Ats, r.BoardUrl, r.Token, r.CareersPageUrl, r.ProviderSupported));
         });
 
+        // Onboard companies missing a website: discover site -> detect ATS (chains the funnel).
+        group.MapPost("/onboard", async (
+            int? limit, ICompanyOnboardingService onboarding, CancellationToken ct) =>
+        {
+            var r = await onboarding.OnboardAsync(Math.Clamp(limit ?? 25, 1, 200), ct);
+            return Results.Ok(new OnboardingResponse(
+                r.ExecutionRunId, r.Status, r.Processed, r.WebsitesFound, r.AtsDetected, r.Errors));
+        });
+
+        // Discover a single company's website from its name (no persistence beyond setting it).
+        group.MapPost("/{id:guid}/discover-website", async (
+            Guid id, OpportunityOsDbContext db, ICompanyWebsiteDiscoverer discoverer, CancellationToken ct) =>
+        {
+            var company = await db.Companies.FindAsync([id], ct);
+            if (company is null) return Results.NotFound();
+            var r = await discoverer.DiscoverAsync(company.Name, ct);
+            if (r is { Found: true, WebsiteUrl: { Length: > 0 } url })
+            {
+                company.SetWebsiteUrl(url);
+                await db.SaveChangesAsync(ct);
+            }
+            return Results.Ok(new WebsiteDiscoveryResponse(r.Found, r.WebsiteUrl));
+        });
+
         // Bulk import companies from CSV (name,websiteUrl,careersUrl,industry,country).
         group.MapPost("/import-csv", async (HttpRequest request, OpportunityOsDbContext db, CancellationToken ct) =>
         {
