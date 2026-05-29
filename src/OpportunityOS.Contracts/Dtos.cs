@@ -142,6 +142,23 @@ public sealed record RecruiterResponse(
     string? Notes,
     DateTime CreatedAtUtc);
 
+// ---- Digest ----
+
+public sealed record DigestPreviewResponse(
+    string Subject,
+    string Markdown,
+    string Html,
+    int Total,
+    int StrategicCount,
+    int PrioritizeCount,
+    int ApplyCount);
+
+public sealed record DigestSendResponse(
+    bool Sent,
+    string Reason,
+    int ItemCount,
+    Guid ExecutionRunId);
+
 // ---- AI Copilot ----
 
 public sealed record JobAnalysisResponse(

@@ -185,6 +185,33 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
         Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
     }
 
+    [DbFact]
+    public async Task Digest_Preview_ListsAnalyzedOpportunity_AndSendSkipsWithoutSmtp()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        await client.PostAsJsonAsync("/api/candidate-profile", new CandidateProfileRequest(
+            "Nícolas", "Backend .NET", "x", "Brasil", "Pleno/Sênior", "pt-BR",
+            new() { ".NET", "C#" }, null, new() { "Pagamentos" }, null, null, null, null));
+        var jobId = await SeedJob("Senior Backend (.NET / Payments)",
+            "Payments, PIX, .NET, C#, Kafka, AWS. Remote Brazil.");
+
+        // Produces a match (FakeLlm fit -> 89), which becomes a digest item.
+        await client.PostAsync($"/api/jobs/{jobId}/ai/analyze", null);
+
+        var preview = await client.GetFromJsonAsync<DigestPreviewResponse>("/api/digest/preview");
+        Assert.True(preview!.Total >= 1);
+        Assert.Contains("Opportunity OS", preview.Html);
+
+        // No SMTP configured in the test host -> records run, does not send.
+        var send = await client.PostAsync("/api/digest/send", null);
+        send.EnsureSuccessStatusCode();
+        var result = await send.Content.ReadFromJsonAsync<DigestSendResponse>();
+        Assert.False(result!.Sent);
+        Assert.Contains("SMTP", result.Reason);
+    }
+
     private async Task<Guid> SeedJob(string title, string description)
     {
         var companyResp = await CreateCompany();

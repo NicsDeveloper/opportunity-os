@@ -31,6 +31,7 @@ app.MapJobEndpoints();
 app.MapAiEndpoints();
 app.MapOpportunityEndpoints();
 app.MapRecruiterEndpoints();
+app.MapDigestEndpoints();
 
 app.Run();
 
