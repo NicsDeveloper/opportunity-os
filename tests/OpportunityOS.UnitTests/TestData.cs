@@ -1,9 +1,16 @@
+using OpportunityOS.Application.Matching;
 using OpportunityOS.Domain.Entities;
 
 namespace OpportunityOS.UnitTests;
 
 internal static class TestData
 {
+    /// <summary>Map a heuristic <see cref="MatchResult"/> to an entity for service tests.</summary>
+    public static OpportunityMatch ToEntityForTest(this MatchResult r, Guid jobId, Guid profileId) =>
+        new(jobId, profileId, r.OverallScore, r.TechnicalScore, r.DomainScore, r.SeniorityScore,
+            r.LocationScore, r.LanguageScore, r.Recommendation, r.Strengths, r.Risks,
+            r.MissingRequirements, r.Rationale);
+
     public static CandidateProfile BackendDotNetProfile() => new(
         fullName: "Nícolas Serrano",
         headline: "Desenvolvedor .NET Backend",

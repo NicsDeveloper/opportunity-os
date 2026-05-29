@@ -104,6 +104,56 @@ public sealed record DiscoveryResultResponse(
     int JobsUpdated,
     int Errors);
 
+// ---- AI Copilot ----
+
+public sealed record JobAnalysisResponse(
+    List<string> RequiredSkills,
+    List<string> NiceToHaveSkills,
+    List<string> Domains,
+    string Seniority,
+    string WorkMode,
+    string Language,
+    List<string> Responsibilities,
+    List<string> Risks,
+    string Summary);
+
+public sealed record AiAnalyzeResponse(JobAnalysisResponse Analysis, MatchResponse Match);
+
+public sealed record GeneratedMessageResponse(
+    Guid Id,
+    Guid JobPostingId,
+    Guid OpportunityMatchId,
+    string LinkedInMessage,
+    string CoverLetter,
+    string EmailSubject,
+    string EmailBody,
+    string CvTailoringNotes,
+    string FollowUpMessage,
+    string HumanReviewNotes,
+    string Status,
+    string PromptVersion,
+    string ModelName,
+    DateTime CreatedAtUtc);
+
+public sealed record CvTailoringResponse(
+    string SummaryAdjustment,
+    List<string> SkillsToHighlight,
+    List<string> KeywordsToInclude,
+    List<string> BulletSuggestions,
+    List<string> SectionsToReorder,
+    string Notes);
+
+public sealed record CareerInsightRequest(int? MaxJobs);
+
+public sealed record CareerInsightResponse(
+    List<string> MostRequestedTechnologies,
+    List<string> RecurringGaps,
+    List<string> StrongestDomains,
+    List<string> StudySuggestions,
+    List<string> PostIdeas,
+    List<string> MostPromisingCompanies,
+    string Summary);
+
 // ---- Match ----
 
 public sealed record MatchResponse(

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using OpportunityOS.Contracts;
 using Xunit;
@@ -63,6 +64,93 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
         var jobs = await client.GetFromJsonAsync<List<JobPostingResponse>>("/api/jobs");
         Assert.Single(jobs!);
         Assert.Equal("Test", jobs![0].SourceProvider);
+    }
+
+    [DbFact]
+    public async Task AiAnalyze_PersistsMatch_AndPromptLog_ThenOutreachDraft()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        await client.PostAsJsonAsync("/api/candidate-profile", new CandidateProfileRequest(
+            "Nícolas Serrano", "Desenvolvedor .NET Backend", "Backend .NET / pagamentos",
+            "Brasil", "Pleno/Sênior", "pt-BR",
+            CoreSkills: new() { ".NET", "C#", "AWS", "Kafka" }, SecondarySkills: null,
+            Domains: new() { "Pagamentos", "PIX" }, PreferredRoles: null,
+            PreferredContractTypes: null, PreferredLocations: null, Experiences: null));
+
+        var jobId = await SeedJob(
+            "Senior Backend Engineer (.NET / Payments)",
+            "Build payments and PIX systems with .NET, C#, ASP.NET Core, Kafka, AWS. Remote, Brazil. Open Finance, fintech.");
+
+        // analyze -> persists OpportunityMatch + a PromptExecutionLog (FakeLlmProvider).
+        var analyze = await client.PostAsync($"/api/jobs/{jobId}/ai/analyze", null);
+        Assert.Equal(HttpStatusCode.OK, analyze.StatusCode);
+        var ai = await analyze.Content.ReadFromJsonAsync<AiAnalyzeResponse>();
+        Assert.Contains(".NET", ai!.Analysis.RequiredSkills);
+        Assert.True(ai.Match.OverallScore >= 60);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Infrastructure.Persistence.OpportunityOsDbContext>();
+            Assert.True(await db.PromptExecutionLogs.AnyAsync());
+        }
+
+        // outreach -> a Draft GeneratedMessage.
+        var outreach = await client.PostAsync($"/api/jobs/{jobId}/ai/generate-outreach", null);
+        Assert.Equal(HttpStatusCode.OK, outreach.StatusCode);
+        var msg = await outreach.Content.ReadFromJsonAsync<GeneratedMessageResponse>();
+        Assert.Equal("Draft", msg!.Status);
+        Assert.False(string.IsNullOrWhiteSpace(msg.LinkedInMessage));
+    }
+
+    [DbFact]
+    public async Task Outreach_BelowScoreGate_Returns422()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        await client.PostAsJsonAsync("/api/candidate-profile", new CandidateProfileRequest(
+            "Nícolas", "Backend", "x", "Brasil", "Pleno", "pt-BR",
+            new() { ".NET" }, null, null, null, null, null, null));
+
+        var jobId = await SeedJob("Frontend React Developer", "React, Angular, CSS. Onsite São Paulo.");
+
+        // Pre-persist a low-score match so the gate triggers deterministically.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Infrastructure.Persistence.OpportunityOsDbContext>();
+            var profileId = db.CandidateProfiles.Select(p => p.Id).First();
+            db.OpportunityMatches.Add(new Domain.Entities.OpportunityMatch(
+                jobId, profileId, 30, 10, 25, 65, 35, 90, Domain.Enums.MatchRecommendation.Ignore,
+                new[] { "x" }, new[] { "y" }, Array.Empty<string>(), "low"));
+            await db.SaveChangesAsync();
+        }
+
+        var outreach = await client.PostAsync($"/api/jobs/{jobId}/ai/generate-outreach", null);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, outreach.StatusCode);
+    }
+
+    private async Task<Guid> SeedJob(string title, string description)
+    {
+        var companyResp = await CreateCompany();
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<Infrastructure.Persistence.OpportunityOsDbContext>();
+        var job = new Domain.Entities.JobPosting(
+            companyResp, "ext", "Test", title, "https://example.com/j", description,
+            location: "Remote", language: "en");
+        db.JobPostings.Add(job);
+        await db.SaveChangesAsync();
+        return job.Id;
+    }
+
+    private async Task<Guid> CreateCompany()
+    {
+        var client = _factory.CreateClient();
+        var resp = await client.PostAsJsonAsync("/api/companies", new CompanyRequest(
+            "Acme", null, null, null, "Fintech", "Brazil", Priority: 3, Tags: null));
+        var company = await resp.Content.ReadFromJsonAsync<CompanyResponse>();
+        return company!.Id;
     }
 
     [DbFact]
