@@ -44,7 +44,8 @@ public sealed class EfDigestStore : IDigestStore
             items.Add(new OpportunityDigestItem(
                 companyName, job.Title, job.AbsoluteUrl, match.OverallScore, match.Recommendation.ToString(),
                 match.Rationale, msg?.LinkedInMessage ?? string.Empty, msg?.CoverLetter ?? string.Empty,
-                msg?.CvTailoringNotes ?? string.Empty, match.Strengths.ToList(), match.Risks.ToList()));
+                msg?.CvTailoringNotes ?? string.Empty, match.Strengths.ToList(), match.Risks.ToList(),
+                OutreachLanguage: job.Language));
         }
         return items;
     }
