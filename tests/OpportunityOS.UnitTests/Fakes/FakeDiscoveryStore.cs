@@ -1,5 +1,6 @@
 using OpportunityOS.Application.Discovery;
 using OpportunityOS.Domain.Entities;
+using OpportunityOS.Domain.Enums;
 
 namespace OpportunityOS.UnitTests.Fakes;
 
@@ -24,6 +25,18 @@ public sealed class FakeDiscoveryStore : IDiscoveryStore
     {
         Jobs.Add(job);
         return Task.CompletedTask;
+    }
+
+    public Task<Company> FindOrCreateCompanyByNameAsync(string name, CancellationToken ct)
+    {
+        var existing = Companies.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (existing is null)
+        {
+            existing = new Company(name, null, null, null, null, "Brazil",
+                CompanyPriority.Medium, CompanySource.AtsDiscovery, new[] { "gupy" });
+            Companies.Add(existing);
+        }
+        return Task.FromResult(existing);
     }
 
     public Task AddExecutionRunAsync(ExecutionRun run, CancellationToken ct)

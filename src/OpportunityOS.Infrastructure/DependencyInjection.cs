@@ -51,6 +51,9 @@ public static class DependencyInjection
         if (config.GetValue("FeatureFlags:EnableLeverProvider", true))
             services.AddHttpClient<IJobSourceProvider, LeverJobSourceProvider>(ConfigureClient);
 
+        if (config.GetValue("FeatureFlags:EnableGupyProvider", true))
+            services.AddHttpClient<IJobSearchProvider, GupyJobSearchProvider>(ConfigureClient);
+
         AddAiCopilot(services, config);
 
         return services;

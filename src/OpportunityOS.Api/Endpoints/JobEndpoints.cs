@@ -39,6 +39,20 @@ public static class JobEndpoints
                 result.ProvidersInvoked, result.JobsDiscovered, result.JobsUpdated, result.Errors));
         });
 
+        // Keyword search across search providers (Gupy). Defaults to a sensible
+        // .NET/payments keyword set when none is supplied.
+        group.MapPost("/search", async (
+            SearchRequest? req, IJobDiscoveryService discovery, CancellationToken ct) =>
+        {
+            var keywords = req?.Keywords is { Count: > 0 } k
+                ? k
+                : new List<string> { ".net", "c#", "desenvolvedor .net", "backend", "pagamentos" };
+            var result = await discovery.SearchAsync(keywords, ct);
+            return Results.Ok(new DiscoveryResultResponse(
+                result.ExecutionRunId, result.Status, result.CompaniesProcessed,
+                result.ProvidersInvoked, result.JobsDiscovered, result.JobsUpdated, result.Errors));
+        });
+
         // Manual analysis run: normalize + score against the active profile.
         group.MapPost("/{id:guid}/match", async (
             Guid id, OpportunityOsDbContext db, IJobNormalizer normalizer, IMatchEngine engine,
