@@ -107,6 +107,30 @@ public sealed record AtsDetectionResponse(
 
 public sealed record CsvImportResponse(int Created);
 
+// ---- Bacen ----
+
+public sealed record BacenImportResponse(
+    int TotalRead, int Created, int Updated, int Skipped, List<string> Warnings);
+
+public sealed record BacenPromotionResponse(
+    int TotalEligible, int CompaniesCreated, int CompaniesUpdated, int Skipped, List<string> Warnings);
+
+public sealed record BacenInstitutionResponse(
+    Guid Id,
+    string Name,
+    string? Ispb,
+    string? Cnpj,
+    string InstitutionType,
+    bool AuthorizedByBacen,
+    string? SpiParticipationType,
+    string? PixParticipationType,
+    string? PixParticipationMode,
+    bool? PaymentInitiation,
+    bool? CashoutServiceFacilitator,
+    List<string> Tags,
+    DateTime ImportedAtUtc,
+    DateTime? UpdatedAtUtc);
+
 public sealed record DiscoveryResultResponse(
     Guid ExecutionRunId,
     string Status,

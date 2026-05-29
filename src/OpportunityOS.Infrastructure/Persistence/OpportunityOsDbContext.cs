@@ -19,6 +19,7 @@ public sealed class OpportunityOsDbContext : DbContext
     public DbSet<PromptExecutionLog> PromptExecutionLogs => Set<PromptExecutionLog>();
     public DbSet<Opportunity> Opportunities => Set<Opportunity>();
     public DbSet<RecruiterLead> RecruiterLeads => Set<RecruiterLead>();
+    public DbSet<BacenInstitution> BacenInstitutions => Set<BacenInstitution>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -155,6 +156,20 @@ public sealed class OpportunityOsDbContext : DbContext
             e.Property(x => x.FullName).IsRequired();
             e.Property(x => x.Source).HasConversion<int>();
             e.HasIndex(x => x.CompanyId);
+        });
+
+        b.Entity<BacenInstitution>(e =>
+        {
+            e.ToTable("bacen_institutions");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).IsRequired();
+            e.Property(x => x.InstitutionType).IsRequired();
+            e.Property(x => x.Tags).HasConversion(stringListConverter).HasColumnType("jsonb")
+                .Metadata.SetValueComparer(stringListComparer);
+            // Preferred unique key on CNPJ when present; alternate on ISPB.
+            e.HasIndex(x => x.Cnpj).IsUnique().HasFilter("\"Cnpj\" IS NOT NULL");
+            e.HasIndex(x => x.Ispb).IsUnique().HasFilter("\"Ispb\" IS NOT NULL");
+            e.HasIndex(x => x.AuthorizedByBacen);
         });
     }
 }

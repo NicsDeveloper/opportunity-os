@@ -70,4 +70,9 @@ public static class Mapping
     public static RecruiterResponse ToResponse(this RecruiterLead r) =>
         new(r.Id, r.CompanyId, r.FullName, r.RoleTitle, r.LinkedInUrl, r.Email,
             r.Source.ToString(), r.Notes, r.CreatedAtUtc);
+
+    public static BacenInstitutionResponse ToResponse(this BacenInstitution i) =>
+        new(i.Id, i.Name, i.Ispb, i.Cnpj, i.InstitutionType, i.AuthorizedByBacen,
+            i.SpiParticipationType, i.PixParticipationType, i.PixParticipationMode,
+            i.PaymentInitiation, i.CashoutServiceFacilitator, i.Tags, i.ImportedAtUtc, i.UpdatedAtUtc);
 }

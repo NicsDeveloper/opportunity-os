@@ -25,6 +25,10 @@ public sealed class OpportunityOsApiFactory : WebApplicationFactory<Program>
         {
             services.RemoveAll<IJobSourceProvider>();
             services.AddScoped<IJobSourceProvider, TestJobSourceProvider>();
+
+            // Deterministic Bacen CSV (no network) for integration tests.
+            services.RemoveAll<Application.Bacen.IBacenPixParticipantsCsvProvider>();
+            services.AddScoped<Application.Bacen.IBacenPixParticipantsCsvProvider, TestBacenCsvProvider>();
         });
     }
 

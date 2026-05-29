@@ -212,6 +212,46 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
         Assert.Contains("SMTP", result.Reason);
     }
 
+    [DbFact]
+    public async Task Bacen_Import_ThenPromote_AreIdempotent()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        // First import: 4 institutions created.
+        var imp1 = await (await client.PostAsync("/api/bacen/pix-participants/import", null))
+            .Content.ReadFromJsonAsync<BacenImportResponse>();
+        Assert.Equal(4, imp1!.TotalRead);
+        Assert.Equal(4, imp1.Created);
+        Assert.Equal(0, imp1.Updated);
+
+        // Second import: no duplicates — all updated.
+        var imp2 = await (await client.PostAsync("/api/bacen/pix-participants/import", null))
+            .Content.ReadFromJsonAsync<BacenImportResponse>();
+        Assert.Equal(0, imp2!.Created);
+        Assert.Equal(4, imp2.Updated);
+
+        var list = await client.GetFromJsonAsync<List<BacenInstitutionResponse>>("/api/bacen/pix-participants");
+        Assert.Equal(4, list!.Count);
+
+        // Promote: only the 2 eligible (99PAY, BTG) become companies; coop + unauthorized skipped.
+        var pro1 = await (await client.PostAsync("/api/bacen/pix-participants/promote-to-companies", null))
+            .Content.ReadFromJsonAsync<BacenPromotionResponse>();
+        Assert.Equal(2, pro1!.TotalEligible);
+        Assert.Equal(2, pro1.CompaniesCreated);
+        Assert.Equal(2, pro1.Skipped);
+
+        // Promote again: no new companies — both updated.
+        var pro2 = await (await client.PostAsync("/api/bacen/pix-participants/promote-to-companies", null))
+            .Content.ReadFromJsonAsync<BacenPromotionResponse>();
+        Assert.Equal(0, pro2!.CompaniesCreated);
+        Assert.Equal(2, pro2.CompaniesUpdated);
+
+        var companies = await client.GetFromJsonAsync<List<CompanyResponse>>("/api/companies");
+        Assert.Equal(2, companies!.Count);
+        Assert.Contains(companies, c => c.Source == "Bacen" && c.Priority == "Strategic"); // 99PAY/BTG
+    }
+
     private async Task<Guid> SeedJob(string title, string description)
     {
         var companyResp = await CreateCompany();
