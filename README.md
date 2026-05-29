@@ -157,10 +157,20 @@ sob controle do sistema e revisão humana. Serviços (`Application/AI`):
 A IA **não** busca vagas sozinha, não envia mensagens, não aplica, não altera o CV e
 não inventa experiências.
 
-**Provider de LLM** (`ILlmProvider`):
-- Com `OpenAI:ApiKey` configurada e `FeatureFlags:EnableLlmAnalysis=true` → `OpenAiLlmProvider`.
-- Sem API key → `FakeLlmProvider` (JSON determinístico, funciona offline).
-- Com `EnableLlmAnalysis=false` → provider reporta não-configurado e os serviços usam **fallback heurístico**.
+**Provider de LLM** (`ILlmProvider`) — selecionado por configuração:
+- `Llm:Provider` aceita `auto` (padrão), `Anthropic`, `OpenAI` ou `Fake`.
+- Em `auto`: usa `AnthropicLlmProvider` se houver `Anthropic:ApiKey`; senão `OpenAiLlmProvider` se houver `OpenAI:ApiKey`; senão `FakeLlmProvider`.
+- `FakeLlmProvider` retorna JSON determinístico (funciona **offline**, sem chave).
+- Com `FeatureFlags:EnableLlmAnalysis=false` → provider reporta não-configurado e os serviços usam **fallback heurístico**.
+
+> **Chaves de API nunca vão no repositório.** Configure via User Secrets ou variável de
+> ambiente, definidas por você:
+> ```bash
+> cd src/OpportunityOS.Api
+> dotnet user-secrets set "Anthropic:ApiKey" "<sua-chave>"   # Claude (Messages API)
+> # ou
+> dotnet user-secrets set "OpenAI:ApiKey" "<sua-chave>"
+> ```
 
 **Garantias** (todas testadas):
 - Toda execução é auditada em `prompt_execution_logs` (`promptVersion`, `modelName`, `rawResponse`, `success`, `usedFallback`, `createdAtUtc`).
