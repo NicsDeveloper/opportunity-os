@@ -37,31 +37,18 @@ public static class DatabaseSeeder
                 experiences: BuildExperiences()));
         }
 
+        // Seed a couple of REAL companies with public Greenhouse boards so the radar
+        // is useful on first run (no fictitious data / fake links). Jobs come from
+        // real discovery (POST /api/jobs/discover) and Gupy search, not from the seed.
         if (!await db.Companies.AnyAsync(ct))
         {
-            var fintech = new Company(
-                "Sample Fintech", "https://samplefintech.example", "https://boards.greenhouse.io/samplefintech",
-                null, "Fintech", "Brazil", CompanyPriority.Strategic, CompanySource.Manual,
-                new[] { "fintech", "payments", "pix", "dotnet", "remote-friendly" });
-            var generic = new Company(
-                "Sample WebShop", "https://webshop.example", "https://jobs.lever.co/webshop",
-                null, "E-commerce", "Brazil", CompanyPriority.Low, CompanySource.Manual,
-                new[] { "ecommerce" });
-            db.Companies.AddRange(fintech, generic);
-            await db.SaveChangesAsync(ct);
-
-            db.JobPostings.AddRange(
-                new JobPosting(
-                    fintech.Id, "seed-001", "Seed", "Senior Backend Engineer (.NET / Payments)",
-                    "https://samplefintech.example/jobs/seed-001",
-                    "We are hiring a Senior Backend Engineer to build payment and PIX systems using .NET, C#, " +
-                    "ASP.NET Core, Kafka and AWS. Remote, Brazil. Experience with Open Finance and fintech is a plus.",
-                    location: "Remote - Brazil", language: "en"),
-                new JobPosting(
-                    generic.Id, "seed-002", "Seed", "Frontend React Developer",
-                    "https://webshop.example/jobs/seed-002",
-                    "Frontend developer with React, Angular and CSS to build our e-commerce storefront. Onsite.",
-                    location: "São Paulo - Onsite", language: "en"));
+            db.Companies.AddRange(
+                new Company("Monzo", "https://monzo.com", "https://boards.greenhouse.io/monzo",
+                    null, "Fintech / Banking", "UK", CompanyPriority.Medium, CompanySource.Manual,
+                    new[] { "fintech", "banking", "payments" }),
+                new Company("Brex", "https://brex.com", "https://boards.greenhouse.io/brex",
+                    null, "Fintech", "US", CompanyPriority.Medium, CompanySource.Manual,
+                    new[] { "fintech", "payments" }));
         }
 
         await db.SaveChangesAsync(ct);
