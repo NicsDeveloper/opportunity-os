@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using OpportunityOS.Application.Discovery;
 using OpportunityOS.Infrastructure.Persistence;
 
 namespace OpportunityOS.IntegrationTests;
@@ -17,6 +19,13 @@ public sealed class OpportunityOsApiFactory : WebApplicationFactory<Program>
         builder.UseSetting("ConnectionStrings:DefaultConnection", TestDb.ConnectionString);
         builder.UseSetting("SeedOnStartup", "false");
         builder.UseEnvironment("Testing");
+
+        // Replace the real ATS providers with a deterministic one (no network).
+        builder.ConfigureServices(services =>
+        {
+            services.RemoveAll<IJobSourceProvider>();
+            services.AddScoped<IJobSourceProvider, TestJobSourceProvider>();
+        });
     }
 
     public async Task ResetDatabaseAsync()

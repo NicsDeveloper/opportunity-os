@@ -8,7 +8,8 @@ revisáveis e envia um digest por e-mail para **revisão humana**.
 > **não** envia mensagens sem revisão humana. É um copiloto de carreira, não um robô de spam.
 
 Este repositório está sendo construído por fases (Spec-Driven Development). **Esta entrega
-cobre a Fase 1 — Core funcional.**
+cobre as Fases 1 (Core funcional), 2 (Automação diária / descoberta), 3 (AI Copilot Layer)
+, 4 (CRM de oportunidades) e 5 (Email Digest). O roadmap planejado está completo.**
 
 ---
 
@@ -25,9 +26,10 @@ cobre a Fase 1 — Core funcional.**
 src/
   OpportunityOS.Domain          # Entidades, enums, regras de negócio (sem dependências)
   OpportunityOS.Contracts       # DTOs de request/response da API
-  OpportunityOS.Application      # Casos de uso: Match Engine, normalização, interfaces
-  OpportunityOS.Infrastructure   # EF Core, DbContext, migrations, DI
+  OpportunityOS.Application      # Casos de uso: Match Engine, normalização, descoberta, interfaces
+  OpportunityOS.Infrastructure   # EF Core, DbContext, migrations, DI, ATS providers
   OpportunityOS.Api              # Minimal API (endpoints), seed, OpenAPI
+  OpportunityOS.Worker           # Host Hangfire: jobs recorrentes (descoberta diária)
 tests/
   OpportunityOS.UnitTests        # Match Engine + Normalizer
   OpportunityOS.IntegrationTests # API + PostgreSQL real (auto-skip se não houver DB)
@@ -58,7 +60,16 @@ Direção das dependências: `Api → Infrastructure → Application → Domain`
    A porta de desenvolvimento vem de `src/OpportunityOS.Api/Properties/launchSettings.json`.
    O documento OpenAPI fica em `/openapi/v1.json`.
 
-3. **(Opcional) Suba tudo via Docker Compose** (API + banco):
+3. **(Opcional) Rode o Worker** (Hangfire — agenda a descoberta diária):
+
+   ```bash
+   dotnet run --project src/OpportunityOS.Worker
+   ```
+
+   No primeiro start ele instala o schema do Hangfire no PostgreSQL e registra o job
+   recorrente `discover-jobs` (cron `Jobs:DailyDiscoveryCron`, padrão `0 8 * * *`).
+
+4. **(Opcional) Suba tudo via Docker Compose** (API + Worker + banco):
 
    ```bash
    docker compose up --build
@@ -93,9 +104,26 @@ Desabilite com `"SeedOnStartup": false` em `appsettings.json` ou via env var
 | DELETE | `/api/companies/{id}` | Remove empresa |
 | GET    | `/api/jobs` | Lista vagas |
 | GET    | `/api/jobs/{id}` | Vaga por id |
-| POST   | `/api/jobs/{id}/match` | **Análise manual**: normaliza + calcula score e persiste o match |
+| POST   | `/api/jobs/discover` | **Descoberta manual**: busca vagas nos providers ATS e persiste (dedup). Body opcional `{ "companyId": "..." }` |
+| POST   | `/api/jobs/{id}/match` | **Análise manual (heurística)**: normaliza + calcula score e persiste o match |
 | GET    | `/api/jobs/{id}/match` | Último match da vaga |
 | POST   | `/api/jobs/{id}/archive` | Arquiva a vaga |
+| POST   | `/api/jobs/{id}/ai/analyze` | **IA**: interpreta a vaga (LLM) + score de fit, persiste o match |
+| POST   | `/api/jobs/{id}/ai/generate-outreach` | **IA**: gera drafts (LinkedIn/e-mail/carta/follow-up) como `Draft`. Bloqueado se score < 60 (422) |
+| POST   | `/api/jobs/{id}/ai/suggest-cv-tailoring` | **IA**: sugestões de ajuste de CV (não altera o CV) |
+| POST   | `/api/insights/career` | **IA**: insights de carreira sobre vagas analisadas. Body opcional `{ "maxJobs": 50 }` |
+| GET    | `/api/opportunities` | Lista o pipeline |
+| GET    | `/api/opportunities/follow-ups` | Follow-ups pendentes (vencidos) |
+| GET    | `/api/opportunities/{id}` | Oportunidade por id |
+| PUT    | `/api/opportunities/{id}/status` | Muda status (**manual**; única via para status pós-revisão como `SentManually`) |
+| PUT    | `/api/opportunities/{id}/notes` | Atualiza notas |
+| PUT    | `/api/opportunities/{id}/follow-up` | Define `NextFollowUpAtUtc` |
+| GET    | `/api/recruiters` | Lista recrutadores (adicionados manualmente) |
+| POST   | `/api/recruiters` | Cria recruiter lead |
+| PUT    | `/api/recruiters/{id}` | Atualiza recruiter lead |
+| DELETE | `/api/recruiters/{id}` | Remove recruiter lead |
+| GET    | `/api/digest/preview` | Renderiza o digest (Markdown + HTML) **sem enviar**. Query opcional `?minScore=60` |
+| POST   | `/api/digest/send` | Envia o digest por e-mail (registra `ExecutionRun`). Sem SMTP → não envia e avisa |
 
 ### Exemplo: rodar análise manual
 
@@ -106,6 +134,99 @@ curl -X POST http://localhost:5000/api/jobs/{jobId}/match
 
 Resposta inclui `overallScore` (0–100), sub-scores (técnico, domínio, senioridade,
 localização, idioma), `recommendation`, `strengths`, `risks` e `rationale`.
+
+## Descoberta de vagas (Fase 2)
+
+Providers de fontes públicas de ATS implementam `IJobSourceProvider`:
+
+- **Greenhouse** — `GET https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true`
+  (token derivado de `boards.greenhouse.io/{token}` na `CareersUrl`).
+- **Lever** — `GET https://api.lever.co/v0/postings/{handle}?mode=json`
+  (handle derivado de `jobs.lever.co/{handle}`).
+
+Habilite/desabilite via `FeatureFlags:EnableGreenhouseProvider` / `EnableLeverProvider`.
+Cada provider usa `HttpClient` com timeout, `User-Agent` identificável e retry com backoff
+para falhas transitórias (429/5xx).
+
+A orquestração (`JobDiscoveryService`) é resiliente: falha de um provider/empresa é
+**logada e registrada** no `ExecutionRun`, sem abortar o ciclo. A deduplicação é por
+`(SourceProvider, ExternalId)` — vagas reencontradas são **atualizadas, nunca duplicadas**
+(índice único no banco). Nenhuma candidatura é enviada; apenas descoberta + persistência.
+
+O Worker agenda `discover-jobs` diariamente; também é possível disparar manualmente via
+`POST /api/jobs/discover`.
+
+## AI Copilot Layer (Fase 3)
+
+Camada explícita de IA que **interpreta, analisa e redige** — mantendo ações externas
+sob controle do sistema e revisão humana. Serviços (`Application/AI`):
+
+1. **JobUnderstandingService** — extrai skills, domínio, senioridade, modelo, idioma, responsabilidades e riscos da vaga.
+2. **CandidateFitAnalysisService** — compara vaga × perfil e produz um `OpportunityMatch` (scores + recomendação).
+3. **OutreachDraftService** — gera mensagem LinkedIn, e-mail, carta e follow-up (sempre `Draft`).
+4. **CvTailoringSuggestionService** — sugere ajustes de CV (**nunca** altera o CV).
+5. **CareerInsightService** — agrega padrões entre várias vagas (tecnologias pedidas, lacunas, domínios, ideias de estudo/posts).
+
+A IA **não** busca vagas sozinha, não envia mensagens, não aplica, não altera o CV e
+não inventa experiências.
+
+**Provider de LLM** (`ILlmProvider`) — selecionado por configuração:
+- `Llm:Provider` aceita `auto` (padrão), `Anthropic`, `OpenAI` ou `Fake`.
+- Em `auto`: usa `AnthropicLlmProvider` se houver `Anthropic:ApiKey`; senão `OpenAiLlmProvider` se houver `OpenAI:ApiKey`; senão `FakeLlmProvider`.
+- `FakeLlmProvider` retorna JSON determinístico (funciona **offline**, sem chave).
+- Com `FeatureFlags:EnableLlmAnalysis=false` → provider reporta não-configurado e os serviços usam **fallback heurístico**.
+
+> **Chaves de API nunca vão no repositório.** Configure via User Secrets ou variável de
+> ambiente, definidas por você:
+> ```bash
+> cd src/OpportunityOS.Api
+> dotnet user-secrets set "Anthropic:ApiKey" "<sua-chave>"   # Claude (Messages API)
+> # ou
+> dotnet user-secrets set "OpenAI:ApiKey" "<sua-chave>"
+> ```
+
+**Garantias** (todas testadas):
+- Toda execução é auditada em `prompt_execution_logs` (`promptVersion`, `modelName`, `rawResponse`, `success`, `usedFallback`, `createdAtUtc`).
+- JSON inválido / falha de chamada → registra erro e **cai no fallback heurístico** sem quebrar o fluxo.
+- Não gera outreach se o score for < 60 (HTTP 422).
+- Prompts versionados em `Application/AI/Prompts.cs`.
+
+## CRM de oportunidades (Fase 4)
+
+Quando um match atinge **score ≥ 70**, o sistema cria automaticamente uma `Opportunity`
+(status `Analyzed`). Quando um outreach é gerado, a oportunidade avança para
+`ReadyForHumanReview`.
+
+**Regra central**: o sistema só pode avançar o status **automaticamente até
+`ReadyForHumanReview`**. Qualquer estado além disso (`SentManually`, `AppliedManually`,
+`InterviewScheduled`, …) exige **ação humana** via `PUT /api/opportunities/{id}/status`
+(o domínio lança exceção se o sistema tentar fazer isso sozinho).
+
+`RecruiterLead` guarda contatos **adicionados manualmente** pelo usuário — o sistema
+nunca raspa o LinkedIn. Follow-ups: defina `NextFollowUpAtUtc` e consulte os pendentes
+em `GET /api/opportunities/follow-ups`.
+
+## Email Digest (Fase 5)
+
+Resumo das melhores oportunidades (score ≥ 60 por padrão), ordenadas por score, com
+empresa, vaga, link, recomendação, pontos fortes, riscos e — quando houver — mensagem
+curta, carta e notas de CV.
+
+- `GET /api/digest/preview` renderiza Markdown + HTML **sem enviar**.
+- `POST /api/digest/send` envia via SMTP e registra um `ExecutionRun`. O `SendDailyDigestJob`
+  (Worker) agenda o envio diário (`Jobs:DailyDigestCron`, padrão `0 9 * * *`).
+- **Sem oportunidades relevantes** → registra o `ExecutionRun` sem erro e **não envia**.
+- **Sem SMTP configurado** → não envia e retorna aviso (o preview continua funcionando).
+- Sem anexos; nenhuma candidatura é enviada; o envio só ocorre quando o endpoint/job é acionado.
+
+**Configuração SMTP** (via User Secrets — nunca no repositório):
+```bash
+cd src/OpportunityOS.Api      # e idem em src/OpportunityOS.Worker p/ o job diário
+dotnet user-secrets set "Email:Smtp:Host" "smtp.gmail.com"
+dotnet user-secrets set "Email:Smtp:Port" "587"
+dotnet user-secrets set "Email:Smtp:Username" "voce@gmail.com"
+dotnet user-secrets set "Email:Smtp:Password" "<Gmail App Password (requer 2FA)>"
+```
 
 ## Match Engine (heurístico, v1)
 
@@ -170,18 +291,23 @@ de ambiente.
 
 ## Status do roadmap
 
-- ✅ **Fase 1 — Core funcional** (esta entrega): solution, projetos, PostgreSQL + EF Core,
-  entidades, migrations, CRUD de CandidateProfile e Company, listagem de JobPostings,
-  Match Engine heurístico v1, análise manual via API, testes.
-- ⏳ Fase 2 — Worker + jobs agendados + providers ATS (Greenhouse/Lever) + descoberta.
-- ⏳ Fase 3 — LLM (análise + geração de mensagens), prompts versionados.
-- ⏳ Fase 4 — Pipeline de oportunidades + recruiter leads.
-- ⏳ Fase 5 — Digest por e-mail.
+- ✅ **Fase 1 — Core funcional**: solution, projetos, PostgreSQL + EF Core, entidades,
+  migrations, CRUD de CandidateProfile e Company, listagem de JobPostings, Match Engine
+  heurístico v1, análise manual via API, testes.
+- ✅ **Fase 2 — Automação diária**: `OpportunityOS.Worker` com Hangfire, `IJobSourceProvider`
+  + providers Greenhouse e Lever, `POST /api/jobs/discover`, deduplicação por
+  `(SourceProvider, ExternalId)`, `ExecutionRun` para auditoria, logs estruturados, testes
+  com fake HTTP handler.
+- ✅ **Fase 3 — AI Copilot Layer**: `ILlmProvider` (`OpenAiLlmProvider` + `FakeLlmProvider`),
+  5 serviços de IA, prompts versionados, `GeneratedMessage`, `PromptExecutionLog` (auditoria),
+  endpoints de IA, fallback heurístico e validação de JSON, testes com `FakeLlmProvider`.
+- ✅ **Fase 4 — CRM de oportunidades**: entidades `Opportunity` e `RecruiterLead`,
+  criação automática de oportunidade quando score ≥ 70, status manual (gate de revisão
+  humana), `NextFollowUpAtUtc` + follow-ups pendentes, CRUD de recruiter leads, testes.
+- ✅ **Fase 5 — Email Digest**: `IEmailDigestService` + SMTP, `GET /api/digest/preview`,
+  `POST /api/digest/send`, template Markdown/HTML, `SendDailyDigestJob` (cron diário),
+  skip sem oportunidades/sem SMTP, testes com fake sender.
 
-## Próximos passos sugeridos (Fase 2)
-
-1. Criar `OpportunityOS.Worker` com Hangfire/Quartz.
-2. `IJobSourceProvider` + `GreenhouseJobSourceProvider` e `LeverJobSourceProvider`.
-3. `POST /api/jobs/discover` com deduplicação por `SourceProvider + ExternalId`
-   (índice único já criado).
-4. `ExecutionRun` para auditoria das execuções.
+**Roadmap planejado concluído.** Próximas ideias (fora do roadmap original): dashboard
+React, integração Banco Central / participantes Pix, Google Custom Search, crawler
+Playwright para páginas com JS, e tailoring de CV em PDF/DOCX.

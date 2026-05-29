@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using OpportunityOS.Contracts;
 using Xunit;
@@ -36,6 +37,201 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
 
         var delete = await client.DeleteAsync($"/api/companies/{created.Id}");
         Assert.Equal(HttpStatusCode.NoContent, delete.StatusCode);
+    }
+
+    [DbFact]
+    public async Task DiscoverEndpoint_PersistsJobs_AndDedupesOnSecondRun()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        await client.PostAsJsonAsync("/api/companies", new CompanyRequest(
+            "Acme", null, "https://boards.greenhouse.io/acme", null, "Fintech", "Brazil",
+            Priority: 3, Tags: null));
+
+        var first = await client.PostAsJsonAsync("/api/jobs/discover", new DiscoverRequest(null));
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var firstResult = await first.Content.ReadFromJsonAsync<DiscoveryResultResponse>();
+        Assert.Equal(1, firstResult!.JobsDiscovered);
+        Assert.Equal(0, firstResult.JobsUpdated);
+
+        // Second run: same posting is refreshed, not duplicated.
+        var second = await client.PostAsJsonAsync("/api/jobs/discover", new DiscoverRequest(null));
+        var secondResult = await second.Content.ReadFromJsonAsync<DiscoveryResultResponse>();
+        Assert.Equal(0, secondResult!.JobsDiscovered);
+        Assert.Equal(1, secondResult.JobsUpdated);
+
+        var jobs = await client.GetFromJsonAsync<List<JobPostingResponse>>("/api/jobs");
+        Assert.Single(jobs!);
+        Assert.Equal("Test", jobs![0].SourceProvider);
+    }
+
+    [DbFact]
+    public async Task AiAnalyze_PersistsMatch_AndPromptLog_ThenOutreachDraft()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        await client.PostAsJsonAsync("/api/candidate-profile", new CandidateProfileRequest(
+            "Nícolas Serrano", "Desenvolvedor .NET Backend", "Backend .NET / pagamentos",
+            "Brasil", "Pleno/Sênior", "pt-BR",
+            CoreSkills: new() { ".NET", "C#", "AWS", "Kafka" }, SecondarySkills: null,
+            Domains: new() { "Pagamentos", "PIX" }, PreferredRoles: null,
+            PreferredContractTypes: null, PreferredLocations: null, Experiences: null));
+
+        var jobId = await SeedJob(
+            "Senior Backend Engineer (.NET / Payments)",
+            "Build payments and PIX systems with .NET, C#, ASP.NET Core, Kafka, AWS. Remote, Brazil. Open Finance, fintech.");
+
+        // analyze -> persists OpportunityMatch + a PromptExecutionLog (FakeLlmProvider).
+        var analyze = await client.PostAsync($"/api/jobs/{jobId}/ai/analyze", null);
+        Assert.Equal(HttpStatusCode.OK, analyze.StatusCode);
+        var ai = await analyze.Content.ReadFromJsonAsync<AiAnalyzeResponse>();
+        Assert.Contains(".NET", ai!.Analysis.RequiredSkills);
+        Assert.True(ai.Match.OverallScore >= 60);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Infrastructure.Persistence.OpportunityOsDbContext>();
+            Assert.True(await db.PromptExecutionLogs.AnyAsync());
+        }
+
+        // outreach -> a Draft GeneratedMessage.
+        var outreach = await client.PostAsync($"/api/jobs/{jobId}/ai/generate-outreach", null);
+        Assert.Equal(HttpStatusCode.OK, outreach.StatusCode);
+        var msg = await outreach.Content.ReadFromJsonAsync<GeneratedMessageResponse>();
+        Assert.Equal("Draft", msg!.Status);
+        Assert.False(string.IsNullOrWhiteSpace(msg.LinkedInMessage));
+    }
+
+    [DbFact]
+    public async Task Outreach_BelowScoreGate_Returns422()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        await client.PostAsJsonAsync("/api/candidate-profile", new CandidateProfileRequest(
+            "Nícolas", "Backend", "x", "Brasil", "Pleno", "pt-BR",
+            new() { ".NET" }, null, null, null, null, null, null));
+
+        var jobId = await SeedJob("Frontend React Developer", "React, Angular, CSS. Onsite São Paulo.");
+
+        // Pre-persist a low-score match so the gate triggers deterministically.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Infrastructure.Persistence.OpportunityOsDbContext>();
+            var profileId = db.CandidateProfiles.Select(p => p.Id).First();
+            db.OpportunityMatches.Add(new Domain.Entities.OpportunityMatch(
+                jobId, profileId, 30, 10, 25, 65, 35, 90, Domain.Enums.MatchRecommendation.Ignore,
+                new[] { "x" }, new[] { "y" }, Array.Empty<string>(), "low"));
+            await db.SaveChangesAsync();
+        }
+
+        var outreach = await client.PostAsync($"/api/jobs/{jobId}/ai/generate-outreach", null);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, outreach.StatusCode);
+    }
+
+    [DbFact]
+    public async Task AiAnalyze_AutoCreatesOpportunity_ThenManualStatusAndFollowUp()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        await client.PostAsJsonAsync("/api/candidate-profile", new CandidateProfileRequest(
+            "Nícolas", "Backend .NET", "x", "Brasil", "Pleno/Sênior", "pt-BR",
+            new() { ".NET", "C#" }, null, new() { "Pagamentos" }, null, null, null, null));
+        var jobId = await SeedJob("Senior Backend (.NET / Payments)",
+            "Payments, PIX, .NET, C#, Kafka, AWS. Remote Brazil. Open Finance, fintech.");
+
+        // FakeLlmProvider fit -> 89 (>= 70) so an Opportunity is auto-created.
+        await client.PostAsync($"/api/jobs/{jobId}/ai/analyze", null);
+
+        var opps = await client.GetFromJsonAsync<List<OpportunityResponse>>("/api/opportunities");
+        var opp = Assert.Single(opps!);
+        Assert.Equal(jobId, opp.JobPostingId);
+        Assert.Equal("Analyzed", opp.Status);
+
+        // Manual status change to a human-gated status is allowed via the API.
+        var statusResp = await client.PutAsJsonAsync(
+            $"/api/opportunities/{opp.Id}/status", new OpportunityStatusRequest("SentManually"));
+        statusResp.EnsureSuccessStatusCode();
+        var updated = await statusResp.Content.ReadFromJsonAsync<OpportunityResponse>();
+        Assert.Equal("SentManually", updated!.Status);
+
+        // Follow-up in the past shows up in the pending list.
+        await client.PutAsJsonAsync($"/api/opportunities/{opp.Id}/follow-up",
+            new OpportunityFollowUpRequest(DateTime.UtcNow.AddDays(-1)));
+        var due = await client.GetFromJsonAsync<List<OpportunityResponse>>("/api/opportunities/follow-ups");
+        Assert.Contains(due!, o => o.Id == opp.Id);
+    }
+
+    [DbFact]
+    public async Task Recruiter_Crud_RoundTrips()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+        var companyId = await CreateCompany();
+
+        var create = await client.PostAsJsonAsync("/api/recruiters", new RecruiterRequest(
+            companyId, "Ana Recruiter", "Tech Recruiter", "https://linkedin.com/in/ana", null, 1, "via referral"));
+        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+        var lead = await create.Content.ReadFromJsonAsync<RecruiterResponse>();
+        Assert.Equal("Manual", lead!.Source);
+
+        var list = await client.GetFromJsonAsync<List<RecruiterResponse>>("/api/recruiters");
+        Assert.Single(list!);
+
+        var del = await client.DeleteAsync($"/api/recruiters/{lead.Id}");
+        Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
+    }
+
+    [DbFact]
+    public async Task Digest_Preview_ListsAnalyzedOpportunity_AndSendSkipsWithoutSmtp()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        await client.PostAsJsonAsync("/api/candidate-profile", new CandidateProfileRequest(
+            "Nícolas", "Backend .NET", "x", "Brasil", "Pleno/Sênior", "pt-BR",
+            new() { ".NET", "C#" }, null, new() { "Pagamentos" }, null, null, null, null));
+        var jobId = await SeedJob("Senior Backend (.NET / Payments)",
+            "Payments, PIX, .NET, C#, Kafka, AWS. Remote Brazil.");
+
+        // Produces a match (FakeLlm fit -> 89), which becomes a digest item.
+        await client.PostAsync($"/api/jobs/{jobId}/ai/analyze", null);
+
+        var preview = await client.GetFromJsonAsync<DigestPreviewResponse>("/api/digest/preview");
+        Assert.True(preview!.Total >= 1);
+        Assert.Contains("Opportunity OS", preview.Html);
+
+        // No SMTP configured in the test host -> records run, does not send.
+        var send = await client.PostAsync("/api/digest/send", null);
+        send.EnsureSuccessStatusCode();
+        var result = await send.Content.ReadFromJsonAsync<DigestSendResponse>();
+        Assert.False(result!.Sent);
+        Assert.Contains("SMTP", result.Reason);
+    }
+
+    private async Task<Guid> SeedJob(string title, string description)
+    {
+        var companyResp = await CreateCompany();
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<Infrastructure.Persistence.OpportunityOsDbContext>();
+        var job = new Domain.Entities.JobPosting(
+            companyResp, "ext", "Test", title, "https://example.com/j", description,
+            location: "Remote", language: "en");
+        db.JobPostings.Add(job);
+        await db.SaveChangesAsync();
+        return job.Id;
+    }
+
+    private async Task<Guid> CreateCompany()
+    {
+        var client = _factory.CreateClient();
+        var resp = await client.PostAsJsonAsync("/api/companies", new CompanyRequest(
+            "Acme", null, null, null, "Fintech", "Brazil", Priority: 3, Tags: null));
+        var company = await resp.Content.ReadFromJsonAsync<CompanyResponse>();
+        return company!.Id;
     }
 
     [DbFact]

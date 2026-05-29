@@ -28,6 +28,10 @@ app.MapGet("/", () => Results.Ok(new { service = "Opportunity OS", status = "ok"
 app.MapCandidateProfileEndpoints();
 app.MapCompanyEndpoints();
 app.MapJobEndpoints();
+app.MapAiEndpoints();
+app.MapOpportunityEndpoints();
+app.MapRecruiterEndpoints();
+app.MapDigestEndpoints();
 
 app.Run();
 

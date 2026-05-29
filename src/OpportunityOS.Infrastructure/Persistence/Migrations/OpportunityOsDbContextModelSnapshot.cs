@@ -141,6 +141,109 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                     b.ToTable("companies", (string)null);
                 });
 
+            modelBuilder.Entity("OpportunityOS.Domain.Entities.ExecutionRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("FinishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("ItemsFailed")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ItemsProcessed")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ItemsSucceeded")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RunType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("StartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RunType");
+
+                    b.HasIndex("StartedAtUtc");
+
+                    b.ToTable("execution_runs", (string)null);
+                });
+
+            modelBuilder.Entity("OpportunityOS.Domain.Entities.GeneratedMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CoverLetter")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CvTailoringNotes")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("EmailBody")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("EmailSubject")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("FollowUpMessage")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("HumanReviewNotes")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("JobPostingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("LinkedInMessage")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ModelName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("OpportunityMatchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PromptVersion")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JobPostingId");
+
+                    b.HasIndex("OpportunityMatchId");
+
+                    b.ToTable("generated_messages", (string)null);
+                });
+
             modelBuilder.Entity("OpportunityOS.Domain.Entities.JobPosting", b =>
                 {
                     b.Property<Guid>("Id")
@@ -223,6 +326,45 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                     b.ToTable("job_postings", (string)null);
                 });
 
+            modelBuilder.Entity("OpportunityOS.Domain.Entities.Opportunity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("JobPostingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("LastActionAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("NextFollowUpAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("RecruiterLeadId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JobPostingId")
+                        .IsUnique();
+
+                    b.HasIndex("NextFollowUpAtUtc");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("opportunities", (string)null);
+                });
+
             modelBuilder.Entity("OpportunityOS.Domain.Entities.OpportunityMatch", b =>
                 {
                     b.Property<Guid>("Id")
@@ -282,6 +424,95 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                     b.HasIndex("OverallScore");
 
                     b.ToTable("opportunity_matches", (string)null);
+                });
+
+            modelBuilder.Entity("OpportunityOS.Domain.Entities.PromptExecutionLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CandidateProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("JobPostingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ModelName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("PromptVersion")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("RawResponse")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Service")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("Success")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("UsedFallback")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAtUtc");
+
+                    b.HasIndex("JobPostingId");
+
+                    b.HasIndex("Service");
+
+                    b.ToTable("prompt_execution_logs", (string)null);
+                });
+
+            modelBuilder.Entity("OpportunityOS.Domain.Entities.RecruiterLead", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Email")
+                        .HasColumnType("text");
+
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("LinkedInUrl")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text");
+
+                    b.Property<string>("RoleTitle")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.ToTable("recruiter_leads", (string)null);
                 });
 #pragma warning restore 612, 618
         }

@@ -14,6 +14,11 @@ public sealed class OpportunityOsDbContext : DbContext
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<JobPosting> JobPostings => Set<JobPosting>();
     public DbSet<OpportunityMatch> OpportunityMatches => Set<OpportunityMatch>();
+    public DbSet<ExecutionRun> ExecutionRuns => Set<ExecutionRun>();
+    public DbSet<GeneratedMessage> GeneratedMessages => Set<GeneratedMessage>();
+    public DbSet<PromptExecutionLog> PromptExecutionLogs => Set<PromptExecutionLog>();
+    public DbSet<Opportunity> Opportunities => Set<Opportunity>();
+    public DbSet<RecruiterLead> RecruiterLeads => Set<RecruiterLead>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -101,6 +106,55 @@ public sealed class OpportunityOsDbContext : DbContext
                 .Metadata.SetValueComparer(stringListComparer);
             e.HasIndex(x => x.OverallScore);
             e.HasIndex(x => x.JobPostingId);
+        });
+
+        b.Entity<ExecutionRun>(e =>
+        {
+            e.ToTable("execution_runs");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.RunType).IsRequired();
+            e.Property(x => x.Status).HasConversion<int>();
+            e.HasIndex(x => x.RunType);
+            e.HasIndex(x => x.StartedAtUtc);
+        });
+
+        b.Entity<GeneratedMessage>(e =>
+        {
+            e.ToTable("generated_messages");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Status).HasConversion<int>();
+            e.HasIndex(x => x.JobPostingId);
+            e.HasIndex(x => x.OpportunityMatchId);
+        });
+
+        b.Entity<PromptExecutionLog>(e =>
+        {
+            e.ToTable("prompt_execution_logs");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Service).IsRequired();
+            e.Property(x => x.PromptVersion).IsRequired();
+            e.HasIndex(x => x.Service);
+            e.HasIndex(x => x.JobPostingId);
+            e.HasIndex(x => x.CreatedAtUtc);
+        });
+
+        b.Entity<Opportunity>(e =>
+        {
+            e.ToTable("opportunities");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Status).HasConversion<int>();
+            e.HasIndex(x => x.Status);
+            e.HasIndex(x => x.JobPostingId).IsUnique();
+            e.HasIndex(x => x.NextFollowUpAtUtc);
+        });
+
+        b.Entity<RecruiterLead>(e =>
+        {
+            e.ToTable("recruiter_leads");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.FullName).IsRequired();
+            e.Property(x => x.Source).HasConversion<int>();
+            e.HasIndex(x => x.CompanyId);
         });
     }
 }

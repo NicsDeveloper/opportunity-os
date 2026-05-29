@@ -1,3 +1,4 @@
+using OpportunityOS.Application.AI;
 using OpportunityOS.Application.Matching;
 using OpportunityOS.Contracts;
 using OpportunityOS.Domain.Entities;
@@ -44,4 +45,29 @@ public static class Mapping
         new(jobId, profileId, r.OverallScore, r.TechnicalScore, r.DomainScore, r.SeniorityScore,
             r.LocationScore, r.LanguageScore, r.Recommendation, r.Strengths, r.Risks,
             r.MissingRequirements, r.Rationale);
+
+    public static JobAnalysisResponse ToResponse(this JobAnalysisResult a) =>
+        new(a.RequiredSkills, a.NiceToHaveSkills, a.Domains, a.Seniority, a.WorkMode, a.Language,
+            a.Responsibilities, a.Risks, a.Summary);
+
+    public static GeneratedMessageResponse ToResponse(this GeneratedMessage m) =>
+        new(m.Id, m.JobPostingId, m.OpportunityMatchId, m.LinkedInMessage, m.CoverLetter,
+            m.EmailSubject, m.EmailBody, m.CvTailoringNotes, m.FollowUpMessage, m.HumanReviewNotes,
+            m.Status.ToString(), m.PromptVersion, m.ModelName, m.CreatedAtUtc);
+
+    public static CvTailoringResponse ToResponse(this CvTailoringSuggestion s) =>
+        new(s.SummaryAdjustment, s.SkillsToHighlight, s.KeywordsToInclude, s.BulletSuggestions,
+            s.SectionsToReorder, s.Notes);
+
+    public static CareerInsightResponse ToResponse(this CareerInsightReport r) =>
+        new(r.MostRequestedTechnologies, r.RecurringGaps, r.StrongestDomains, r.StudySuggestions,
+            r.PostIdeas, r.MostPromisingCompanies, r.Summary);
+
+    public static OpportunityResponse ToResponse(this Opportunity o) =>
+        new(o.Id, o.JobPostingId, o.RecruiterLeadId, o.Status.ToString(), o.CreatedAtUtc,
+            o.LastActionAtUtc, o.NextFollowUpAtUtc, o.Notes);
+
+    public static RecruiterResponse ToResponse(this RecruiterLead r) =>
+        new(r.Id, r.CompanyId, r.FullName, r.RoleTitle, r.LinkedInUrl, r.Email,
+            r.Source.ToString(), r.Notes, r.CreatedAtUtc);
 }

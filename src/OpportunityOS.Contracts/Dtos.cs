@@ -91,6 +91,136 @@ public sealed record JobPostingResponse(
     DateTime CreatedAtUtc,
     DateTime UpdatedAtUtc);
 
+// ---- Discovery ----
+
+public sealed record DiscoverRequest(Guid? CompanyId);
+
+public sealed record SearchRequest(List<string>? Keywords);
+
+public sealed record AtsDetectionResponse(
+    bool Detected,
+    string? Ats,
+    string? BoardUrl,
+    string? Token,
+    string? CareersPageUrl,
+    bool ProviderSupported);
+
+public sealed record CsvImportResponse(int Created);
+
+public sealed record DiscoveryResultResponse(
+    Guid ExecutionRunId,
+    string Status,
+    int CompaniesProcessed,
+    int ProvidersInvoked,
+    int JobsDiscovered,
+    int JobsUpdated,
+    int Errors);
+
+// ---- Opportunities (pipeline) ----
+
+public sealed record OpportunityResponse(
+    Guid Id,
+    Guid JobPostingId,
+    Guid? RecruiterLeadId,
+    string Status,
+    DateTime CreatedAtUtc,
+    DateTime? LastActionAtUtc,
+    DateTime? NextFollowUpAtUtc,
+    string? Notes);
+
+public sealed record OpportunityStatusRequest(string Status);
+public sealed record OpportunityNotesRequest(string? Notes);
+public sealed record OpportunityFollowUpRequest(DateTime? NextFollowUpAtUtc);
+
+// ---- Recruiter leads ----
+
+public sealed record RecruiterRequest(
+    Guid CompanyId,
+    string FullName,
+    string? RoleTitle,
+    string? LinkedInUrl,
+    string? Email,
+    int? Source,
+    string? Notes);
+
+public sealed record RecruiterResponse(
+    Guid Id,
+    Guid CompanyId,
+    string FullName,
+    string? RoleTitle,
+    string? LinkedInUrl,
+    string? Email,
+    string Source,
+    string? Notes,
+    DateTime CreatedAtUtc);
+
+// ---- Digest ----
+
+public sealed record DigestPreviewResponse(
+    string Subject,
+    string Markdown,
+    string Html,
+    int Total,
+    int StrategicCount,
+    int PrioritizeCount,
+    int ApplyCount);
+
+public sealed record DigestSendResponse(
+    bool Sent,
+    string Reason,
+    int ItemCount,
+    Guid ExecutionRunId);
+
+// ---- AI Copilot ----
+
+public sealed record JobAnalysisResponse(
+    List<string> RequiredSkills,
+    List<string> NiceToHaveSkills,
+    List<string> Domains,
+    string Seniority,
+    string WorkMode,
+    string Language,
+    List<string> Responsibilities,
+    List<string> Risks,
+    string Summary);
+
+public sealed record AiAnalyzeResponse(JobAnalysisResponse Analysis, MatchResponse Match);
+
+public sealed record GeneratedMessageResponse(
+    Guid Id,
+    Guid JobPostingId,
+    Guid OpportunityMatchId,
+    string LinkedInMessage,
+    string CoverLetter,
+    string EmailSubject,
+    string EmailBody,
+    string CvTailoringNotes,
+    string FollowUpMessage,
+    string HumanReviewNotes,
+    string Status,
+    string PromptVersion,
+    string ModelName,
+    DateTime CreatedAtUtc);
+
+public sealed record CvTailoringResponse(
+    string SummaryAdjustment,
+    List<string> SkillsToHighlight,
+    List<string> KeywordsToInclude,
+    List<string> BulletSuggestions,
+    List<string> SectionsToReorder,
+    string Notes);
+
+public sealed record CareerInsightRequest(int? MaxJobs);
+
+public sealed record CareerInsightResponse(
+    List<string> MostRequestedTechnologies,
+    List<string> RecurringGaps,
+    List<string> StrongestDomains,
+    List<string> StudySuggestions,
+    List<string> PostIdeas,
+    List<string> MostPromisingCompanies,
+    string Summary);
+
 // ---- Match ----
 
 public sealed record MatchResponse(
