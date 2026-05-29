@@ -15,6 +15,8 @@ public sealed class OpportunityOsDbContext : DbContext
     public DbSet<JobPosting> JobPostings => Set<JobPosting>();
     public DbSet<OpportunityMatch> OpportunityMatches => Set<OpportunityMatch>();
     public DbSet<ExecutionRun> ExecutionRuns => Set<ExecutionRun>();
+    public DbSet<GeneratedMessage> GeneratedMessages => Set<GeneratedMessage>();
+    public DbSet<PromptExecutionLog> PromptExecutionLogs => Set<PromptExecutionLog>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -112,6 +114,26 @@ public sealed class OpportunityOsDbContext : DbContext
             e.Property(x => x.Status).HasConversion<int>();
             e.HasIndex(x => x.RunType);
             e.HasIndex(x => x.StartedAtUtc);
+        });
+
+        b.Entity<GeneratedMessage>(e =>
+        {
+            e.ToTable("generated_messages");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Status).HasConversion<int>();
+            e.HasIndex(x => x.JobPostingId);
+            e.HasIndex(x => x.OpportunityMatchId);
+        });
+
+        b.Entity<PromptExecutionLog>(e =>
+        {
+            e.ToTable("prompt_execution_logs");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Service).IsRequired();
+            e.Property(x => x.PromptVersion).IsRequired();
+            e.HasIndex(x => x.Service);
+            e.HasIndex(x => x.JobPostingId);
+            e.HasIndex(x => x.CreatedAtUtc);
         });
     }
 }

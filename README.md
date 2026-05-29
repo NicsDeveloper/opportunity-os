@@ -8,7 +8,7 @@ revisáveis e envia um digest por e-mail para **revisão humana**.
 > **não** envia mensagens sem revisão humana. É um copiloto de carreira, não um robô de spam.
 
 Este repositório está sendo construído por fases (Spec-Driven Development). **Esta entrega
-cobre as Fases 1 (Core funcional) e 2 (Automação diária / descoberta de vagas).**
+cobre as Fases 1 (Core funcional), 2 (Automação diária / descoberta) e 3 (AI Copilot Layer).**
 
 ---
 
@@ -104,9 +104,13 @@ Desabilite com `"SeedOnStartup": false` em `appsettings.json` ou via env var
 | GET    | `/api/jobs` | Lista vagas |
 | GET    | `/api/jobs/{id}` | Vaga por id |
 | POST   | `/api/jobs/discover` | **Descoberta manual**: busca vagas nos providers ATS e persiste (dedup). Body opcional `{ "companyId": "..." }` |
-| POST   | `/api/jobs/{id}/match` | **Análise manual**: normaliza + calcula score e persiste o match |
+| POST   | `/api/jobs/{id}/match` | **Análise manual (heurística)**: normaliza + calcula score e persiste o match |
 | GET    | `/api/jobs/{id}/match` | Último match da vaga |
 | POST   | `/api/jobs/{id}/archive` | Arquiva a vaga |
+| POST   | `/api/jobs/{id}/ai/analyze` | **IA**: interpreta a vaga (LLM) + score de fit, persiste o match |
+| POST   | `/api/jobs/{id}/ai/generate-outreach` | **IA**: gera drafts (LinkedIn/e-mail/carta/follow-up) como `Draft`. Bloqueado se score < 60 (422) |
+| POST   | `/api/jobs/{id}/ai/suggest-cv-tailoring` | **IA**: sugestões de ajuste de CV (não altera o CV) |
+| POST   | `/api/insights/career` | **IA**: insights de carreira sobre vagas analisadas. Body opcional `{ "maxJobs": 50 }` |
 
 ### Exemplo: rodar análise manual
 
@@ -138,6 +142,31 @@ A orquestração (`JobDiscoveryService`) é resiliente: falha de um provider/emp
 
 O Worker agenda `discover-jobs` diariamente; também é possível disparar manualmente via
 `POST /api/jobs/discover`.
+
+## AI Copilot Layer (Fase 3)
+
+Camada explícita de IA que **interpreta, analisa e redige** — mantendo ações externas
+sob controle do sistema e revisão humana. Serviços (`Application/AI`):
+
+1. **JobUnderstandingService** — extrai skills, domínio, senioridade, modelo, idioma, responsabilidades e riscos da vaga.
+2. **CandidateFitAnalysisService** — compara vaga × perfil e produz um `OpportunityMatch` (scores + recomendação).
+3. **OutreachDraftService** — gera mensagem LinkedIn, e-mail, carta e follow-up (sempre `Draft`).
+4. **CvTailoringSuggestionService** — sugere ajustes de CV (**nunca** altera o CV).
+5. **CareerInsightService** — agrega padrões entre várias vagas (tecnologias pedidas, lacunas, domínios, ideias de estudo/posts).
+
+A IA **não** busca vagas sozinha, não envia mensagens, não aplica, não altera o CV e
+não inventa experiências.
+
+**Provider de LLM** (`ILlmProvider`):
+- Com `OpenAI:ApiKey` configurada e `FeatureFlags:EnableLlmAnalysis=true` → `OpenAiLlmProvider`.
+- Sem API key → `FakeLlmProvider` (JSON determinístico, funciona offline).
+- Com `EnableLlmAnalysis=false` → provider reporta não-configurado e os serviços usam **fallback heurístico**.
+
+**Garantias** (todas testadas):
+- Toda execução é auditada em `prompt_execution_logs` (`promptVersion`, `modelName`, `rawResponse`, `success`, `usedFallback`, `createdAtUtc`).
+- JSON inválido / falha de chamada → registra erro e **cai no fallback heurístico** sem quebrar o fluxo.
+- Não gera outreach se o score for < 60 (HTTP 422).
+- Prompts versionados em `Application/AI/Prompts.cs`.
 
 ## Match Engine (heurístico, v1)
 
@@ -209,13 +238,15 @@ de ambiente.
   + providers Greenhouse e Lever, `POST /api/jobs/discover`, deduplicação por
   `(SourceProvider, ExternalId)`, `ExecutionRun` para auditoria, logs estruturados, testes
   com fake HTTP handler.
-- ⏳ Fase 3 — LLM (análise + geração de mensagens), prompts versionados.
+- ✅ **Fase 3 — AI Copilot Layer**: `ILlmProvider` (`OpenAiLlmProvider` + `FakeLlmProvider`),
+  5 serviços de IA, prompts versionados, `GeneratedMessage`, `PromptExecutionLog` (auditoria),
+  endpoints de IA, fallback heurístico e validação de JSON, testes com `FakeLlmProvider`.
 - ⏳ Fase 4 — Pipeline de oportunidades + recruiter leads.
 - ⏳ Fase 5 — Digest por e-mail.
 
-## Próximos passos sugeridos (Fase 3)
+## Próximos passos sugeridos (Fase 4)
 
-1. `ILlmProvider` + `FakeLlmProvider` (e `OpenAiLlmProvider` ativado só com API key).
-2. Prompts versionados (análise de vaga, mensagem curta, carta).
-3. `GeneratedMessage` + `POST /api/jobs/{jobId}/generate-message` (não gerar se score < 60;
-   salvar como `Draft`, nunca enviar automaticamente).
+1. Entidades `Opportunity` e `RecruiterLead` + status manual do pipeline.
+2. Criação automática de `Opportunity` quando match score >= 70.
+3. `NextFollowUpAtUtc` + consulta de follow-ups pendentes.
+4. Sistema nunca muda status para `SentManually` automaticamente.
