@@ -120,6 +120,8 @@ Desabilite com `"SeedOnStartup": false` em `appsettings.json` ou via env var
 | PUT    | `/api/opportunities/{id}/follow-up` | Define `NextFollowUpAtUtc` |
 | POST   | `/api/companies/import-csv` | Importa empresas de um CSV (`name,websiteUrl,careersUrl,industry,country`) |
 | POST   | `/api/companies/{id}/detect-ats` | Detecta o ATS (Greenhouse/Lever/Gupy/Workday) crawleando o site |
+| POST   | `/api/companies/{id}/discover-website` | Descobre o site oficial a partir do nome (heurístico) |
+| POST   | `/api/companies/onboard?limit=N` | Encadeia: descobre site → detecta ATS para empresas sem site (maior prioridade primeiro) |
 | POST   | `/api/jobs/search` | Busca vagas por palavra-chave (Gupy); auto-cria empresas |
 | GET    | `/api/recruiters` | Lista recrutadores (adicionados manualmente) |
 | POST   | `/api/recruiters` | Cria recruiter lead |
@@ -247,6 +249,12 @@ Pix do Banco Central** (CSV). É um processo de **dois estágios** para o radar 
 
 > O Bacen Importer **não busca vagas** — só monta o radar de empresas. A busca de vagas
 > continua nos ATS providers (Greenhouse/Lever/Gupy) + detecção de ATS / página de carreiras.
+
+**Encadeando o funil (onboarding):** as empresas promovidas vêm sem site. `POST
+/api/companies/onboard` descobre o **site oficial** (heurístico: deriva domínios do nome,
+valida que a página menciona a marca — conservador, prefere errar para menos a apontar
+errado) e em seguida roda o **detector de ATS**. Para recall maior, dá para plugar Google
+Custom Search atrás de `ICompanyWebsiteDiscoverer` quando houver `Search:ApiKey`.
 
 **Validação real:** 919 instituições importadas; 279 promovidas a empresas; 640 filtradas.
 
