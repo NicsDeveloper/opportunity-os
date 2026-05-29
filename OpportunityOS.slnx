@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OpportunityOS.Api/OpportunityOS.Api.csproj" />
+    <Project Path="src/OpportunityOS.Application/OpportunityOS.Application.csproj" />
+    <Project Path="src/OpportunityOS.Contracts/OpportunityOS.Contracts.csproj" />
+    <Project Path="src/OpportunityOS.Domain/OpportunityOS.Domain.csproj" />
+    <Project Path="src/OpportunityOS.Infrastructure/OpportunityOS.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OpportunityOS.IntegrationTests/OpportunityOS.IntegrationTests.csproj" />
+    <Project Path="tests/OpportunityOS.UnitTests/OpportunityOS.UnitTests.csproj" />
+  </Folder>
+</Solution>

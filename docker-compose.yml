@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: opportunity-os-postgres
+    environment:
+      POSTGRES_DB: opportunity_os
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      # postgres:18+ stores data under /var/lib/postgresql/<version>; mount the parent.
+      - opportunity_os_pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d opportunity_os"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: src/OpportunityOS.Api/Dockerfile
+    container_name: opportunity-os-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=opportunity_os;Username=postgres;Password=postgres
+    ports:
+      - "5000:8080"
+
+volumes:
+  opportunity_os_pgdata:
