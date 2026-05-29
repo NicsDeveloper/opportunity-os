@@ -83,13 +83,13 @@ public static class CompanyEndpoints
                 r.Detected, r.Ats, r.BoardUrl, r.Token, r.CareersPageUrl, r.ProviderSupported));
         });
 
-        // Onboard companies missing a website: discover site -> detect ATS (chains the funnel).
+        // Onboard companies missing a board: find ATS board (CSE-ATS or heuristic) — chains the funnel.
         group.MapPost("/onboard", async (
             int? limit, ICompanyOnboardingService onboarding, CancellationToken ct) =>
         {
             var r = await onboarding.OnboardAsync(Math.Clamp(limit ?? 25, 1, 200), ct);
             return Results.Ok(new OnboardingResponse(
-                r.ExecutionRunId, r.Status, r.Processed, r.WebsitesFound, r.AtsDetected, r.Errors));
+                r.ExecutionRunId, r.Status, r.Processed, r.BoardsFound, r.Errors));
         });
 
         // Discover a single company's website from its name (no persistence beyond setting it).

@@ -40,6 +40,19 @@ public sealed class AtsDetectorTests
         Assert.False(r.ProviderSupported); // detected but no fetch provider yet
     }
 
+    [Theory]
+    [InlineData("https://acme.inhire.app/vagas", "inhire")]
+    [InlineData("https://jobs.ashbyhq.com/acme", "Ashby")]
+    [InlineData("https://acme.abler.com.br/", "Abler")]
+    [InlineData("https://carreiras.pandape.com.br/acme", "Pandape")]
+    public void Detect_RecognizesAdditionalAts_AsNotSupported(string url, string expectedAts)
+    {
+        var r = AtsDetector.Detect(url);
+        Assert.NotNull(r);
+        Assert.Equal(expectedAts, r!.Ats);
+        Assert.False(r.ProviderSupported); // detected/linked only, no fetch provider yet
+    }
+
     [Fact]
     public void Detect_ReturnsNull_WhenNoAtsPresent()
     {

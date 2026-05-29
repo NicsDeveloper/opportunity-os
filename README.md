@@ -250,11 +250,24 @@ Pix do Banco Central** (CSV). É um processo de **dois estágios** para o radar 
 > O Bacen Importer **não busca vagas** — só monta o radar de empresas. A busca de vagas
 > continua nos ATS providers (Greenhouse/Lever/Gupy) + detecção de ATS / página de carreiras.
 
-**Encadeando o funil (onboarding):** as empresas promovidas vêm sem site. `POST
-/api/companies/onboard` descobre o **site oficial** (heurístico: deriva domínios do nome,
-valida que a página menciona a marca — conservador, prefere errar para menos a apontar
-errado) e em seguida roda o **detector de ATS**. Para recall maior, dá para plugar Google
-Custom Search atrás de `ICompanyWebsiteDiscoverer` quando houver `Search:ApiKey`.
+**Encadeando o funil (onboarding):** as empresas promovidas vêm sem board. `POST
+/api/companies/onboard` acha o **board de vagas (ATS)** de cada uma e grava em `CareersUrl`.
+Duas estratégias por trás de `IAtsBoardFinder`:
+
+- **Google CSE escopado a ATS** (recomendado): um Programmable Search Engine configurado
+  com os domínios de ATS (greenhouse.io, lever.co, gupy.io, inhire.app, abler.com.br,
+  pandape.com, ashbyhq.com, …). A query pelo nome da empresa retorna o board direto, que
+  é classificado pelo `AtsDetector`. (O Google descontinuou "buscar em toda a web" para
+  engines novos em 20/01/2026 — escopar nos ATS é a saída, e ainda vai direto ao board.)
+  Configure `Search:ApiKey` + `Search:SearchEngineId`.
+- **Heurístico (fallback)**: descobre o site oficial pelo nome (deriva domínios, valida a
+  marca — conservador) e crawleia em busca do ATS.
+
+O `AtsDetector` reconhece Greenhouse, Lever, Gupy, Workday, Ashby, SmartRecruiters,
+Workable, Recruitee, Teamtailor, Breezy, inhire, Abler, Solides, Pandapé, Kenoby, Quickin,
+JobConvo, Taqe, 99jobs, Recrutei, GeekHunter, Coodesh, Programathor — mas só
+**Greenhouse/Lever/Gupy** têm provider de **busca de vagas** hoje; os demais são
+detectados/linkados até existir um provider.
 
 **Validação real:** 919 instituições importadas; 279 promovidas a empresas; 640 filtradas.
 

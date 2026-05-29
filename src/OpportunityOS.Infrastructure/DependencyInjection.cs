@@ -59,9 +59,13 @@ public static class DependencyInjection
         services.AddHttpClient<IAtsDetector, AtsDetector>(ConfigureClient);
         services.AddScoped<ICompanyOnboardingService, CompanyOnboardingService>();
 
-        // Website discovery: Google Custom Search when configured (with heuristic
-        // fallback), otherwise the heuristic domain-probing discoverer alone.
+        // Heuristic website discovery (used as the board-finder fallback).
         services.AddHttpClient<CompanyWebsiteDiscoverer>(ConfigureClient);
+        services.AddScoped<ICompanyWebsiteDiscoverer>(sp => sp.GetRequiredService<CompanyWebsiteDiscoverer>());
+        services.AddScoped<HeuristicAtsBoardFinder>();
+
+        // ATS board finder: Google CSE scoped to ATS domains when configured (with the
+        // heuristic finder as fallback), otherwise the heuristic finder alone.
         var googleSearch = new GoogleSearchOptions
         {
             ApiKey = config["Search:ApiKey"] ?? string.Empty,
@@ -70,14 +74,12 @@ public static class DependencyInjection
         if (googleSearch.IsConfigured)
         {
             services.AddSingleton(googleSearch);
-            services.AddHttpClient<GoogleCustomSearchWebsiteDiscoverer>(ConfigureClient);
-            services.AddScoped<ICompanyWebsiteDiscoverer>(sp =>
-                sp.GetRequiredService<GoogleCustomSearchWebsiteDiscoverer>());
+            services.AddHttpClient<GoogleAtsBoardFinder>(ConfigureClient);
+            services.AddScoped<IAtsBoardFinder>(sp => sp.GetRequiredService<GoogleAtsBoardFinder>());
         }
         else
         {
-            services.AddScoped<ICompanyWebsiteDiscoverer>(sp =>
-                sp.GetRequiredService<CompanyWebsiteDiscoverer>());
+            services.AddScoped<IAtsBoardFinder>(sp => sp.GetRequiredService<HeuristicAtsBoardFinder>());
         }
 
         var bacenOptions = new BacenOptions();
