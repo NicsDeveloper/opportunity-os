@@ -254,12 +254,14 @@ Pix do Banco Central** (CSV). É um processo de **dois estágios** para o radar 
 /api/companies/onboard` acha o **board de vagas (ATS)** de cada uma e grava em `CareersUrl`.
 Duas estratégias por trás de `IAtsBoardFinder`:
 
-- **Google CSE escopado a ATS** (recomendado): um Programmable Search Engine configurado
-  com os domínios de ATS (greenhouse.io, lever.co, gupy.io, inhire.app, abler.com.br,
-  pandape.com, ashbyhq.com, …). A query pelo nome da empresa retorna o board direto, que
-  é classificado pelo `AtsDetector`. (O Google descontinuou "buscar em toda a web" para
-  engines novos em 20/01/2026 — escopar nos ATS é a saída, e ainda vai direto ao board.)
-  Configure `Search:ApiKey` + `Search:SearchEngineId`.
+- **Google CSE** (recomendado): funciona com engine **escopado a ATS** (domínios
+  greenhouse.io/lever.co/gupy.io/inhire.app/…) **ou** com engine **de web aberta**
+  (grandfathered até 2027). `GoogleAtsBoardFinder` faz: pass 1 — se o resultado já é um
+  board de ATS, classifica e retorna; pass 2 — senão usa o 1º resultado orgânico como site
+  oficial e crawleia atrás do ATS (pula LinkedIn/agregadores). Configure `Search:ApiKey` +
+  `Search:SearchEngineId`.
+  > Nota: o Google descontinuou "buscar em toda a web" para engines **novos** em 20/01/2026;
+  > engines antigos com a opção ligada seguem válidos até 2027. Ambos funcionam aqui.
 - **Heurístico (fallback)**: descobre o site oficial pelo nome (deriva domínios, valida a
   marca — conservador) e crawleia em busca do ATS.
 
