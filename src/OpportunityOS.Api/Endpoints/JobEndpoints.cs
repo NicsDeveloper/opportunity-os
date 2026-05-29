@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using OpportunityOS.Application.Discovery;
 using OpportunityOS.Application.Matching;
 using OpportunityOS.Application.Normalization;
+using OpportunityOS.Application.Pipeline;
 using OpportunityOS.Contracts;
 using OpportunityOS.Infrastructure.Persistence;
 
@@ -40,7 +41,8 @@ public static class JobEndpoints
 
         // Manual analysis run: normalize + score against the active profile.
         group.MapPost("/{id:guid}/match", async (
-            Guid id, OpportunityOsDbContext db, IJobNormalizer normalizer, IMatchEngine engine, CancellationToken ct) =>
+            Guid id, OpportunityOsDbContext db, IJobNormalizer normalizer, IMatchEngine engine,
+            IOpportunityPipeline pipeline, CancellationToken ct) =>
         {
             var job = await db.JobPostings.FindAsync([id], ct);
             if (job is null) return Results.NotFound();
@@ -59,6 +61,9 @@ public static class JobEndpoints
             job.MarkAnalyzed();
             db.OpportunityMatches.Add(match);
             await db.SaveChangesAsync(ct);
+
+            // Auto-create an Opportunity when the score qualifies (score >= 70).
+            await pipeline.EnsureForMatchAsync(match, ct);
 
             return Results.Ok(match.ToResponse());
         });

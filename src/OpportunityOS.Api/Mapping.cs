@@ -62,4 +62,12 @@ public static class Mapping
     public static CareerInsightResponse ToResponse(this CareerInsightReport r) =>
         new(r.MostRequestedTechnologies, r.RecurringGaps, r.StrongestDomains, r.StudySuggestions,
             r.PostIdeas, r.MostPromisingCompanies, r.Summary);
+
+    public static OpportunityResponse ToResponse(this Opportunity o) =>
+        new(o.Id, o.JobPostingId, o.RecruiterLeadId, o.Status.ToString(), o.CreatedAtUtc,
+            o.LastActionAtUtc, o.NextFollowUpAtUtc, o.Notes);
+
+    public static RecruiterResponse ToResponse(this RecruiterLead r) =>
+        new(r.Id, r.CompanyId, r.FullName, r.RoleTitle, r.LinkedInUrl, r.Email,
+            r.Source.ToString(), r.Notes, r.CreatedAtUtc);
 }

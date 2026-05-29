@@ -131,6 +131,60 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
         Assert.Equal(HttpStatusCode.UnprocessableEntity, outreach.StatusCode);
     }
 
+    [DbFact]
+    public async Task AiAnalyze_AutoCreatesOpportunity_ThenManualStatusAndFollowUp()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        await client.PostAsJsonAsync("/api/candidate-profile", new CandidateProfileRequest(
+            "Nícolas", "Backend .NET", "x", "Brasil", "Pleno/Sênior", "pt-BR",
+            new() { ".NET", "C#" }, null, new() { "Pagamentos" }, null, null, null, null));
+        var jobId = await SeedJob("Senior Backend (.NET / Payments)",
+            "Payments, PIX, .NET, C#, Kafka, AWS. Remote Brazil. Open Finance, fintech.");
+
+        // FakeLlmProvider fit -> 89 (>= 70) so an Opportunity is auto-created.
+        await client.PostAsync($"/api/jobs/{jobId}/ai/analyze", null);
+
+        var opps = await client.GetFromJsonAsync<List<OpportunityResponse>>("/api/opportunities");
+        var opp = Assert.Single(opps!);
+        Assert.Equal(jobId, opp.JobPostingId);
+        Assert.Equal("Analyzed", opp.Status);
+
+        // Manual status change to a human-gated status is allowed via the API.
+        var statusResp = await client.PutAsJsonAsync(
+            $"/api/opportunities/{opp.Id}/status", new OpportunityStatusRequest("SentManually"));
+        statusResp.EnsureSuccessStatusCode();
+        var updated = await statusResp.Content.ReadFromJsonAsync<OpportunityResponse>();
+        Assert.Equal("SentManually", updated!.Status);
+
+        // Follow-up in the past shows up in the pending list.
+        await client.PutAsJsonAsync($"/api/opportunities/{opp.Id}/follow-up",
+            new OpportunityFollowUpRequest(DateTime.UtcNow.AddDays(-1)));
+        var due = await client.GetFromJsonAsync<List<OpportunityResponse>>("/api/opportunities/follow-ups");
+        Assert.Contains(due!, o => o.Id == opp.Id);
+    }
+
+    [DbFact]
+    public async Task Recruiter_Crud_RoundTrips()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+        var companyId = await CreateCompany();
+
+        var create = await client.PostAsJsonAsync("/api/recruiters", new RecruiterRequest(
+            companyId, "Ana Recruiter", "Tech Recruiter", "https://linkedin.com/in/ana", null, 1, "via referral"));
+        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+        var lead = await create.Content.ReadFromJsonAsync<RecruiterResponse>();
+        Assert.Equal("Manual", lead!.Source);
+
+        var list = await client.GetFromJsonAsync<List<RecruiterResponse>>("/api/recruiters");
+        Assert.Single(list!);
+
+        var del = await client.DeleteAsync($"/api/recruiters/{lead.Id}");
+        Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
+    }
+
     private async Task<Guid> SeedJob(string title, string description)
     {
         var companyResp = await CreateCompany();

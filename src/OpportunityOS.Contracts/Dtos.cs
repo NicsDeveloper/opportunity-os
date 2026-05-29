@@ -104,6 +104,44 @@ public sealed record DiscoveryResultResponse(
     int JobsUpdated,
     int Errors);
 
+// ---- Opportunities (pipeline) ----
+
+public sealed record OpportunityResponse(
+    Guid Id,
+    Guid JobPostingId,
+    Guid? RecruiterLeadId,
+    string Status,
+    DateTime CreatedAtUtc,
+    DateTime? LastActionAtUtc,
+    DateTime? NextFollowUpAtUtc,
+    string? Notes);
+
+public sealed record OpportunityStatusRequest(string Status);
+public sealed record OpportunityNotesRequest(string? Notes);
+public sealed record OpportunityFollowUpRequest(DateTime? NextFollowUpAtUtc);
+
+// ---- Recruiter leads ----
+
+public sealed record RecruiterRequest(
+    Guid CompanyId,
+    string FullName,
+    string? RoleTitle,
+    string? LinkedInUrl,
+    string? Email,
+    int? Source,
+    string? Notes);
+
+public sealed record RecruiterResponse(
+    Guid Id,
+    Guid CompanyId,
+    string FullName,
+    string? RoleTitle,
+    string? LinkedInUrl,
+    string? Email,
+    string Source,
+    string? Notes,
+    DateTime CreatedAtUtc);
+
 // ---- AI Copilot ----
 
 public sealed record JobAnalysisResponse(
