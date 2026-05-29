@@ -57,8 +57,28 @@ public static class DependencyInjection
             services.AddHttpClient<IJobSearchProvider, GupyJobSearchProvider>(ConfigureClient);
 
         services.AddHttpClient<IAtsDetector, AtsDetector>(ConfigureClient);
-        services.AddHttpClient<ICompanyWebsiteDiscoverer, CompanyWebsiteDiscoverer>(ConfigureClient);
         services.AddScoped<ICompanyOnboardingService, CompanyOnboardingService>();
+
+        // Website discovery: Google Custom Search when configured (with heuristic
+        // fallback), otherwise the heuristic domain-probing discoverer alone.
+        services.AddHttpClient<CompanyWebsiteDiscoverer>(ConfigureClient);
+        var googleSearch = new GoogleSearchOptions
+        {
+            ApiKey = config["Search:ApiKey"] ?? string.Empty,
+            SearchEngineId = config["Search:SearchEngineId"] ?? string.Empty
+        };
+        if (googleSearch.IsConfigured)
+        {
+            services.AddSingleton(googleSearch);
+            services.AddHttpClient<GoogleCustomSearchWebsiteDiscoverer>(ConfigureClient);
+            services.AddScoped<ICompanyWebsiteDiscoverer>(sp =>
+                sp.GetRequiredService<GoogleCustomSearchWebsiteDiscoverer>());
+        }
+        else
+        {
+            services.AddScoped<ICompanyWebsiteDiscoverer>(sp =>
+                sp.GetRequiredService<CompanyWebsiteDiscoverer>());
+        }
 
         var bacenOptions = new BacenOptions();
         config.GetSection("Bacen").Bind(bacenOptions);
