@@ -108,7 +108,7 @@ public sealed record AtsDetectionResponse(
 public sealed record CsvImportResponse(int Created);
 
 public sealed record OnboardingResponse(
-    Guid ExecutionRunId, string Status, int Processed, int WebsitesFound, int AtsDetected, int Errors);
+    Guid ExecutionRunId, string Status, int Processed, int BoardsFound, int Errors);
 
 public sealed record WebsiteDiscoveryResponse(bool Found, string? WebsiteUrl);
 
