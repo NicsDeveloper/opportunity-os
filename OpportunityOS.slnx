@@ -5,6 +5,7 @@
     <Project Path="src/OpportunityOS.Contracts/OpportunityOS.Contracts.csproj" />
     <Project Path="src/OpportunityOS.Domain/OpportunityOS.Domain.csproj" />
     <Project Path="src/OpportunityOS.Infrastructure/OpportunityOS.Infrastructure.csproj" />
+    <Project Path="src/OpportunityOS.Worker/OpportunityOS.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/OpportunityOS.IntegrationTests/OpportunityOS.IntegrationTests.csproj" />

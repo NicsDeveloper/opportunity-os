@@ -31,5 +31,17 @@ services:
     ports:
       - "5000:8080"
 
+  worker:
+    build:
+      context: .
+      dockerfile: src/OpportunityOS.Worker/Dockerfile
+    container_name: opportunity-os-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DOTNET_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=opportunity_os;Username=postgres;Password=postgres
+
 volumes:
   opportunity_os_pgdata:

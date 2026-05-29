@@ -14,6 +14,7 @@ public sealed class OpportunityOsDbContext : DbContext
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<JobPosting> JobPostings => Set<JobPosting>();
     public DbSet<OpportunityMatch> OpportunityMatches => Set<OpportunityMatch>();
+    public DbSet<ExecutionRun> ExecutionRuns => Set<ExecutionRun>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -101,6 +102,16 @@ public sealed class OpportunityOsDbContext : DbContext
                 .Metadata.SetValueComparer(stringListComparer);
             e.HasIndex(x => x.OverallScore);
             e.HasIndex(x => x.JobPostingId);
+        });
+
+        b.Entity<ExecutionRun>(e =>
+        {
+            e.ToTable("execution_runs");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.RunType).IsRequired();
+            e.Property(x => x.Status).HasConversion<int>();
+            e.HasIndex(x => x.RunType);
+            e.HasIndex(x => x.StartedAtUtc);
         });
     }
 }

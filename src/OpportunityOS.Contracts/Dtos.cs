@@ -91,6 +91,19 @@ public sealed record JobPostingResponse(
     DateTime CreatedAtUtc,
     DateTime UpdatedAtUtc);
 
+// ---- Discovery ----
+
+public sealed record DiscoverRequest(Guid? CompanyId);
+
+public sealed record DiscoveryResultResponse(
+    Guid ExecutionRunId,
+    string Status,
+    int CompaniesProcessed,
+    int ProvidersInvoked,
+    int JobsDiscovered,
+    int JobsUpdated,
+    int Errors);
+
 // ---- Match ----
 
 public sealed record MatchResponse(
