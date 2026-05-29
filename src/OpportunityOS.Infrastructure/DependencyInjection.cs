@@ -45,29 +45,7 @@ public static class DependencyInjection
 
     private static void AddAiCopilot(IServiceCollection services, IConfiguration config)
     {
-        var llmEnabled = config.GetValue("FeatureFlags:EnableLlmAnalysis", true);
-        var apiKey = config["OpenAI:ApiKey"];
-
-        if (!llmEnabled)
-        {
-            // Disabled: provider reports not-configured, so services use heuristic fallback.
-            services.AddSingleton<ILlmProvider>(_ => new FakeLlmProvider(isConfigured: false));
-        }
-        else if (!string.IsNullOrWhiteSpace(apiKey))
-        {
-            var options = new OpenAiOptions
-            {
-                ApiKey = apiKey!,
-                Model = config["OpenAI:Model"] ?? "gpt-4.1-mini"
-            };
-            services.AddSingleton(options);
-            services.AddHttpClient<ILlmProvider, OpenAiLlmProvider>(c => c.Timeout = TimeSpan.FromSeconds(60));
-        }
-        else
-        {
-            // No API key: deterministic fake provider (still returns valid JSON).
-            services.AddSingleton<ILlmProvider>(_ => new FakeLlmProvider());
-        }
+        RegisterLlmProvider(services, config);
 
         services.AddScoped<IPromptExecutionLogStore, EfPromptExecutionLogStore>();
         services.AddScoped<IJobUnderstandingService, JobUnderstandingService>();
@@ -75,6 +53,54 @@ public static class DependencyInjection
         services.AddScoped<IOutreachDraftService, OutreachDraftService>();
         services.AddScoped<ICvTailoringSuggestionService, CvTailoringSuggestionService>();
         services.AddScoped<ICareerInsightService, CareerInsightService>();
+    }
+
+    /// <summary>
+    /// Selects the LLM provider. Disabled -> not-configured fake (forces heuristic
+    /// fallback). Otherwise honours an explicit <c>Llm:Provider</c> (Anthropic|OpenAI|Fake)
+    /// or auto-detects by the first available API key (Anthropic, then OpenAI),
+    /// falling back to the deterministic fake when no key is present.
+    /// </summary>
+    private static void RegisterLlmProvider(IServiceCollection services, IConfiguration config)
+    {
+        if (!config.GetValue("FeatureFlags:EnableLlmAnalysis", true))
+        {
+            services.AddSingleton<ILlmProvider>(_ => new FakeLlmProvider(isConfigured: false));
+            return;
+        }
+
+        var anthropicKey = config["Anthropic:ApiKey"];
+        var openAiKey = config["OpenAI:ApiKey"];
+        var preference = (config["Llm:Provider"] ?? "auto").Trim().ToLowerInvariant();
+
+        var useAnthropic = preference == "anthropic"
+            || (preference == "auto" && !string.IsNullOrWhiteSpace(anthropicKey));
+        var useOpenAi = preference == "openai"
+            || (preference == "auto" && string.IsNullOrWhiteSpace(anthropicKey) && !string.IsNullOrWhiteSpace(openAiKey));
+
+        if (useAnthropic)
+        {
+            services.AddSingleton(new AnthropicOptions
+            {
+                ApiKey = anthropicKey ?? string.Empty,
+                Model = config["Anthropic:Model"] ?? "claude-sonnet-4-6"
+            });
+            services.AddHttpClient<ILlmProvider, AnthropicLlmProvider>(c => c.Timeout = TimeSpan.FromSeconds(60));
+        }
+        else if (useOpenAi)
+        {
+            services.AddSingleton(new OpenAiOptions
+            {
+                ApiKey = openAiKey ?? string.Empty,
+                Model = config["OpenAI:Model"] ?? "gpt-4.1-mini"
+            });
+            services.AddHttpClient<ILlmProvider, OpenAiLlmProvider>(c => c.Timeout = TimeSpan.FromSeconds(60));
+        }
+        else
+        {
+            // No key (or Llm:Provider=Fake): deterministic fake that still returns valid JSON.
+            services.AddSingleton<ILlmProvider>(_ => new FakeLlmProvider());
+        }
     }
 
     private static void ConfigureClient(HttpClient client)
