@@ -18,6 +18,13 @@ public interface IDiscoveryStore
 
     Task AddJobAsync(JobPosting job, CancellationToken ct);
 
+    /// <summary>
+    /// Find a company by name (case-insensitive) or create one tagged as
+    /// discovered via ATS search. Persisted immediately so repeated lookups
+    /// within a run resolve to the same company.
+    /// </summary>
+    Task<Company> FindOrCreateCompanyByNameAsync(string name, CancellationToken ct);
+
     Task AddExecutionRunAsync(ExecutionRun run, CancellationToken ct);
 
     Task SaveChangesAsync(CancellationToken ct);

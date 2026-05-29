@@ -16,6 +16,9 @@ public interface IJobDiscoveryService
 {
     /// <summary>Discover jobs for one company (when <paramref name="companyId"/> is set) or all.</summary>
     Task<DiscoveryResult> DiscoverAsync(Guid? companyId, CancellationToken ct);
+
+    /// <summary>Discover jobs by keyword across search providers (e.g. Gupy); auto-creates companies.</summary>
+    Task<DiscoveryResult> SearchAsync(IReadOnlyCollection<string> keywords, CancellationToken ct);
 }
 
 /// <summary>
@@ -27,17 +30,61 @@ public interface IJobDiscoveryService
 public sealed class JobDiscoveryService : IJobDiscoveryService
 {
     private readonly IEnumerable<IJobSourceProvider> _providers;
+    private readonly IEnumerable<IJobSearchProvider> _searchProviders;
     private readonly IDiscoveryStore _store;
     private readonly ILogger<JobDiscoveryService> _logger;
 
     public JobDiscoveryService(
         IEnumerable<IJobSourceProvider> providers,
+        IEnumerable<IJobSearchProvider> searchProviders,
         IDiscoveryStore store,
         ILogger<JobDiscoveryService> logger)
     {
         _providers = providers;
+        _searchProviders = searchProviders;
         _store = store;
         _logger = logger;
+    }
+
+    public async Task<DiscoveryResult> SearchAsync(IReadOnlyCollection<string> keywords, CancellationToken ct)
+    {
+        var run = ExecutionRun.Start("SearchJobs");
+        await _store.AddExecutionRunAsync(run, ct);
+
+        int newJobs = 0, updatedJobs = 0, providersInvoked = 0;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var companies = new HashSet<Guid>();
+
+        foreach (var provider in _searchProviders)
+        {
+            providersInvoked++;
+            try
+            {
+                var jobs = await provider.SearchAsync(keywords, ct);
+                foreach (var dto in jobs)
+                {
+                    var key = $"{dto.SourceProvider}::{dto.ExternalId}";
+                    if (!seen.Add(key)) continue;
+
+                    var company = await _store.FindOrCreateCompanyByNameAsync(dto.CompanyName, ct);
+                    companies.Add(company.Id);
+                    if (await UpsertAsync(company.Id, dto, ct)) newJobs++;
+                    else updatedJobs++;
+                }
+                await _store.SaveChangesAsync(ct);
+                run.RecordSuccess();
+            }
+            catch (Exception ex)
+            {
+                run.RecordFailure($"{provider.ProviderName}: {ex.Message}");
+                _logger.LogError(ex, "SearchProviderFailed {Provider}", provider.ProviderName);
+            }
+        }
+
+        run.Complete();
+        await _store.SaveChangesAsync(ct);
+        return new DiscoveryResult(
+            run.Id, run.Status.ToString(), companies.Count, providersInvoked, newJobs, updatedJobs, run.ItemsFailed);
     }
 
     public async Task<DiscoveryResult> DiscoverAsync(Guid? companyId, CancellationToken ct)

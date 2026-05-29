@@ -17,7 +17,7 @@ public sealed class JobDiscoveryServiceTests
     }
 
     private static JobDiscoveryService Build(FakeDiscoveryStore store, params IJobSourceProvider[] providers) =>
-        new(providers, store, NullLogger<JobDiscoveryService>.Instance);
+        new(providers, Array.Empty<IJobSearchProvider>(), store, NullLogger<JobDiscoveryService>.Instance);
 
     [Fact]
     public async Task Discover_CreatesNewJob()
@@ -87,6 +87,34 @@ public sealed class JobDiscoveryServiceTests
 
         Assert.Equal(1, result.JobsDiscovered);
         Assert.Single(store.Jobs);
+    }
+
+    [Fact]
+    public async Task Search_AutoCreatesCompany_AndPersistsJob()
+    {
+        var store = new FakeDiscoveryStore(); // no companies registered
+        var search = new FakeSearchProvider("Gupy", new[]
+        {
+            FakeJobSourceProvider.Job("g-1", "Gupy", "Desenvolvedor .NET") with { CompanyName = "Lumini IT" }
+        });
+        var service = new JobDiscoveryService(
+            Array.Empty<IJobSourceProvider>(), new[] { search }, store, NullLogger<JobDiscoveryService>.Instance);
+
+        var result = await service.SearchAsync(new[] { ".net", "c#" }, CancellationToken.None);
+
+        Assert.Equal(1, result.JobsDiscovered);
+        Assert.Single(store.Jobs);
+        Assert.Single(store.Companies); // company auto-created from the result
+        Assert.Equal("Lumini IT", store.Companies[0].Name);
+    }
+
+    private sealed class FakeSearchProvider : IJobSearchProvider
+    {
+        private readonly IReadOnlyCollection<DiscoveredJobDto> _jobs;
+        public FakeSearchProvider(string name, IReadOnlyCollection<DiscoveredJobDto> jobs) { ProviderName = name; _jobs = jobs; }
+        public string ProviderName { get; }
+        public Task<IReadOnlyCollection<DiscoveredJobDto>> SearchAsync(IReadOnlyCollection<string> keywords, CancellationToken ct) =>
+            Task.FromResult(_jobs);
     }
 
     [Fact]

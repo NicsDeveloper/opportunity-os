@@ -89,4 +89,40 @@ public sealed class ProviderTests
         Assert.Equal("Build APIs with .NET", job.DescriptionText);
         Assert.NotNull(job.PublishedAtUtc);
     }
+
+    [Fact]
+    public async Task Gupy_ParsesPortalJobs_AndDedupesById()
+    {
+        const string json = """
+        {
+          "data": [
+            {
+              "id": 9559956,
+              "name": "Desenvolvedor .NET Sr. | AWS | Cliente Bancário",
+              "description": "Vaga .NET / C# para cliente bancário, AWS, remoto.",
+              "careerPageName": "Lumini IT Solutions",
+              "publishedDate": "2025-07-22T19:57:14.484Z",
+              "isRemoteWork": true,
+              "country": "Brasil",
+              "workplaceType": "remote",
+              "jobUrl": "https://luminiitsolutions.gupy.io/job/abc"
+            }
+          ],
+          "pagination": { "offset": 0, "limit": 50, "total": 1 }
+        }
+        """;
+        var http = new HttpClient(FakeHttpMessageHandler.Json(json));
+        var provider = new GupyJobSearchProvider(http, NullLogger<GupyJobSearchProvider>.Instance);
+
+        // Two keywords hit the same job id -> deduped to one.
+        var jobs = await provider.SearchAsync(new[] { ".net", "c#" }, CancellationToken.None);
+
+        var job = Assert.Single(jobs);
+        Assert.Equal("9559956", job.ExternalId);
+        Assert.Equal("Lumini IT Solutions", job.CompanyName);
+        Assert.Equal("Gupy", job.SourceProvider);
+        Assert.Equal("Remoto - Brasil", job.Location);
+        Assert.Equal("pt-BR", job.Language);
+        Assert.NotNull(job.PublishedAtUtc);
+    }
 }

@@ -95,6 +95,8 @@ public sealed record JobPostingResponse(
 
 public sealed record DiscoverRequest(Guid? CompanyId);
 
+public sealed record SearchRequest(List<string>? Keywords);
+
 public sealed record DiscoveryResultResponse(
     Guid ExecutionRunId,
     string Status,
