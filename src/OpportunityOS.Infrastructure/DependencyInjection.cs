@@ -54,6 +54,8 @@ public static class DependencyInjection
         if (config.GetValue("FeatureFlags:EnableGupyProvider", true))
             services.AddHttpClient<IJobSearchProvider, GupyJobSearchProvider>(ConfigureClient);
 
+        services.AddHttpClient<IAtsDetector, AtsDetector>(ConfigureClient);
+
         AddAiCopilot(services, config);
 
         return services;

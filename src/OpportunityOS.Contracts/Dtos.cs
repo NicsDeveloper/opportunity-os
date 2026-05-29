@@ -97,6 +97,16 @@ public sealed record DiscoverRequest(Guid? CompanyId);
 
 public sealed record SearchRequest(List<string>? Keywords);
 
+public sealed record AtsDetectionResponse(
+    bool Detected,
+    string? Ats,
+    string? BoardUrl,
+    string? Token,
+    string? CareersPageUrl,
+    bool ProviderSupported);
+
+public sealed record CsvImportResponse(int Created);
+
 public sealed record DiscoveryResultResponse(
     Guid ExecutionRunId,
     string Status,

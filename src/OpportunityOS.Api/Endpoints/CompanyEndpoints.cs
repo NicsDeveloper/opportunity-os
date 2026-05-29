@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using OpportunityOS.Application.Companies;
+using OpportunityOS.Application.Discovery;
 using OpportunityOS.Contracts;
 using OpportunityOS.Domain.Entities;
 using OpportunityOS.Domain.Enums;
@@ -61,6 +63,45 @@ public static class CompanyEndpoints
             db.Companies.Remove(company);
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
+        });
+
+        // Detect the company's ATS by crawling its public site/careers page.
+        group.MapPost("/{id:guid}/detect-ats", async (
+            Guid id, OpportunityOsDbContext db, IAtsDetector detector, CancellationToken ct) =>
+        {
+            var company = await db.Companies.FindAsync([id], ct);
+            if (company is null) return Results.NotFound();
+
+            var r = await detector.DetectAsync(company, ct);
+            if (r.Detected && !string.IsNullOrWhiteSpace(r.BoardUrl))
+            {
+                company.SetCareersUrl(r.BoardUrl!);
+                if (r.Ats is not null) company.AddTag(r.Ats.ToLowerInvariant());
+                await db.SaveChangesAsync(ct);
+            }
+            return Results.Ok(new AtsDetectionResponse(
+                r.Detected, r.Ats, r.BoardUrl, r.Token, r.CareersPageUrl, r.ProviderSupported));
+        });
+
+        // Bulk import companies from CSV (name,websiteUrl,careersUrl,industry,country).
+        group.MapPost("/import-csv", async (HttpRequest request, OpportunityOsDbContext db, CancellationToken ct) =>
+        {
+            using var reader = new StreamReader(request.Body);
+            var csv = await reader.ReadToEndAsync(ct);
+            var rows = CsvCompanyParser.Parse(csv);
+            if (rows.Count == 0) return Results.BadRequest("No valid rows found (expected at least a 'name' column).");
+
+            var created = 0;
+            foreach (var row in rows)
+            {
+                if (await db.Companies.AnyAsync(c => c.Name.ToLower() == row.Name.ToLower(), ct)) continue;
+                db.Companies.Add(new Company(
+                    row.Name, row.WebsiteUrl, row.CareersUrl, null, row.Industry, row.Country,
+                    CompanyPriority.Medium, CompanySource.CsvImport, null));
+                created++;
+            }
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new CsvImportResponse(created));
         });
     }
 }

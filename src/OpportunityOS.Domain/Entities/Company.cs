@@ -67,4 +67,15 @@ public sealed class Company
     }
 
     public void MarkScanned() => LastScannedAtUtc = DateTime.UtcNow;
+
+    /// <summary>Set the careers/ATS board URL discovered by the ATS detector.</summary>
+    public void SetCareersUrl(string careersUrl)
+    {
+        if (!string.IsNullOrWhiteSpace(careersUrl)) CareersUrl = careersUrl;
+    }
+
+    public void AddTag(string tag)
+    {
+        if (!string.IsNullOrWhiteSpace(tag) && !Tags.Contains(tag)) Tags.Add(tag);
+    }
 }
