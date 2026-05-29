@@ -8,7 +8,8 @@ revisáveis e envia um digest por e-mail para **revisão humana**.
 > **não** envia mensagens sem revisão humana. É um copiloto de carreira, não um robô de spam.
 
 Este repositório está sendo construído por fases (Spec-Driven Development). **Esta entrega
-cobre as Fases 1 (Core funcional), 2 (Automação diária / descoberta) e 3 (AI Copilot Layer).**
+cobre as Fases 1 (Core funcional), 2 (Automação diária / descoberta), 3 (AI Copilot Layer)
+e 4 (CRM de oportunidades).**
 
 ---
 
@@ -111,6 +112,16 @@ Desabilite com `"SeedOnStartup": false` em `appsettings.json` ou via env var
 | POST   | `/api/jobs/{id}/ai/generate-outreach` | **IA**: gera drafts (LinkedIn/e-mail/carta/follow-up) como `Draft`. Bloqueado se score < 60 (422) |
 | POST   | `/api/jobs/{id}/ai/suggest-cv-tailoring` | **IA**: sugestões de ajuste de CV (não altera o CV) |
 | POST   | `/api/insights/career` | **IA**: insights de carreira sobre vagas analisadas. Body opcional `{ "maxJobs": 50 }` |
+| GET    | `/api/opportunities` | Lista o pipeline |
+| GET    | `/api/opportunities/follow-ups` | Follow-ups pendentes (vencidos) |
+| GET    | `/api/opportunities/{id}` | Oportunidade por id |
+| PUT    | `/api/opportunities/{id}/status` | Muda status (**manual**; única via para status pós-revisão como `SentManually`) |
+| PUT    | `/api/opportunities/{id}/notes` | Atualiza notas |
+| PUT    | `/api/opportunities/{id}/follow-up` | Define `NextFollowUpAtUtc` |
+| GET    | `/api/recruiters` | Lista recrutadores (adicionados manualmente) |
+| POST   | `/api/recruiters` | Cria recruiter lead |
+| PUT    | `/api/recruiters/{id}` | Atualiza recruiter lead |
+| DELETE | `/api/recruiters/{id}` | Remove recruiter lead |
 
 ### Exemplo: rodar análise manual
 
@@ -177,6 +188,21 @@ não inventa experiências.
 - JSON inválido / falha de chamada → registra erro e **cai no fallback heurístico** sem quebrar o fluxo.
 - Não gera outreach se o score for < 60 (HTTP 422).
 - Prompts versionados em `Application/AI/Prompts.cs`.
+
+## CRM de oportunidades (Fase 4)
+
+Quando um match atinge **score ≥ 70**, o sistema cria automaticamente uma `Opportunity`
+(status `Analyzed`). Quando um outreach é gerado, a oportunidade avança para
+`ReadyForHumanReview`.
+
+**Regra central**: o sistema só pode avançar o status **automaticamente até
+`ReadyForHumanReview`**. Qualquer estado além disso (`SentManually`, `AppliedManually`,
+`InterviewScheduled`, …) exige **ação humana** via `PUT /api/opportunities/{id}/status`
+(o domínio lança exceção se o sistema tentar fazer isso sozinho).
+
+`RecruiterLead` guarda contatos **adicionados manualmente** pelo usuário — o sistema
+nunca raspa o LinkedIn. Follow-ups: defina `NextFollowUpAtUtc` e consulte os pendentes
+em `GET /api/opportunities/follow-ups`.
 
 ## Match Engine (heurístico, v1)
 
@@ -251,12 +277,16 @@ de ambiente.
 - ✅ **Fase 3 — AI Copilot Layer**: `ILlmProvider` (`OpenAiLlmProvider` + `FakeLlmProvider`),
   5 serviços de IA, prompts versionados, `GeneratedMessage`, `PromptExecutionLog` (auditoria),
   endpoints de IA, fallback heurístico e validação de JSON, testes com `FakeLlmProvider`.
-- ⏳ Fase 4 — Pipeline de oportunidades + recruiter leads.
+- ✅ **Fase 4 — CRM de oportunidades**: entidades `Opportunity` e `RecruiterLead`,
+  criação automática de oportunidade quando score ≥ 70, status manual (gate de revisão
+  humana), `NextFollowUpAtUtc` + follow-ups pendentes, CRUD de recruiter leads, testes.
 - ⏳ Fase 5 — Digest por e-mail.
 
-## Próximos passos sugeridos (Fase 4)
+## Próximos passos sugeridos (Fase 5)
 
-1. Entidades `Opportunity` e `RecruiterLead` + status manual do pipeline.
-2. Criação automática de `Opportunity` quando match score >= 70.
-3. `NextFollowUpAtUtc` + consulta de follow-ups pendentes.
-4. Sistema nunca muda status para `SentManually` automaticamente.
+1. `IEmailDigestService` + provider SMTP.
+2. `GET /api/digest/preview` e `POST /api/digest/send`.
+3. Template Markdown/HTML com empresa, vaga, score, recomendação, pontos fortes/riscos,
+   mensagem curta, carta e notas de CV.
+4. Job diário (`SendDailyDigestJob`); se não houver oportunidades relevantes, registrar
+   `ExecutionRun` sem erro (sem enviar e-mail).

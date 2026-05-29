@@ -29,6 +29,8 @@ app.MapCandidateProfileEndpoints();
 app.MapCompanyEndpoints();
 app.MapJobEndpoints();
 app.MapAiEndpoints();
+app.MapOpportunityEndpoints();
+app.MapRecruiterEndpoints();
 
 app.Run();
 

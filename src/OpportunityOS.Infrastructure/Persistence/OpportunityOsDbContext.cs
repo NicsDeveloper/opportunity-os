@@ -17,6 +17,8 @@ public sealed class OpportunityOsDbContext : DbContext
     public DbSet<ExecutionRun> ExecutionRuns => Set<ExecutionRun>();
     public DbSet<GeneratedMessage> GeneratedMessages => Set<GeneratedMessage>();
     public DbSet<PromptExecutionLog> PromptExecutionLogs => Set<PromptExecutionLog>();
+    public DbSet<Opportunity> Opportunities => Set<Opportunity>();
+    public DbSet<RecruiterLead> RecruiterLeads => Set<RecruiterLead>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -134,6 +136,25 @@ public sealed class OpportunityOsDbContext : DbContext
             e.HasIndex(x => x.Service);
             e.HasIndex(x => x.JobPostingId);
             e.HasIndex(x => x.CreatedAtUtc);
+        });
+
+        b.Entity<Opportunity>(e =>
+        {
+            e.ToTable("opportunities");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Status).HasConversion<int>();
+            e.HasIndex(x => x.Status);
+            e.HasIndex(x => x.JobPostingId).IsUnique();
+            e.HasIndex(x => x.NextFollowUpAtUtc);
+        });
+
+        b.Entity<RecruiterLead>(e =>
+        {
+            e.ToTable("recruiter_leads");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.FullName).IsRequired();
+            e.Property(x => x.Source).HasConversion<int>();
+            e.HasIndex(x => x.CompanyId);
         });
     }
 }

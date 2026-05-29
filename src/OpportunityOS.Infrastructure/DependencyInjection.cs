@@ -7,6 +7,7 @@ using OpportunityOS.Application.AI;
 using OpportunityOS.Application.Discovery;
 using OpportunityOS.Application.Matching;
 using OpportunityOS.Application.Normalization;
+using OpportunityOS.Application.Pipeline;
 using OpportunityOS.Infrastructure.Ai;
 using OpportunityOS.Infrastructure.Persistence;
 using OpportunityOS.Infrastructure.Providers;
@@ -31,6 +32,9 @@ public static class DependencyInjection
 
         services.AddScoped<IDiscoveryStore, EfDiscoveryStore>();
         services.AddScoped<IJobDiscoveryService, JobDiscoveryService>();
+
+        services.AddScoped<IOpportunityStore, EfOpportunityStore>();
+        services.AddScoped<IOpportunityPipeline, OpportunityPipeline>();
 
         if (config.GetValue("FeatureFlags:EnableGreenhouseProvider", true))
             services.AddHttpClient<IJobSourceProvider, GreenhouseJobSourceProvider>(ConfigureClient);
