@@ -14,7 +14,8 @@ public enum CompanySource
     CsvImport = 2,
     SearchEngine = 3,
     PublicRegistry = 4,
-    AtsDiscovery = 5
+    AtsDiscovery = 5,
+    Bacen = 6
 }
 
 public enum JobPostingStatus

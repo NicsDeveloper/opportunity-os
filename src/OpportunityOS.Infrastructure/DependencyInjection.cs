@@ -4,12 +4,14 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using OpportunityOS.Application.AI;
+using OpportunityOS.Application.Bacen;
 using OpportunityOS.Application.Digest;
 using OpportunityOS.Application.Discovery;
 using OpportunityOS.Application.Matching;
 using OpportunityOS.Application.Normalization;
 using OpportunityOS.Application.Pipeline;
 using OpportunityOS.Infrastructure.Ai;
+using OpportunityOS.Infrastructure.Bacen;
 using OpportunityOS.Infrastructure.Email;
 using OpportunityOS.Infrastructure.Persistence;
 using OpportunityOS.Infrastructure.Providers;
@@ -55,6 +57,13 @@ public static class DependencyInjection
             services.AddHttpClient<IJobSearchProvider, GupyJobSearchProvider>(ConfigureClient);
 
         services.AddHttpClient<IAtsDetector, AtsDetector>(ConfigureClient);
+
+        var bacenOptions = new BacenOptions();
+        config.GetSection("Bacen").Bind(bacenOptions);
+        services.AddSingleton(bacenOptions);
+        services.AddHttpClient<IBacenPixParticipantsCsvProvider, BacenPixParticipantsCsvProvider>(ConfigureClient);
+        services.AddScoped<IBacenStore, EfBacenStore>();
+        services.AddScoped<IBacenRadarService, BacenRadarService>();
 
         AddAiCopilot(services, config);
 

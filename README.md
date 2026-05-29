@@ -118,6 +118,9 @@ Desabilite com `"SeedOnStartup": false` em `appsettings.json` ou via env var
 | PUT    | `/api/opportunities/{id}/status` | Muda status (**manual**; única via para status pós-revisão como `SentManually`) |
 | PUT    | `/api/opportunities/{id}/notes` | Atualiza notas |
 | PUT    | `/api/opportunities/{id}/follow-up` | Define `NextFollowUpAtUtc` |
+| POST   | `/api/companies/import-csv` | Importa empresas de um CSV (`name,websiteUrl,careersUrl,industry,country`) |
+| POST   | `/api/companies/{id}/detect-ats` | Detecta o ATS (Greenhouse/Lever/Gupy/Workday) crawleando o site |
+| POST   | `/api/jobs/search` | Busca vagas por palavra-chave (Gupy); auto-cria empresas |
 | GET    | `/api/recruiters` | Lista recrutadores (adicionados manualmente) |
 | POST   | `/api/recruiters` | Cria recruiter lead |
 | PUT    | `/api/recruiters/{id}` | Atualiza recruiter lead |
@@ -227,6 +230,48 @@ dotnet user-secrets set "Email:Smtp:Port" "587"
 dotnet user-secrets set "Email:Smtp:Username" "voce@gmail.com"
 dotnet user-secrets set "Email:Smtp:Password" "<Gmail App Password (requer 2FA)>"
 ```
+
+## Bacen Pix Importer (radar de empresas)
+
+Popula o **radar inicial de empresas** a partir da **lista oficial de participantes do
+Pix do Banco Central** (CSV). É um processo de **dois estágios** para o radar não virar
+"lista gigante suja":
+
+1. **Import** → grava tudo em `BacenInstitution` (staging cru). Fonte = CSV oficial,
+   Latin1 / `;`-separado, **URL configurável** em `Bacen:PixParticipantsCsvUrl`
+   (sem scraping de HTML, sem adivinhar endpoint).
+2. **Promote** → cria/atualiza `Company` **apenas para instituições elegíveis** (autorizadas
+   pelo BCB e do tipo Instituição de Pagamento / Banco / Sociedade de Crédito Direto / SCFI),
+   com prioridade calculada (Strategic/High/Medium/Low) e tags herdadas + `company-radar`.
+   Cooperativas e não-autorizadas ficam de fora do radar.
+
+> O Bacen Importer **não busca vagas** — só monta o radar de empresas. A busca de vagas
+> continua nos ATS providers (Greenhouse/Lever/Gupy) + detecção de ATS / página de carreiras.
+
+**Validação real:** 919 instituições importadas; 279 promovidas a empresas; 640 filtradas.
+
+Endpoints:
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| POST | `/api/bacen/pix-participants/import` | Baixa o CSV oficial → `BacenInstitution` (idempotente por CNPJ, fallback ISPB) |
+| POST | `/api/bacen/pix-participants/promote-to-companies` | Promove elegíveis → `Company` (idempotente por nome) |
+| GET  | `/api/bacen/pix-participants` | Lista (filtros: `institutionType`, `authorizedByBacen`, `tag`, `search`) |
+| GET  | `/api/bacen/pix-participants/{id}` | Detalhe |
+
+Como rodar:
+
+```bash
+docker compose up -d postgres
+dotnet run --project src/OpportunityOS.Api          # aplica migrations no startup
+curl -X POST http://localhost:5000/api/bacen/pix-participants/import
+curl -X POST http://localhost:5000/api/bacen/pix-participants/promote-to-companies
+```
+
+Limitações conhecidas: a URL do CSV é um snapshot fixo (não há descoberta automática da
+versão mais recente); a descoberta nome → site/carreiras é responsabilidade de outro módulo
+(`detect-ats` / futuro `CompanyWebsiteDiscoveryService`); cada operação registra um
+`ExecutionRun` (`BacenPixParticipantsImport` / `BacenPixParticipantsPromotion`).
 
 ## Match Engine (heurístico, v1)
 
