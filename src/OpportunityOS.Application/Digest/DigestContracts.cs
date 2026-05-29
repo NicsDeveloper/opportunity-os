@@ -12,7 +12,8 @@ public sealed record OpportunityDigestItem(
     string CoverLetter,
     string CvTailoringNotes,
     List<string> Strengths,
-    List<string> Risks);
+    List<string> Risks,
+    string? OutreachLanguage = null);
 
 /// <summary>Rendered digest (not yet sent).</summary>
 public sealed record DigestPreview(
