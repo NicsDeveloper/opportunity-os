@@ -42,6 +42,7 @@ export interface Summary {
 export interface BestOpportunity {
   matchId: string; jobPostingId: string; jobTitle: string; companyName: string;
   skills: string[]; overallScore: number; recommendation: string; jobUrl: string;
+  companyWebsiteUrl?: string | null;
 }
 export interface Run {
   id: string; runType: string; status: string; startedAtUtc: string;
@@ -66,5 +67,6 @@ export const api = {
   digestPreview: () => get<DigestPreview>("/digest/preview"),
   search: (keywords: string[]) => post("/jobs/search", { keywords }),
   discover: (companyId?: string) => post("/jobs/discover", { companyId: companyId ?? null }),
-  sendDigest: () => post("/digest/send"),
+  sendDigest: () => post<{ sent: boolean; itemCount: number; reason: string }>("/digest/send"),
+  generateOutreach: (jobId: string) => post(`/jobs/${jobId}/ai/generate-outreach`),
 };

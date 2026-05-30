@@ -68,10 +68,10 @@ public static class DashboardEndpoints
             var result = latest.Where(m => jobs.ContainsKey(m.JobPostingId)).Select(m =>
             {
                 var job = jobs[m.JobPostingId];
-                var company = companies.TryGetValue(job.CompanyId, out var c) ? c.Name : "(empresa)";
+                companies.TryGetValue(job.CompanyId, out var c);
                 return new BestOpportunityResponse(
-                    m.Id, job.Id, job.Title, company, job.ExtractedSkills.Take(4).ToList(),
-                    m.OverallScore, m.Recommendation.ToString(), job.AbsoluteUrl);
+                    m.Id, job.Id, job.Title, c?.Name ?? "(empresa)", job.ExtractedSkills.Take(4).ToList(),
+                    m.OverallScore, m.Recommendation.ToString(), job.AbsoluteUrl, c?.WebsiteUrl);
             });
             return Results.Ok(result);
         }).WithTags("Matches");
