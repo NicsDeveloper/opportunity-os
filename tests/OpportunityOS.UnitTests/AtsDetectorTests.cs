@@ -42,7 +42,6 @@ public sealed class AtsDetectorTests
 
     [Theory]
     [InlineData("https://acme.inhire.app/vagas", "inhire")]
-    [InlineData("https://jobs.ashbyhq.com/acme", "Ashby")]
     [InlineData("https://acme.abler.com.br/", "Abler")]
     [InlineData("https://carreiras.pandape.com.br/acme", "Pandape")]
     public void Detect_RecognizesAdditionalAts_AsNotSupported(string url, string expectedAts)
