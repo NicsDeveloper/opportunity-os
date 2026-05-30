@@ -31,6 +31,12 @@ export function App() {
   const notify = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3500); };
   const refresh = () => setReload((r) => r + 1);
 
+  // Keep the view fresh while the system discovers in the background.
+  useEffect(() => {
+    const id = setInterval(() => setReload((r) => r + 1), 20000);
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <div className="layout">
       <Sidebar view={view} onNav={setView} name={profile.data?.fullName} headline={profile.data?.headline} />
