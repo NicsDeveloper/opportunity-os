@@ -43,6 +43,19 @@ Direção das dependências: `Api → Infrastructure → Application → Domain`
 - .NET SDK 10
 - Docker + Docker Compose
 
+## Subir tudo com um comando
+
+Na raiz do repo (Windows), sobe Postgres + API + Worker + Frontend em janelas separadas:
+
+```cmd
+dev-up
+```
+(ou `powershell -ExecutionPolicy Bypass -File dev-up.ps1`). Depois abra **http://localhost:5173**.
+Para derrubar: `dev-down`.
+
+> Use este caminho (`dotnet run`) para ter Claude/Google/e-mail reais — as chaves ficam no
+> User Secrets, que o container Docker não enxerga. As etapas manuais abaixo são equivalentes.
+
 ## Como rodar localmente
 
 1. **Suba o PostgreSQL:**
