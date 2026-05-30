@@ -25,7 +25,7 @@ public sealed class GoogleAtsBoardFinderTests
         var finder = new GoogleAtsBoardFinder(
             new HttpClient(FakeHttpMessageHandler.Json(json)),
             new GoogleSearchOptions { ApiKey = "k", SearchEngineId = "cx" },
-            new FakeAts(NotDetected), NoopFallback(), NullLogger<GoogleAtsBoardFinder>.Instance);
+            new FakeAts(NotDetected), new GoogleQuotaGuard(100), NoopFallback(), NullLogger<GoogleAtsBoardFinder>.Instance);
 
         var r = await finder.FindAsync(Acme(), CancellationToken.None);
 
@@ -49,7 +49,7 @@ public sealed class GoogleAtsBoardFinderTests
             new HttpClient(FakeHttpMessageHandler.Json(json)),
             new GoogleSearchOptions { ApiKey = "k", SearchEngineId = "cx" },
             new FakeAts(new AtsDetectionResult(true, "Greenhouse", "https://boards.greenhouse.io/acme", "acme", null, true)),
-            NoopFallback(), NullLogger<GoogleAtsBoardFinder>.Instance);
+            new GoogleQuotaGuard(100), NoopFallback(), NullLogger<GoogleAtsBoardFinder>.Instance);
 
         var r = await finder.FindAsync(company, CancellationToken.None);
 
@@ -68,7 +68,7 @@ public sealed class GoogleAtsBoardFinderTests
 
         var finder = new GoogleAtsBoardFinder(
             new HttpClient(FakeHttpMessageHandler.Json("{}")),
-            new GoogleSearchOptions(), new FakeAts(NotDetected), fallback,
+            new GoogleSearchOptions(), new FakeAts(NotDetected), new GoogleQuotaGuard(100), fallback,
             NullLogger<GoogleAtsBoardFinder>.Instance);
 
         var r = await finder.FindAsync(company, CancellationToken.None);

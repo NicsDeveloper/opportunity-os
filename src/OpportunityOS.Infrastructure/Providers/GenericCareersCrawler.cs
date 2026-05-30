@@ -31,11 +31,13 @@ public sealed partial class GenericCareersCrawler : IJobSourceProvider
     };
 
     private readonly HttpClient _http;
+    private readonly IPageRenderer _renderer;
     private readonly ILogger<GenericCareersCrawler> _logger;
 
-    public GenericCareersCrawler(HttpClient http, ILogger<GenericCareersCrawler> logger)
+    public GenericCareersCrawler(HttpClient http, IPageRenderer renderer, ILogger<GenericCareersCrawler> logger)
     {
         _http = http;
+        _renderer = renderer;
         _logger = logger;
     }
 
@@ -56,6 +58,7 @@ public sealed partial class GenericCareersCrawler : IJobSourceProvider
 
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var byUrl = new Dictionary<string, DiscoveredJobDto>(StringComparer.OrdinalIgnoreCase);
+        var careersPages = new List<string>();
         var fetches = 0;
 
         for (var i = 0; i < queue.Count && fetches < MaxPages && byUrl.Count < MaxJobs; i++)
@@ -68,11 +71,36 @@ public sealed partial class GenericCareersCrawler : IJobSourceProvider
 
             // Queue careers-looking links (one level deep) to reach the jobs page.
             foreach (var link in AtsDetector.ExtractCareersLinks(html, url))
-                if (!visited.Contains(link) && !queue.Contains(link) && SameCompany(link, companyHost)) queue.Add(link);
+                if (!visited.Contains(link) && !queue.Contains(link) && SameCompany(link, companyHost))
+                {
+                    queue.Add(link);
+                    careersPages.Add(link);
+                }
 
-            // Extract job-posting links by role text.
-            foreach (var (href, text) in ExtractAnchors(html, url))
+            ExtractJobs(html, url, company, companyHost, byUrl);
+        }
+
+        // SPA fallback: nothing via HTTP but JS rendering available -> render careers pages.
+        if (byUrl.Count == 0 && _renderer.IsAvailable)
+        {
+            foreach (var page in (careersPages.Count > 0 ? careersPages : queue).Take(2))
             {
+                var rendered = await _renderer.RenderAsync(page, ct);
+                if (rendered is not null) ExtractJobs(rendered, page, company, companyHost, byUrl);
+                if (byUrl.Count > 0) break;
+            }
+        }
+
+        if (byUrl.Count > 0)
+            _logger.LogInformation("CareersCrawler: {Count} jobs from {Company}", byUrl.Count, company.Name);
+        return byUrl.Values.ToList();
+    }
+
+    private void ExtractJobs(string html, string pageUrl, Company company, string companyHost,
+        Dictionary<string, DiscoveredJobDto> byUrl)
+    {
+        foreach (var (href, text) in ExtractAnchors(html, pageUrl))
+        {
                 if (!RoleRegex().IsMatch(text) && !RoleRegex().IsMatch(href)) continue;
                 if (!Uri.TryCreate(href, UriKind.Absolute, out var jobUri)) continue;
                 if (IsAtsHost(jobUri.Host)) continue;              // handled by ATS providers
@@ -86,13 +114,8 @@ public sealed partial class GenericCareersCrawler : IJobSourceProvider
                     Location: null, Department: null, DescriptionHtml: null,
                     DescriptionText: title, AbsoluteUrl: abs, SourceProvider: Provider,
                     PublishedAtUtc: null, UpdatedAtUtc: null, Language: null);
-                if (byUrl.Count >= MaxJobs) break;
+                if (byUrl.Count >= MaxJobs) return;
             }
-        }
-
-        if (byUrl.Count > 0)
-            _logger.LogInformation("CareersCrawler: {Count} jobs from {Company}", byUrl.Count, company.Name);
-        return byUrl.Values.ToList();
     }
 
     private static bool IsAtsHost(string host) =>

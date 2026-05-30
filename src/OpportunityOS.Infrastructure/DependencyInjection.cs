@@ -34,6 +34,9 @@ public static class DependencyInjection
         services.AddScoped<IJobNormalizer, JobNormalizer>();
         services.AddScoped<IMatchEngine, HeuristicMatchEngine>();
 
+        // Headless renderer for JS-heavy career pages (shared browser); HTTP fallback if absent.
+        services.AddSingleton<IPageRenderer, PlaywrightPageRenderer>();
+
         services.AddScoped<IDiscoveryStore, EfDiscoveryStore>();
         services.AddScoped<IJobDiscoveryService, JobDiscoveryService>();
 
@@ -79,6 +82,8 @@ public static class DependencyInjection
         if (googleSearch.IsConfigured)
         {
             services.AddSingleton(googleSearch);
+            // Shared daily quota across every Google CSE caller (free tier = 100/day).
+            services.AddSingleton(new GoogleQuotaGuard(config.GetValue("Search:DailyQueryBudget", 90)));
             // Website discovery via Google (whole-web), heuristic fallback.
             services.AddHttpClient<GoogleWebsiteDiscoverer>(ConfigureClient);
             services.AddScoped<ICompanyWebsiteDiscoverer>(sp => sp.GetRequiredService<GoogleWebsiteDiscoverer>());
@@ -86,6 +91,9 @@ public static class DependencyInjection
             // ATS board finder via Google CSE (board first, then website crawl), heuristic fallback.
             services.AddHttpClient<GoogleAtsBoardFinder>(ConfigureClient);
             services.AddScoped<IAtsBoardFinder>(sp => sp.GetRequiredService<GoogleAtsBoardFinder>());
+            // Open-web job search (recent .NET postings), quota-guarded.
+            if (config.GetValue("FeatureFlags:EnableGoogleWebSearch", true))
+                services.AddHttpClient<IJobSearchProvider, GoogleWebJobSearchProvider>(ConfigureClient);
         }
         else
         {

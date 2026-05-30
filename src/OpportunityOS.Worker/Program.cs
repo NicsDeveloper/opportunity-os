@@ -20,6 +20,7 @@ builder.Services.AddHangfire(cfg => cfg
 builder.Services.AddHangfireServer();
 
 builder.Services.AddScoped<DiscoverJobsJob>();
+builder.Services.AddScoped<SearchJobsJob>();
 builder.Services.AddScoped<SendDailyDigestJob>();
 builder.Services.AddHostedService<RecurringJobScheduler>();
 

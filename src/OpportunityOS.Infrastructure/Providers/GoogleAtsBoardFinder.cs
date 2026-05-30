@@ -35,16 +35,18 @@ public sealed class GoogleAtsBoardFinder : IAtsBoardFinder
     private readonly HttpClient _http;
     private readonly GoogleSearchOptions _options;
     private readonly IAtsDetector _atsDetector;
+    private readonly GoogleQuotaGuard _quota;
     private readonly HeuristicAtsBoardFinder _fallback;
     private readonly ILogger<GoogleAtsBoardFinder> _logger;
 
     public GoogleAtsBoardFinder(
         HttpClient http, GoogleSearchOptions options, IAtsDetector atsDetector,
-        HeuristicAtsBoardFinder fallback, ILogger<GoogleAtsBoardFinder> logger)
+        GoogleQuotaGuard quota, HeuristicAtsBoardFinder fallback, ILogger<GoogleAtsBoardFinder> logger)
     {
         _http = http;
         _options = options;
         _atsDetector = atsDetector;
+        _quota = quota;
         _fallback = fallback;
         _logger = logger;
     }
@@ -91,6 +93,11 @@ public sealed class GoogleAtsBoardFinder : IAtsBoardFinder
 
     private async Task<List<string>> SearchAsync(string companyName, CancellationToken ct)
     {
+        if (!_quota.TryConsume())
+        {
+            _logger.LogInformation("Google quota exhausted; onboarding falls back to heuristic.");
+            return new List<string>();
+        }
         var q = Uri.EscapeDataString($"{companyName} carreiras vagas");
         var url = $"{Endpoint}?key={_options.ApiKey}&cx={_options.SearchEngineId}&q={q}&num=6";
 
