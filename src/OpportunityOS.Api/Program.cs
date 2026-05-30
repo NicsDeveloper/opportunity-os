@@ -33,6 +33,7 @@ app.MapOpportunityEndpoints();
 app.MapRecruiterEndpoints();
 app.MapDigestEndpoints();
 app.MapBacenEndpoints();
+app.MapDashboardEndpoints();
 
 app.Run();
 
