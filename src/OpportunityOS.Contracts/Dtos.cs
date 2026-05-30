@@ -145,6 +145,26 @@ public sealed record DiscoveryResultResponse(
     int JobsUpdated,
     int Errors);
 
+// ---- Dashboard ----
+
+public sealed record DashboardSummaryResponse(
+    int JobsDiscovered, int JobsToday,
+    int MatchesAbove75, int MatchesAbove75Today,
+    int MessagesGenerated, int MessagesToday,
+    int EmailsSent, int EmailsToday,
+    int FollowUpsPending, int? NextFollowUpInDays);
+
+public sealed record BestOpportunityResponse(
+    Guid MatchId, Guid JobPostingId, string JobTitle, string CompanyName,
+    List<string> Skills, int OverallScore, string Recommendation, string JobUrl);
+
+public sealed record ExecutionRunResponse(
+    Guid Id, string RunType, string Status, DateTime StartedAtUtc,
+    int ItemsProcessed, int ItemsSucceeded, int ItemsFailed);
+
+public sealed record GeneratedMessageSummary(
+    Guid Id, Guid JobPostingId, string EmailSubject, string Status, DateTime CreatedAtUtc);
+
 // ---- Opportunities (pipeline) ----
 
 public sealed record OpportunityResponse(
