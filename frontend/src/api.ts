@@ -51,6 +51,12 @@ export interface Run {
 export interface Message {
   id: string; jobPostingId: string; emailSubject: string; status: string; createdAtUtc: string;
 }
+export interface GeneratedMessage {
+  id: string; jobPostingId: string; opportunityMatchId: string;
+  linkedInMessage: string; coverLetter: string; emailSubject: string; emailBody: string;
+  cvTailoringNotes: string; followUpMessage: string; humanReviewNotes: string;
+  status: string; promptVersion: string; modelName: string; createdAtUtc: string;
+}
 export interface Profile { fullName: string; headline: string; }
 
 export const api = {
@@ -68,6 +74,6 @@ export const api = {
   search: (keywords: string[]) => post("/jobs/search", { keywords }),
   discover: (companyId?: string) => post("/jobs/discover", { companyId: companyId ?? null }),
   sendDigest: () => post<{ sent: boolean; itemCount: number; reason: string }>("/digest/send"),
-  generateOutreach: (jobId: string) => post(`/jobs/${jobId}/ai/generate-outreach`),
+  generateOutreach: (jobId: string) => post<GeneratedMessage>(`/jobs/${jobId}/ai/generate-outreach`),
   backfillWebsites: () => post<{ processed: number; found: number }>("/companies/backfill-websites"),
 };

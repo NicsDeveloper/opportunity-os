@@ -1,28 +1,10 @@
 import { useEffect, useState } from "react";
 import { Icon } from "./icons";
 import {
-  api, type BestOpportunity, type Company, type Job, type Message,
-  type Opportunity, type Run,
+  api, type BestOpportunity, type GeneratedMessage, type Run,
 } from "./api";
 
-type View =
-  | "dashboard" | "jobs" | "companies" | "matches" | "messages" | "followups"
-  | "search" | "runs" | "insights" | "reports" | "profile" | "prefs";
-
-const NAV: { label: string; items: [View, string, string][] }[] = [
-  { label: "", items: [["dashboard", "Dashboard", "dashboard"]] },
-  { label: "Oportunidades", items: [
-    ["jobs", "Vagas", "briefcase"], ["companies", "Empresas", "building"],
-    ["matches", "Matches", "target"], ["messages", "Mensagens", "chat"],
-    ["followups", "Follow-ups", "bell"],
-  ]},
-  { label: "Busca", items: [["search", "Busca ativa", "search"], ["runs", "Execuções", "bolt"]] },
-  { label: "Análises", items: [["insights", "Insights", "chart"], ["reports", "Relatórios", "doc"]] },
-  { label: "Configurações", items: [["profile", "Perfil", "user"], ["prefs", "Preferências", "gear"]] },
-];
-
 export function App() {
-  const [view, setView] = useState<View>("dashboard");
   const [reload, setReload] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const profile = useAsync(api.profile, []);
@@ -31,7 +13,7 @@ export function App() {
   const notify = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3500); };
   const refresh = () => setReload((r) => r + 1);
 
-  // Keep the view fresh while the system discovers in the background.
+  // Keep the screen fresh while the system discovers in the background ("ao vivo").
   useEffect(() => {
     const id = setInterval(() => setReload((r) => r + 1), 20000);
     return () => clearInterval(id);
@@ -39,22 +21,11 @@ export function App() {
 
   return (
     <div className="layout">
-      <Sidebar view={view} onNav={setView} name={profile.data?.fullName} headline={profile.data?.headline} />
+      <StatusRail reload={reload} name={profile.data?.fullName} headline={profile.data?.headline} />
       <main className="main">
         <div className="main-inner">
-        <Topbar firstName={firstName} />
-        {view === "dashboard" && <Dashboard reload={reload} onNav={setView} notify={notify} onChanged={refresh} />}
-        {view === "jobs" && <JobsPage reload={reload} />}
-        {view === "companies" && <CompaniesPage reload={reload} />}
-        {view === "matches" && <MatchesPage reload={reload} notify={notify} onChanged={refresh} />}
-        {view === "messages" && <MessagesPage reload={reload} />}
-        {view === "followups" && <FollowUpsPage reload={reload} />}
-        {view === "search" && <SearchPage notify={notify} onChanged={refresh} />}
-        {view === "runs" && <RunsPage reload={reload} />}
-        {view === "insights" && <Placeholder title="Insights" />}
-        {view === "reports" && <Placeholder title="Relatórios" />}
-        {view === "profile" && <ProfilePage />}
-        {view === "prefs" && <Placeholder title="Preferências" />}
+          <Topbar firstName={firstName} />
+          <Feed reload={reload} notify={notify} onChanged={refresh} />
         </div>
       </main>
       {toast && <div className="toast">{toast}</div>}
@@ -62,24 +33,31 @@ export function App() {
   );
 }
 
-/* ---------- layout ---------- */
+/* ---------- left status rail (system "ao vivo") ---------- */
 
-function Sidebar({ view, onNav, name, headline }: {
-  view: View; onNav: (v: View) => void; name?: string; headline?: string;
-}) {
+function StatusRail({ reload, name, headline }: { reload: number; name?: string; headline?: string }) {
+  const runs = useAsync(() => api.runs(6), [reload]);
+  const last = runs.data?.[0];
   return (
     <aside className="sidebar">
       <div className="brand"><span className="mark">◎</span> Opportunity OS</div>
-      {NAV.map((group, i) => (
-        <div key={i}>
-          {group.label && <div className="nav-label">{group.label}</div>}
-          {group.items.map(([id, label, icon]) => (
-            <button key={id} className={"nav-item" + (view === id ? " active" : "")} onClick={() => onNav(id)}>
-              <Icon name={icon} /> {label}
-            </button>
-          ))}
+
+      <div className="live">
+        <span className="pulse" />
+        <div>
+          <div className="live-t">Descoberta contínua</div>
+          <div className="live-s">
+            {last ? `Última atividade ${ago(last.startedAtUtc)}` : "Aguardando primeira execução…"}
+          </div>
         </div>
-      ))}
+      </div>
+
+      <div className="nav-label">Atividade do sistema</div>
+      <div className="rail-runs">
+        {(runs.data ?? []).map((r) => <RunRow key={r.id} r={r} />)}
+        {runs.data?.length === 0 && <p className="placeholder small">Nenhuma execução ainda.</p>}
+      </div>
+
       <div className="usercard">
         <span className="avatar">{initials(name ?? "NS")}</span>
         <div><div className="nm">{name ?? "—"}</div><div className="rl">{headline ?? ""}</div></div>
@@ -93,106 +71,71 @@ function Topbar({ firstName }: { firstName: string }) {
     <div className="topbar">
       <div className="greeting">
         <h2>{greeting()}, {firstName}! 👋</h2>
-        <p>Aqui está o resumo das suas oportunidades.</p>
+        <p>Suas oportunidades .NET mais relevantes e recentes, atualizadas ao vivo.</p>
       </div>
       <div className="topbar-right">
-        <span className="bell"><Icon name="bell" /></span>
         <span className="avatar">{initials(firstName)}</span>
       </div>
     </div>
   );
 }
 
-/* ---------- dashboard ---------- */
+/* ---------- the one living screen ---------- */
 
-function Dashboard({ reload, onNav, notify, onChanged }: {
-  reload: number; onNav: (v: View) => void; notify: (m: string) => void; onChanged: () => void;
+function Feed({ reload, notify, onChanged }: {
+  reload: number; notify: (m: string) => void; onChanged: () => void;
 }) {
   const summary = useAsync(api.summary, [reload]);
-  const opps = useAsync(() => api.bestOpportunities(5), [reload]);
-  const runs = useAsync(() => api.runs(4), [reload]);
-  const followUps = useAsync(api.opportunities, [reload]);
-
+  const opps = useAsync(() => api.bestOpportunities(40), [reload]);
+  const [busy, setBusy] = useState(false);
   const s = summary.data;
-  const upcoming = (followUps.data ?? [])
-    .filter((o) => o.nextFollowUpAtUtc)
-    .sort((a, b) => +new Date(a.nextFollowUpAtUtc!) - +new Date(b.nextFollowUpAtUtc!))
-    .slice(0, 3);
 
-  const genOutreach = async (jobId: string) => {
-    notify("Gerando mensagem…");
-    try { await api.generateOutreach(jobId); notify("Mensagem gerada (rascunho)."); onChanged(); }
-    catch { notify("Não foi possível gerar (score < 60?)."); }
-  };
-  const sendDigest = async () => {
-    notify("Enviando digest…");
-    try { const r = await api.sendDigest(); notify(r.sent ? `Digest enviado (${r.itemCount}).` : r.reason); onChanged(); }
-    catch { notify("Falha ao enviar digest."); }
-  };
-  const backfillLogos = async () => {
-    notify("Descobrindo sites das empresas…");
-    try { const r = await api.backfillWebsites(); notify(`Sites encontrados: ${r.found}/${r.processed}.`); onChanged(); }
-    catch { notify("Falha ao descobrir sites."); }
+  const runSearch = async () => {
+    setBusy(true); notify("Buscando vagas .NET…");
+    try {
+      await api.search([".net", "c#", "desenvolvedor .net", "backend .net", "pagamentos"]);
+      notify("Busca disparada. Os resultados aparecem aqui em instantes.");
+      onChanged();
+    } catch { notify("Falha na busca."); }
+    finally { setBusy(false); }
   };
 
   return (
     <>
       <div className="statgrid">
-        <Stat icon="briefcase" label="Vagas descobertas" n={s?.jobsDiscovered} delta={s ? `+${s.jobsToday} hoje` : ""} />
-        <Stat icon="target" label="Matches acima de 75" n={s?.matchesAbove75} delta={s ? `+${s.matchesAbove75Today} hoje` : ""} />
-        <Stat icon="chat" label="Mensagens geradas" n={s?.messagesGenerated} delta={s ? `+${s.messagesToday} hoje` : ""} />
-        <Stat icon="mail" label="E-mails enviados" n={s?.emailsSent} delta={s ? `+${s.emailsToday} hoje` : ""} />
+        <Stat icon="target" label="Oportunidades relevantes" n={opps.data?.length}
+          delta={s ? `${s.matchesAbove75} fortes (75+)` : ""} />
+        <Stat icon="briefcase" label="Vagas descobertas" n={s?.jobsDiscovered}
+          delta={s ? `+${s.jobsToday} hoje` : ""} />
+        <Stat icon="chat" label="Mensagens geradas" n={s?.messagesGenerated}
+          delta={s ? `+${s.messagesToday} hoje` : ""} />
         <Stat icon="calendar" label="Follow-ups pendentes" n={s?.followUpsPending}
           delta={s?.nextFollowUpInDays != null ? `Próximo: ${s.nextFollowUpInDays} dia(s)` : "—"} mutedDelta />
       </div>
 
-      <div className="cols">
-        <div>
-          <div className="panel">
-            <div className="panel-head">
-              <h3>Melhores oportunidades</h3>
-              <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <button className="btn" onClick={backfillLogos}>Atualizar logos</button>
-                <button className="btn" onClick={sendDigest}>Enviar digest</button>
-                <a onClick={() => onNav("matches")} style={{ cursor: "pointer" }}>Ver todas</a>
-              </span>
-            </div>
-            {opps.error && <p className="err">{opps.error}</p>}
-            {(opps.data ?? []).map((o) => <OppRow key={o.matchId} o={o} onGenerate={genOutreach} />)}
-            {opps.data?.length === 0 && <p className="placeholder">Sem matches ainda. Rode uma busca + análise.</p>}
-          </div>
-        </div>
-
-        <div>
-          <div className="panel">
-            <div className="panel-head"><h3>Busca ativa</h3></div>
-            <p className="sub" style={{ marginTop: -4 }}>Execute uma busca agora mesmo.</p>
-            <Action icon="building" t="Buscar por empresa" s="Ex.: Dock, Stone, Nubank" onClick={() => onNav("companies")} />
-            <Action icon="tag" t="Buscar por setor" s="Ex.: Fintechs, Bancos" onClick={() => onNav("companies")} />
-            <Action icon="search" t="Buscar por palavras-chave" s="Ex.: .NET, C#, AWS, Kafka"
-              onClick={async () => { notify("Buscando vagas .NET no Gupy…"); try { await api.search([".net", "c#", "backend", "pagamentos"]); notify("Busca concluída."); onChanged(); } catch { notify("Falha na busca."); } }} />
-            <Action icon="link" t="Analisar URL de vaga" s="Cole o link da vaga" onClick={() => notify("Em breve.")} />
-            <Action icon="user" t="Analisar recrutador/empresa" s="A partir de um recrutador" onClick={() => notify("Em breve.")} />
-          </div>
-
-          <div className="panel">
-            <div className="panel-head"><h3>Execuções recentes</h3><a onClick={() => onNav("runs")} style={{ cursor: "pointer" }}>Ver todas</a></div>
-            {(runs.data ?? []).map((r) => <RunRow key={r.id} r={r} />)}
-            {runs.data?.length === 0 && <p className="placeholder">Nenhuma execução.</p>}
-          </div>
-        </div>
-      </div>
-
       <div className="panel">
-        <div className="panel-head"><h3>Próximos follow-ups</h3><a onClick={() => onNav("followups")} style={{ cursor: "pointer" }}>Ver todas</a></div>
-        {upcoming.map((o) => (
-          <div className="fu" key={o.id}>
-            <Icon name="calendar" />
-            <div style={{ flex: 1 }}>Oportunidade <code>{o.id.slice(0, 8)}</code> — <span className="pill">{o.status}</span></div>
-            <div className="when">{daysUntil(o.nextFollowUpAtUtc!)}</div>
+        <div className="panel-head">
+          <div>
+            <h3>Melhores oportunidades</h3>
+            <p className="sub" style={{ margin: "2px 0 0" }}>
+              Ordenadas por relevância para o seu perfil .NET. Clique em “Gerar mensagem” para um rascunho pronto pra copiar.
+            </p>
           </div>
+          <button className="btn primary" disabled={busy} onClick={runSearch}>
+            <Icon name="search" /> {busy ? "Buscando…" : "Buscar agora"}
+          </button>
+        </div>
+
+        {opps.error && <p className="err">{opps.error}</p>}
+        {(opps.data ?? []).map((o) => (
+          <OppCard key={o.matchId} o={o} notify={notify} onChanged={onChanged} />
         ))}
-        {upcoming.length === 0 && <p className="placeholder">Sem follow-ups agendados.</p>}
+        {opps.data?.length === 0 && (
+          <p className="placeholder">
+            Nenhuma oportunidade relevante ainda. Clique em <strong>Buscar agora</strong> — a descoberta contínua
+            também roda sozinha em segundo plano.
+          </p>
+        )}
       </div>
     </>
   );
@@ -222,34 +165,87 @@ function Logo({ name, website }: { name: string; website?: string | null }) {
   return <span className="logo" style={{ background: logoColor(name) }}>{initials(name)}</span>;
 }
 
-function OppRow({ o, onGenerate }: { o: BestOpportunity; onGenerate?: (jobId: string) => void }) {
+/* one opportunity, with inline expandable generated message */
+function OppCard({ o, notify, onChanged }: {
+  o: BestOpportunity; notify: (m: string) => void; onChanged: () => void;
+}) {
+  const [msg, setMsg] = useState<GeneratedMessage | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  const generate = async () => {
+    if (msg) { setOpen((v) => !v); return; }
+    setBusy(true); notify("Gerando mensagem…");
+    try {
+      const m = await api.generateOutreach(o.jobPostingId);
+      setMsg(m); setOpen(true); notify("Mensagem gerada — revise e copie.");
+      onChanged();
+    } catch { notify("Não foi possível gerar (score abaixo do mínimo?)."); }
+    finally { setBusy(false); }
+  };
+
   return (
-    <div className="opp">
-      <div className="who">
-        <Logo name={o.companyName} website={o.companyWebsiteUrl} />
-        <div>
-          <div className="title" title={o.rationale}>{o.jobTitle}</div>
-          <div className="chips">{o.skills.map((sk) => <span className="chip" key={sk}>{sk}</span>)}</div>
+    <div className="oppcard">
+      <div className="opp">
+        <div className="who">
+          <Logo name={o.companyName} website={o.companyWebsiteUrl} />
+          <div>
+            <div className="title">{o.jobTitle}</div>
+            <div className="chips">{o.skills.slice(0, 6).map((sk) => <span className="chip" key={sk}>{sk}</span>)}</div>
+            {o.rationale && <div className="why"><strong>Por que combina:</strong> {o.rationale}</div>}
+          </div>
+        </div>
+        <div className="company">
+          {o.companyName}
+          <div className={"posted" + (isStale(o.postedAtUtc) ? " stale" : "")}>{ago(o.postedAtUtc)}</div>
+        </div>
+        <div className="ring" style={{ borderColor: ringColor(o.overallScore) }}>{o.overallScore}</div>
+        <div className={"rec " + recClass(o.recommendation)}>{recLabel(o.recommendation)}</div>
+        <div className="opp-actions">
+          <a className="btn" href={o.jobUrl} target="_blank" rel="noreferrer">Ver vaga</a>
+          <button className="btn primary" disabled={busy} onClick={generate}>
+            {busy ? "Gerando…" : msg ? (open ? "Ocultar mensagem" : "Ver mensagem") : "Gerar mensagem"}
+          </button>
         </div>
       </div>
-      <div className="company">{o.companyName}<div className={"posted" + (isStale(o.postedAtUtc) ? " stale" : "")}>{ago(o.postedAtUtc)}</div></div>
-      <div className="ring" style={{ borderColor: ringColor(o.overallScore) }}>{o.overallScore}</div>
-      <div className={"rec " + recClass(o.recommendation)}>{recLabel(o.recommendation)}</div>
-      <div className="opp-actions">
-        <a className="btn" href={o.jobUrl} target="_blank" rel="noreferrer">Ver detalhes</a>
-        {onGenerate && <button className="btn primary" onClick={() => onGenerate(o.jobPostingId)}>Gerar msg</button>}
-      </div>
+
+      {msg && open && <MessagePanel msg={msg} notify={notify} />}
     </div>
   );
 }
 
-function Action({ icon, t, s, onClick }: { icon: string; t: string; s: string; onClick: () => void }) {
+function MessagePanel({ msg, notify }: { msg: GeneratedMessage; notify: (m: string) => void }) {
   return (
-    <button className="action" onClick={onClick}>
-      <span className="ic"><Icon name={icon} /></span>
-      <span><span className="t">{t}</span><br /><span className="s">{s}</span></span>
-      <span className="arrow">›</span>
-    </button>
+    <div className="msgpanel">
+      <p className="msg-note"><Icon name="user" /> Rascunho para revisão humana — nada é enviado automaticamente.</p>
+      <CopyBlock label="Mensagem (LinkedIn / direta)" text={msg.linkedInMessage} notify={notify} />
+      <CopyBlock label="Assunto do e-mail" text={msg.emailSubject} notify={notify} single />
+      <CopyBlock label="Corpo do e-mail" text={msg.emailBody} notify={notify} />
+      {msg.followUpMessage && <CopyBlock label="Follow-up (depois)" text={msg.followUpMessage} notify={notify} />}
+      {msg.humanReviewNotes && (
+        <div className="review"><strong>Observações para revisão:</strong> {msg.humanReviewNotes}</div>
+      )}
+    </div>
+  );
+}
+
+function CopyBlock({ label, text, notify, single }: {
+  label: string; text: string; notify: (m: string) => void; single?: boolean;
+}) {
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(text); notify(`Copiado: ${label}`); }
+    catch { notify("Não foi possível copiar."); }
+  };
+  return (
+    <div className="copyblock">
+      <div className="copyblock-head">
+        <span className="cb-label">{label}</span>
+        <button className="btn copy" onClick={copy}>Copiar</button>
+      </div>
+      {single
+        ? <div className="cb-single">{text}</div>
+        : <pre className="cb-text">{text}</pre>}
+    </div>
   );
 }
 
@@ -259,129 +255,9 @@ function RunRow({ r }: { r: Run }) {
     <div className="run">
       <span className={"dot " + cls} />
       <div><div className="t">{runLabel(r.runType)}</div><div className="s">{new Date(r.startedAtUtc).toLocaleString()}</div></div>
-      <div className="meta">{r.itemsProcessed} itens · {r.itemsSucceeded} ok</div>
+      <div className="meta">{r.itemsProcessed}·{r.itemsSucceeded}ok</div>
     </div>
   );
-}
-
-/* ---------- sub pages ---------- */
-
-function JobsPage({ reload }: { reload: number }) {
-  const { data, error } = useAsync(api.jobs, [reload]);
-  if (error) return <p className="err">{error}</p>;
-  return (
-    <div className="panel"><div className="panel-head"><h3>Vagas</h3></div>
-      <table><thead><tr><th>Título</th><th>Fonte</th><th>Local</th><th>Status</th><th>Link</th></tr></thead>
-        <tbody>{(data ?? []).slice(0, 300).map((j: Job) => (
-          <tr key={j.id}><td>{j.title}</td><td>{j.sourceProvider}</td><td>{j.location ?? "—"}</td><td>{j.status}</td>
-            <td><a href={j.absoluteUrl} target="_blank" rel="noreferrer">vaga</a></td></tr>
-        ))}</tbody></table>
-    </div>
-  );
-}
-
-function CompaniesPage({ reload }: { reload: number }) {
-  const { data, error } = useAsync(api.companies, [reload]);
-  if (error) return <p className="err">{error}</p>;
-  return (
-    <div className="panel"><div className="panel-head"><h3>Empresas ({data?.length ?? 0})</h3></div>
-      <table><thead><tr><th>Nome</th><th>Prioridade</th><th>Fonte</th><th>Tags</th><th>Board</th></tr></thead>
-        <tbody>{(data ?? []).slice(0, 400).map((c: Company) => (
-          <tr key={c.id}><td>{c.name}</td><td><span className="pill">{c.priority}</span></td><td>{c.source}</td>
-            <td>{c.tags.slice(0, 4).join(", ")}</td>
-            <td>{c.careersUrl ? <a href={c.careersUrl} target="_blank" rel="noreferrer">board</a> : "—"}</td></tr>
-        ))}</tbody></table>
-    </div>
-  );
-}
-
-function MatchesPage({ reload, notify, onChanged }: { reload: number; notify: (m: string) => void; onChanged: () => void }) {
-  const { data, error } = useAsync(() => api.bestOpportunities(50), [reload]);
-  const genOutreach = async (jobId: string) => {
-    notify("Gerando mensagem…");
-    try { await api.generateOutreach(jobId); notify("Mensagem gerada (rascunho)."); onChanged(); }
-    catch { notify("Não foi possível gerar (score < 60?)."); }
-  };
-  if (error) return <p className="err">{error}</p>;
-  return (
-    <div className="panel"><div className="panel-head"><h3>Matches</h3></div>
-      {(data ?? []).map((o) => <OppRow key={o.matchId} o={o} onGenerate={genOutreach} />)}
-      {data?.length === 0 && <p className="placeholder">Sem matches ainda.</p>}
-    </div>
-  );
-}
-
-function MessagesPage({ reload }: { reload: number }) {
-  const { data, error } = useAsync(api.messages, [reload]);
-  if (error) return <p className="err">{error}</p>;
-  return (
-    <div className="panel"><div className="panel-head"><h3>Mensagens geradas</h3></div>
-      <table><thead><tr><th>Assunto</th><th>Status</th><th>Criada</th></tr></thead>
-        <tbody>{(data ?? []).map((m: Message) => (
-          <tr key={m.id}><td>{m.emailSubject}</td><td><span className="pill">{m.status}</span></td>
-            <td>{new Date(m.createdAtUtc).toLocaleString()}</td></tr>
-        ))}</tbody></table>
-      {data?.length === 0 && <p className="placeholder">Nenhuma mensagem gerada.</p>}
-    </div>
-  );
-}
-
-function FollowUpsPage({ reload }: { reload: number }) {
-  const { data, error } = useAsync(api.opportunities, [reload]);
-  if (error) return <p className="err">{error}</p>;
-  const withFu = (data ?? []).filter((o: Opportunity) => o.nextFollowUpAtUtc);
-  return (
-    <div className="panel"><div className="panel-head"><h3>Follow-ups</h3></div>
-      {withFu.map((o) => (
-        <div className="fu" key={o.id}><Icon name="calendar" />
-          <div style={{ flex: 1 }}>Oportunidade <code>{o.id.slice(0, 8)}</code> — <span className="pill">{o.status}</span></div>
-          <div className="when">{daysUntil(o.nextFollowUpAtUtc!)}</div></div>
-      ))}
-      {withFu.length === 0 && <p className="placeholder">Sem follow-ups agendados.</p>}
-    </div>
-  );
-}
-
-function SearchPage({ notify, onChanged }: { notify: (m: string) => void; onChanged: () => void }) {
-  const [kw, setKw] = useState(".net, c#, backend, pagamentos");
-  const [busy, setBusy] = useState(false);
-  const run = async () => {
-    setBusy(true); notify("Buscando…");
-    try { await api.search(kw.split(",").map((k) => k.trim()).filter(Boolean)); notify("Busca concluída."); onChanged(); }
-    catch { notify("Falha na busca."); } finally { setBusy(false); }
-  };
-  return (
-    <div className="panel"><div className="panel-head"><h3>Busca ativa</h3></div>
-      <p className="sub">Busca por palavras-chave (Gupy). Separe por vírgula.</p>
-      <input value={kw} onChange={(e) => setKw(e.target.value)}
-        style={{ width: "100%", padding: 10, border: "1px solid var(--border)", borderRadius: 8, margin: "10px 0" }} />
-      <button className="btn primary" disabled={busy} onClick={run}>{busy ? "Buscando…" : "Buscar vagas"}</button>
-    </div>
-  );
-}
-
-function RunsPage({ reload }: { reload: number }) {
-  const { data, error } = useAsync(() => api.runs(50), [reload]);
-  if (error) return <p className="err">{error}</p>;
-  return (
-    <div className="panel"><div className="panel-head"><h3>Execuções</h3></div>
-      {(data ?? []).map((r) => <RunRow key={r.id} r={r} />)}
-      {data?.length === 0 && <p className="placeholder">Nenhuma execução.</p>}
-    </div>
-  );
-}
-
-function ProfilePage() {
-  const { data, error } = useAsync(api.profile, []);
-  if (error) return <p className="err">{error}</p>;
-  return (
-    <div className="panel"><div className="panel-head"><h3>Perfil</h3></div>
-      <p><strong>{data?.fullName}</strong></p><p className="sub">{data?.headline}</p></div>
-  );
-}
-
-function Placeholder({ title }: { title: string }) {
-  return <div className="panel"><div className="panel-head"><h3>{title}</h3></div><p className="placeholder">Em breve.</p></div>;
 }
 
 /* ---------- helpers ---------- */
@@ -433,15 +309,13 @@ function runLabel(t: string) {
 }
 function ago(iso: string) {
   const days = Math.floor((Date.now() - +new Date(iso)) / 86400000);
-  if (days <= 0) return "publicada hoje";
+  if (days <= 0) {
+    const h = Math.floor((Date.now() - +new Date(iso)) / 3600000);
+    if (h <= 0) { const m = Math.floor((Date.now() - +new Date(iso)) / 60000); return m <= 1 ? "agora há pouco" : `há ${m} min`; }
+    return `há ${h} h`;
+  }
   if (days < 30) return `há ${days} dia(s)`;
   if (days < 365) return `há ${Math.floor(days / 30)} mes(es)`;
   return `há ${Math.floor(days / 365)} ano(s)`;
 }
 function isStale(iso: string) { return (Date.now() - +new Date(iso)) / 86400000 > 60; }
-function daysUntil(iso: string) {
-  const d = Math.round((+new Date(iso) - Date.now()) / 86400000);
-  if (d < 0) return `${-d} dia(s) atrás`;
-  if (d === 0) return "hoje";
-  return `${d} dia(s)`;
-}
