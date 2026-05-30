@@ -222,11 +222,11 @@ function OppRow({ o, onGenerate }: { o: BestOpportunity; onGenerate?: (jobId: st
       <div className="who">
         <Logo name={o.companyName} website={o.companyWebsiteUrl} />
         <div>
-          <div className="title">{o.jobTitle}</div>
+          <div className="title" title={o.rationale}>{o.jobTitle}</div>
           <div className="chips">{o.skills.map((sk) => <span className="chip" key={sk}>{sk}</span>)}</div>
         </div>
       </div>
-      <div className="company">{o.companyName}</div>
+      <div className="company">{o.companyName}<div className={"posted" + (isStale(o.postedAtUtc) ? " stale" : "")}>{ago(o.postedAtUtc)}</div></div>
       <div className="ring" style={{ borderColor: ringColor(o.overallScore) }}>{o.overallScore}</div>
       <div className={"rec " + recClass(o.recommendation)}>{recLabel(o.recommendation)}</div>
       <div className="opp-actions">
@@ -425,6 +425,14 @@ function runLabel(t: string) {
   };
   return map[t] ?? t;
 }
+function ago(iso: string) {
+  const days = Math.floor((Date.now() - +new Date(iso)) / 86400000);
+  if (days <= 0) return "publicada hoje";
+  if (days < 30) return `há ${days} dia(s)`;
+  if (days < 365) return `há ${Math.floor(days / 30)} mes(es)`;
+  return `há ${Math.floor(days / 365)} ano(s)`;
+}
+function isStale(iso: string) { return (Date.now() - +new Date(iso)) / 86400000 > 60; }
 function daysUntil(iso: string) {
   const d = Math.round((+new Date(iso) - Date.now()) / 86400000);
   if (d < 0) return `${-d} dia(s) atrás`;
