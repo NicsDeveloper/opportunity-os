@@ -30,6 +30,14 @@ public sealed class RecurringJobScheduler : IHostedService
             discoveryCron);
         _logger.LogInformation("Scheduled recurring job 'discover-jobs' with cron {Cron}", discoveryCron);
 
+        // Continuous discovery: keep finding jobs while the system runs (rate-friendly cadence).
+        var continuousCron = _config.GetValue<string>("Jobs:ContinuousDiscoveryCron") ?? "*/15 * * * *";
+        _recurring.AddOrUpdate<DiscoverJobsJob>(
+            "continuous-discovery",
+            job => job.RunAsync(CancellationToken.None),
+            continuousCron);
+        _logger.LogInformation("Scheduled recurring job 'continuous-discovery' with cron {Cron}", continuousCron);
+
         var digestCron = _config.GetValue<string>("Jobs:DailyDigestCron") ?? "0 9 * * *";
         _recurring.AddOrUpdate<SendDailyDigestJob>(
             "send-daily-digest",

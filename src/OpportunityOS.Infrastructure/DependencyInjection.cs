@@ -59,6 +59,9 @@ public static class DependencyInjection
         if (config.GetValue("FeatureFlags:EnableAshbyProvider", true))
             services.AddHttpClient<IJobSourceProvider, AshbyJobSourceProvider>(ConfigureClient);
 
+        if (config.GetValue("FeatureFlags:EnableGenericCrawler", true))
+            services.AddHttpClient<IJobSourceProvider, GenericCareersCrawler>(ConfigureClient);
+
         if (config.GetValue("FeatureFlags:EnableGupyProvider", true))
             services.AddHttpClient<IJobSearchProvider, GupyJobSearchProvider>(ConfigureClient);
 
