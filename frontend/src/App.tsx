@@ -35,6 +35,7 @@ export function App() {
     <div className="layout">
       <Sidebar view={view} onNav={setView} name={profile.data?.fullName} headline={profile.data?.headline} />
       <main className="main">
+        <div className="main-inner">
         <Topbar firstName={firstName} />
         {view === "dashboard" && <Dashboard reload={reload} onNav={setView} notify={notify} onChanged={refresh} />}
         {view === "jobs" && <JobsPage reload={reload} />}
@@ -48,6 +49,7 @@ export function App() {
         {view === "reports" && <Placeholder title="Relatórios" />}
         {view === "profile" && <ProfilePage />}
         {view === "prefs" && <Placeholder title="Preferências" />}
+        </div>
       </main>
       {toast && <div className="toast">{toast}</div>}
     </div>
