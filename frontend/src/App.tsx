@@ -39,7 +39,7 @@ export function App() {
         {view === "dashboard" && <Dashboard reload={reload} onNav={setView} notify={notify} onChanged={refresh} />}
         {view === "jobs" && <JobsPage reload={reload} />}
         {view === "companies" && <CompaniesPage reload={reload} />}
-        {view === "matches" && <MatchesPage reload={reload} />}
+        {view === "matches" && <MatchesPage reload={reload} notify={notify} onChanged={refresh} />}
         {view === "messages" && <MessagesPage reload={reload} />}
         {view === "followups" && <FollowUpsPage reload={reload} />}
         {view === "search" && <SearchPage notify={notify} onChanged={refresh} />}
@@ -111,6 +111,17 @@ function Dashboard({ reload, onNav, notify, onChanged }: {
     .sort((a, b) => +new Date(a.nextFollowUpAtUtc!) - +new Date(b.nextFollowUpAtUtc!))
     .slice(0, 3);
 
+  const genOutreach = async (jobId: string) => {
+    notify("Gerando mensagem…");
+    try { await api.generateOutreach(jobId); notify("Mensagem gerada (rascunho)."); onChanged(); }
+    catch { notify("Não foi possível gerar (score < 60?)."); }
+  };
+  const sendDigest = async () => {
+    notify("Enviando digest…");
+    try { const r = await api.sendDigest(); notify(r.sent ? `Digest enviado (${r.itemCount}).` : r.reason); onChanged(); }
+    catch { notify("Falha ao enviar digest."); }
+  };
+
   return (
     <>
       <div className="statgrid">
@@ -127,10 +138,13 @@ function Dashboard({ reload, onNav, notify, onChanged }: {
           <div className="panel">
             <div className="panel-head">
               <h3>Melhores oportunidades</h3>
-              <a onClick={() => onNav("matches")} style={{ cursor: "pointer" }}>Ver todas</a>
+              <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <button className="btn" onClick={sendDigest}>Enviar digest</button>
+                <a onClick={() => onNav("matches")} style={{ cursor: "pointer" }}>Ver todas</a>
+              </span>
             </div>
             {opps.error && <p className="err">{opps.error}</p>}
-            {(opps.data ?? []).map((o) => <OppRow key={o.matchId} o={o} />)}
+            {(opps.data ?? []).map((o) => <OppRow key={o.matchId} o={o} onGenerate={genOutreach} />)}
             {opps.data?.length === 0 && <p className="placeholder">Sem matches ainda. Rode uma busca + análise.</p>}
           </div>
         </div>
@@ -183,11 +197,20 @@ function Stat({ icon, label, n, delta, mutedDelta }: {
   );
 }
 
-function OppRow({ o }: { o: BestOpportunity }) {
+function Logo({ name, website }: { name: string; website?: string | null }) {
+  const [err, setErr] = useState(false);
+  const host = hostOf(website);
+  if (host && !err)
+    return <img className="logo img" alt={name} onError={() => setErr(true)}
+      src={`https://www.google.com/s2/favicons?sz=64&domain=${host}`} />;
+  return <span className="logo" style={{ background: logoColor(name) }}>{initials(name)}</span>;
+}
+
+function OppRow({ o, onGenerate }: { o: BestOpportunity; onGenerate?: (jobId: string) => void }) {
   return (
     <div className="opp">
       <div className="who">
-        <span className="logo" style={{ background: logoColor(o.companyName) }}>{initials(o.companyName)}</span>
+        <Logo name={o.companyName} website={o.companyWebsiteUrl} />
         <div>
           <div className="title">{o.jobTitle}</div>
           <div className="chips">{o.skills.map((sk) => <span className="chip" key={sk}>{sk}</span>)}</div>
@@ -196,7 +219,10 @@ function OppRow({ o }: { o: BestOpportunity }) {
       <div className="company">{o.companyName}</div>
       <div className="ring" style={{ borderColor: ringColor(o.overallScore) }}>{o.overallScore}</div>
       <div className={"rec " + recClass(o.recommendation)}>{recLabel(o.recommendation)}</div>
-      <a className="btn" href={o.jobUrl} target="_blank" rel="noreferrer">Ver detalhes</a>
+      <div className="opp-actions">
+        <a className="btn" href={o.jobUrl} target="_blank" rel="noreferrer">Ver detalhes</a>
+        {onGenerate && <button className="btn primary" onClick={() => onGenerate(o.jobPostingId)}>Gerar msg</button>}
+      </div>
     </div>
   );
 }
@@ -253,12 +279,17 @@ function CompaniesPage({ reload }: { reload: number }) {
   );
 }
 
-function MatchesPage({ reload }: { reload: number }) {
+function MatchesPage({ reload, notify, onChanged }: { reload: number; notify: (m: string) => void; onChanged: () => void }) {
   const { data, error } = useAsync(() => api.bestOpportunities(50), [reload]);
+  const genOutreach = async (jobId: string) => {
+    notify("Gerando mensagem…");
+    try { await api.generateOutreach(jobId); notify("Mensagem gerada (rascunho)."); onChanged(); }
+    catch { notify("Não foi possível gerar (score < 60?)."); }
+  };
   if (error) return <p className="err">{error}</p>;
   return (
     <div className="panel"><div className="panel-head"><h3>Matches</h3></div>
-      {(data ?? []).map((o) => <OppRow key={o.matchId} o={o} />)}
+      {(data ?? []).map((o) => <OppRow key={o.matchId} o={o} onGenerate={genOutreach} />)}
       {data?.length === 0 && <p className="placeholder">Sem matches ainda.</p>}
     </div>
   );
@@ -351,6 +382,10 @@ function useAsync<T>(fn: () => Promise<T>, deps: unknown[]) {
   return { data, error };
 }
 
+function hostOf(url?: string | null) {
+  if (!url) return null;
+  try { return new URL(url).host; } catch { return null; }
+}
 function greeting() { const h = new Date().getHours(); return h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite"; }
 function initials(name: string) {
   const p = name.trim().split(/\s+/);
