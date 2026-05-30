@@ -54,6 +54,16 @@ public sealed class AtsDetectorTests
     }
 
     [Fact]
+    public void Detect_SmartRecruiters_CapturesIdentifier_AndIsSupported()
+    {
+        var r = AtsDetector.Detect("<a href=\"https://jobs.smartrecruiters.com/Acme/12345\">Jobs</a>");
+        Assert.Equal("SmartRecruiters", r!.Ats);
+        Assert.Equal("Acme", r.Token);
+        Assert.True(r.ProviderSupported);
+        Assert.Equal("https://jobs.smartrecruiters.com/Acme", r.BoardUrl);
+    }
+
+    [Fact]
     public void Detect_ReturnsNull_WhenNoAtsPresent()
     {
         Assert.Null(AtsDetector.Detect("<html><body>Sobre nós</body></html>"));

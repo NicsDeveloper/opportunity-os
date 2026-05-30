@@ -91,6 +91,56 @@ public sealed class ProviderTests
     }
 
     [Fact]
+    public async Task SmartRecruiters_ParsesListAndDetail()
+    {
+        const string list = """
+        { "offset":0,"limit":100,"totalFound":1,"content":[
+          { "id":"744000122509268","name":"Senior Backend Engineer (.NET)",
+            "company":{"identifier":"acme","name":"Acme"},
+            "releasedDate":"2026-04-23T16:54:54.835Z",
+            "location":{"city":"Austin","region":"TX","country":"us","remote":true,"fullLocation":"Austin, TX"},
+            "department":{"label":"Engineering"} } ] }
+        """;
+        const string detail = """
+        { "applyUrl":"https://jobs.smartrecruiters.com/acme/744000122509268",
+          "postingUrl":"https://jobs.smartrecruiters.com/acme/744000122509268-senior-backend",
+          "jobAd":{"sections":{
+            "jobDescription":{"title":"Job","text":"<p>Build payment APIs with .NET and C#</p>"},
+            "qualifications":{"title":"Q","text":"<p>Kafka, AWS</p>"} }} }
+        """;
+        // List path ends with /postings; detail path has /postings/{id}.
+        var handler = new FakeHttpMessageHandler(req =>
+            req.RequestUri!.AbsolutePath.Contains("/postings/")
+                ? new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(detail) }
+                : new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(list) });
+
+        var provider = new SmartRecruitersJobSourceProvider(new HttpClient(handler), NullLogger<SmartRecruitersJobSourceProvider>.Instance);
+        var company = new Company("Acme", null, "https://jobs.smartrecruiters.com/acme", null, null, "US",
+            CompanyPriority.High, CompanySource.Manual);
+
+        Assert.True(provider.CanHandle(company));
+        var jobs = await provider.DiscoverJobsAsync(company, CancellationToken.None);
+
+        var job = Assert.Single(jobs);
+        Assert.Equal("744000122509268", job.ExternalId);
+        Assert.Equal("Senior Backend Engineer (.NET)", job.Title);
+        Assert.Equal("SmartRecruiters", job.SourceProvider);
+        Assert.Contains("payment APIs with .NET", job.DescriptionText);
+        Assert.Contains("Kafka", job.DescriptionText);
+        Assert.Contains("smartrecruiters.com/acme/744000122509268", job.AbsoluteUrl);
+        Assert.NotNull(job.PublishedAtUtc);
+    }
+
+    [Fact]
+    public void SmartRecruiters_CannotHandle_NonSmartRecruitersUrl()
+    {
+        var provider = new SmartRecruitersJobSourceProvider(new HttpClient(FakeHttpMessageHandler.Json("{}")), NullLogger<SmartRecruitersJobSourceProvider>.Instance);
+        var company = new Company("X", null, "https://boards.greenhouse.io/x", null, null, "US",
+            CompanyPriority.Low, CompanySource.Manual);
+        Assert.False(provider.CanHandle(company));
+    }
+
+    [Fact]
     public async Task Gupy_ParsesPortalJobs_AndDedupesById()
     {
         const string json = """

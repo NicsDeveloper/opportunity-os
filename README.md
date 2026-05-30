@@ -267,9 +267,9 @@ Duas estratégias por trás de `IAtsBoardFinder`:
 
 O `AtsDetector` reconhece Greenhouse, Lever, Gupy, Workday, Ashby, SmartRecruiters,
 Workable, Recruitee, Teamtailor, Breezy, inhire, Abler, Solides, Pandapé, Kenoby, Quickin,
-JobConvo, Taqe, 99jobs, Recrutei, GeekHunter, Coodesh, Programathor — mas só
-**Greenhouse/Lever/Gupy** têm provider de **busca de vagas** hoje; os demais são
-detectados/linkados até existir um provider.
+JobConvo, Taqe, 99jobs, Recrutei, GeekHunter, Coodesh, Programathor — e
+**Greenhouse/Lever/Gupy/SmartRecruiters** têm provider de **busca de vagas** (fetch); os
+demais são detectados/linkados até existir um provider.
 
 **Validação real:** 919 instituições importadas; 279 promovidas a empresas; 640 filtradas.
 
