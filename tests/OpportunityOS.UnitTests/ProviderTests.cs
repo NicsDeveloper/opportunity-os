@@ -132,6 +132,34 @@ public sealed class ProviderTests
     }
 
     [Fact]
+    public async Task Ashby_ParsesListWithInlineDescription()
+    {
+        const string json = """
+        { "jobs": [
+          { "id":"d3bc1ced","title":"Senior Backend Engineer","department":"Engineering",
+            "employmentType":"FullTime","location":"Brazil","isListed":true,"isRemote":true,
+            "publishedAt":"2026-04-27T20:13:45.158+00:00",
+            "jobUrl":"https://jobs.ashbyhq.com/acme/d3bc1ced",
+            "descriptionHtml":"<p>Build payments with .NET and Kafka</p>" },
+          { "id":"hidden","title":"Unlisted","isListed":false }
+        ], "apiVersion":"1" }
+        """;
+        var provider = new AshbyJobSourceProvider(new HttpClient(FakeHttpMessageHandler.Json(json)), NullLogger<AshbyJobSourceProvider>.Instance);
+        var company = new Company("Acme", null, "https://jobs.ashbyhq.com/acme", null, null, "Brazil",
+            CompanyPriority.High, CompanySource.Manual);
+
+        Assert.True(provider.CanHandle(company));
+        var jobs = await provider.DiscoverJobsAsync(company, CancellationToken.None);
+
+        var job = Assert.Single(jobs); // unlisted skipped
+        Assert.Equal("d3bc1ced", job.ExternalId);
+        Assert.Equal("Ashby", job.SourceProvider);
+        Assert.Equal("Brazil (remote)", job.Location);
+        Assert.Contains("payments with .NET", job.DescriptionText);
+        Assert.NotNull(job.PublishedAtUtc);
+    }
+
+    [Fact]
     public void SmartRecruiters_CannotHandle_NonSmartRecruitersUrl()
     {
         var provider = new SmartRecruitersJobSourceProvider(new HttpClient(FakeHttpMessageHandler.Json("{}")), NullLogger<SmartRecruitersJobSourceProvider>.Instance);

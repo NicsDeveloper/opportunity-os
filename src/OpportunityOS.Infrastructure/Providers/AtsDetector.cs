@@ -36,7 +36,7 @@ public sealed class AtsDetector : IAtsDetector
             m => $"https://{m.Groups["t"].Value}.gupy.io", "t"),
         new("Workday", false,    Rx(@"(?<h>[A-Za-z0-9-]+\.(?:wd\d+\.)?myworkdayjobs\.com)"),
             m => $"https://{m.Groups["h"].Value}", "h"),
-        new("Ashby", false,      Rx(@"jobs\.ashbyhq\.com/(?<t>[A-Za-z0-9_-]+)"),
+        new("Ashby", true,       Rx(@"jobs\.ashbyhq\.com/(?<t>[A-Za-z0-9_-]+)"),
             m => $"https://jobs.ashbyhq.com/{m.Groups["t"].Value}", "t"),
         new("SmartRecruiters", true, Rx(@"(?:jobs|careers)\.smartrecruiters\.com/(?<t>[A-Za-z0-9._-]+)"),
             m => $"https://jobs.smartrecruiters.com/{m.Groups["t"].Value}", "t"),

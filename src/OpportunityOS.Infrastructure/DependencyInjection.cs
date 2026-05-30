@@ -56,6 +56,9 @@ public static class DependencyInjection
         if (config.GetValue("FeatureFlags:EnableSmartRecruitersProvider", true))
             services.AddHttpClient<IJobSourceProvider, SmartRecruitersJobSourceProvider>(ConfigureClient);
 
+        if (config.GetValue("FeatureFlags:EnableAshbyProvider", true))
+            services.AddHttpClient<IJobSourceProvider, AshbyJobSourceProvider>(ConfigureClient);
+
         if (config.GetValue("FeatureFlags:EnableGupyProvider", true))
             services.AddHttpClient<IJobSearchProvider, GupyJobSearchProvider>(ConfigureClient);
 
