@@ -174,6 +174,44 @@ A orquestração (`JobDiscoveryService`) é resiliente: falha de um provider/emp
 O Worker agenda `discover-jobs` diariamente; também é possível disparar manualmente via
 `POST /api/jobs/discover`.
 
+### Descoberta contínua + crawler de carreiras + busca web-aberta
+
+Além dos ATS providers, o sistema descobre vagas de forma **contínua** e **mais ampla**:
+
+- **Descoberta contínua** — o Worker roda `continuous-discovery` a cada 15 min
+  (`Jobs:ContinuousDiscoveryCron`, default `*/15 * * * *`) para manter o radar fresco
+  enquanto o sistema está de pé, e `search-jobs` a cada 3 h (`Jobs:SearchCron`) para
+  espalhar a cota do Google ao longo do dia.
+- **Crawler genérico de carreiras** (`GenericCareersCrawler`, flag
+  `FeatureFlags:EnableGenericCrawler`) — acessa o **site da empresa** direto, acha a página
+  de "Carreiras/Trabalhe Conosco" e extrai vagas por regex de cargo (mesmo domínio, exclui
+  hosts de ATS, `ExternalId` por hash da URL).
+- **Playwright (render de SPA)** — sites de fintech modernos são SPAs que só renderizam
+  vagas via JS. Quando o crawler não acha nada no HTML estático e o Chromium está instalado,
+  ele renderiza a página com Playwright (`IPageRenderer`/`PlaywrightPageRenderer`) e tenta de
+  novo. **Degrada graciosamente**: sem o browser, cai no fetch HTTP e loga a dica de
+  instalação. Instale uma vez:
+
+  ```bash
+  # após o build (Microsoft.Playwright vive no projeto Infrastructure; o script
+  # é copiado para o output de quem o referencia — Api/Worker):
+  pwsh src/OpportunityOS.Worker/bin/Debug/net10.0/playwright.ps1 install chromium
+  ```
+
+- **Busca web-aberta do Google** (`GoogleWebJobSearchProvider`, flag
+  `FeatureFlags:EnableGoogleWebSearch`) — usa o engine **whole-web** (grandfathered) com
+  `dateRestrict=m3` para achar vagas **.NET recentes** em qualquer site, não só nos ATS
+  conhecidos. Compartilha a cota diária com os demais chamadores do Google CSE via
+  `GoogleQuotaGuard` (`Search:DailyQueryBudget`, default 90 de 100/dia) — quando a cota
+  acaba, os providers simplesmente param de chamar o Google até o reset (UTC).
+
+  > **Requer `Search:ApiKey` _e_ `Search:SearchEngineId`** nos user-secrets. Com apenas o
+  > `SearchEngineId` configurado, a busca web-aberta fica **dormente** (cai no fallback
+  > heurístico). Configure a chave:
+  > ```bash
+  > dotnet user-secrets set "Search:ApiKey" "<sua-chave>" --project src/OpportunityOS.Api
+  > ```
+
 ## AI Copilot Layer (Fase 3)
 
 Camada explícita de IA que **interpreta, analisa e redige** — mantendo ações externas

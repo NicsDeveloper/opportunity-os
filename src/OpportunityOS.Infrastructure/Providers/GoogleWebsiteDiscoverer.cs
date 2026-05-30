@@ -24,22 +24,24 @@ public sealed class GoogleWebsiteDiscoverer : ICompanyWebsiteDiscoverer
 
     private readonly HttpClient _http;
     private readonly GoogleSearchOptions _options;
+    private readonly GoogleQuotaGuard _quota;
     private readonly CompanyWebsiteDiscoverer _fallback;
     private readonly ILogger<GoogleWebsiteDiscoverer> _logger;
 
     public GoogleWebsiteDiscoverer(
-        HttpClient http, GoogleSearchOptions options,
+        HttpClient http, GoogleSearchOptions options, GoogleQuotaGuard quota,
         CompanyWebsiteDiscoverer fallback, ILogger<GoogleWebsiteDiscoverer> logger)
     {
         _http = http;
         _options = options;
+        _quota = quota;
         _fallback = fallback;
         _logger = logger;
     }
 
     public async Task<WebsiteDiscoveryResult> DiscoverAsync(string companyName, CancellationToken ct)
     {
-        if (!_options.IsConfigured)
+        if (!_options.IsConfigured || !_quota.TryConsume())
             return await _fallback.DiscoverAsync(companyName, ct);
 
         try

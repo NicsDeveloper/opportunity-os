@@ -38,6 +38,14 @@ public sealed class RecurringJobScheduler : IHostedService
             continuousCron);
         _logger.LogInformation("Scheduled recurring job 'continuous-discovery' with cron {Cron}", continuousCron);
 
+        // Keyword search (Gupy + open-web Google) a few times a day, to spread the Google quota.
+        var searchCron = _config.GetValue<string>("Jobs:SearchCron") ?? "0 */3 * * *";
+        _recurring.AddOrUpdate<SearchJobsJob>(
+            "search-jobs",
+            job => job.RunAsync(CancellationToken.None),
+            searchCron);
+        _logger.LogInformation("Scheduled recurring job 'search-jobs' with cron {Cron}", searchCron);
+
         var digestCron = _config.GetValue<string>("Jobs:DailyDigestCron") ?? "0 9 * * *";
         _recurring.AddOrUpdate<SendDailyDigestJob>(
             "send-daily-digest",

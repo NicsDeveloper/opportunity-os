@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using OpportunityOS.Application.Discovery;
 using OpportunityOS.Domain.Entities;
 using OpportunityOS.Domain.Enums;
 using OpportunityOS.Infrastructure.Providers;
@@ -9,6 +10,15 @@ namespace OpportunityOS.UnitTests;
 
 public sealed class CareersCrawlerTests
 {
+    private sealed class NoRenderer : IPageRenderer
+    {
+        public bool IsAvailable => false;
+        public Task<string?> RenderAsync(string url, CancellationToken ct) => Task.FromResult<string?>(null);
+    }
+
+    private static GenericCareersCrawler Crawler(FakeHttpMessageHandler h) =>
+        new(new HttpClient(h), new NoRenderer(), NullLogger<GenericCareersCrawler>.Instance);
+
     private static Company Acme() =>
         new("Acme", "https://www.acme.com.br", null, null, null, "Brazil",
             CompanyPriority.High, CompanySource.Bacen, null);
@@ -35,7 +45,7 @@ public sealed class CareersCrawlerTests
             {
                 Content = new StringContent(req.RequestUri!.AbsolutePath.Contains("carreiras") ? careers : home),
             });
-        var crawler = new GenericCareersCrawler(new HttpClient(handler), NullLogger<GenericCareersCrawler>.Instance);
+        var crawler = Crawler(handler);
 
         Assert.True(crawler.CanHandle(Acme()));
         var jobs = await crawler.DiscoverJobsAsync(Acme(), CancellationToken.None);
@@ -51,7 +61,7 @@ public sealed class CareersCrawlerTests
     [Fact]
     public void CannotHandle_WithoutWebsite()
     {
-        var crawler = new GenericCareersCrawler(new HttpClient(FakeHttpMessageHandler.Json("")), NullLogger<GenericCareersCrawler>.Instance);
+        var crawler = Crawler(FakeHttpMessageHandler.Json(""));
         var noSite = new Company("X", null, null, null, null, "BR", CompanyPriority.Low, CompanySource.Bacen, null);
         Assert.False(crawler.CanHandle(noSite));
     }
