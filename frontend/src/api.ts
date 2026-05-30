@@ -69,4 +69,5 @@ export const api = {
   discover: (companyId?: string) => post("/jobs/discover", { companyId: companyId ?? null }),
   sendDigest: () => post<{ sent: boolean; itemCount: number; reason: string }>("/digest/send"),
   generateOutreach: (jobId: string) => post(`/jobs/${jobId}/ai/generate-outreach`),
+  backfillWebsites: () => post<{ processed: number; found: number }>("/companies/backfill-websites"),
 };

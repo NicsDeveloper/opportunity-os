@@ -112,6 +112,8 @@ public sealed record OnboardingResponse(
 
 public sealed record WebsiteDiscoveryResponse(bool Found, string? WebsiteUrl);
 
+public sealed record BackfillResponse(int Processed, int Found);
+
 // ---- Bacen ----
 
 public sealed record BacenImportResponse(

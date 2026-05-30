@@ -121,6 +121,11 @@ function Dashboard({ reload, onNav, notify, onChanged }: {
     try { const r = await api.sendDigest(); notify(r.sent ? `Digest enviado (${r.itemCount}).` : r.reason); onChanged(); }
     catch { notify("Falha ao enviar digest."); }
   };
+  const backfillLogos = async () => {
+    notify("Descobrindo sites das empresas…");
+    try { const r = await api.backfillWebsites(); notify(`Sites encontrados: ${r.found}/${r.processed}.`); onChanged(); }
+    catch { notify("Falha ao descobrir sites."); }
+  };
 
   return (
     <>
@@ -139,6 +144,7 @@ function Dashboard({ reload, onNav, notify, onChanged }: {
             <div className="panel-head">
               <h3>Melhores oportunidades</h3>
               <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <button className="btn" onClick={backfillLogos}>Atualizar logos</button>
                 <button className="btn" onClick={sendDigest}>Enviar digest</button>
                 <a onClick={() => onNav("matches")} style={{ cursor: "pointer" }}>Ver todas</a>
               </span>
@@ -198,11 +204,13 @@ function Stat({ icon, label, n, delta, mutedDelta }: {
 }
 
 function Logo({ name, website }: { name: string; website?: string | null }) {
-  const [err, setErr] = useState(false);
+  const [i, setI] = useState(0);
   const host = hostOf(website);
-  if (host && !err)
-    return <img className="logo img" alt={name} onError={() => setErr(true)}
-      src={`https://www.google.com/s2/favicons?sz=64&domain=${host}`} />;
+  const sources = host
+    ? [`https://logo.clearbit.com/${host}`, `https://www.google.com/s2/favicons?sz=64&domain=${host}`]
+    : [];
+  if (i < sources.length)
+    return <img className="logo img" alt={name} src={sources[i]} onError={() => setI(i + 1)} />;
   return <span className="logo" style={{ background: logoColor(name) }}>{initials(name)}</span>;
 }
 
