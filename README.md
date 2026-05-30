@@ -296,6 +296,22 @@ versão mais recente); a descoberta nome → site/carreiras é responsabilidade 
 (`detect-ats` / futuro `CompanyWebsiteDiscoveryService`); cada operação registra um
 `ExecutionRun` (`BacenPixParticipantsImport` / `BacenPixParticipantsPromotion`).
 
+## Dashboard (frontend)
+
+Dashboard mínimo em **React + Vite + TypeScript** (`frontend/`) consumindo a API:
+abas **Overview** (cards: empresas, vagas, oportunidades, follow-ups), **Empresas**,
+**Vagas**, **Oportunidades** e **Digest** (renderiza o HTML do preview).
+
+```bash
+docker compose up -d postgres
+dotnet run --project src/OpportunityOS.Api     # API em http://localhost:5077
+cd frontend && npm install && npm run dev      # http://localhost:5173
+```
+
+O dev server faz proxy de `/api` para a API (sem CORS em dev). Se a API estiver em
+outra porta (ex.: `5000` no docker compose), use
+`VITE_API_TARGET=http://localhost:5000 npm run dev`.
+
 ## Match Engine (heurístico, v1)
 
 Sem LLM nesta fase — o score é **transparente e explicável** (ver
