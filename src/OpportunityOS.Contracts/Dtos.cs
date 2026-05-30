@@ -95,6 +95,8 @@ public sealed record JobPostingResponse(
 
 public sealed record DiscoverRequest(Guid? CompanyId);
 
+public sealed record ValidateLinksResponse(int Checked, int Expired);
+
 public sealed record SearchRequest(List<string>? Keywords);
 
 public sealed record AtsDetectionResponse(
@@ -159,7 +161,7 @@ public sealed record DashboardSummaryResponse(
 public sealed record BestOpportunityResponse(
     Guid MatchId, Guid JobPostingId, string JobTitle, string CompanyName,
     List<string> Skills, int OverallScore, string Recommendation, string JobUrl,
-    string? CompanyWebsiteUrl);
+    string? CompanyWebsiteUrl, DateTime PostedAtUtc, string Rationale);
 
 public sealed record ExecutionRunResponse(
     Guid Id, string RunType, string Status, DateTime StartedAtUtc,

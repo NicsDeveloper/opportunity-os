@@ -72,6 +72,8 @@ a:hover { text-decoration: underline; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
 .chip { font-size: 11px; background: #f3f4f6; color: #374151; padding: 2px 8px; border-radius: 6px; }
 .company { font-size: 13px; color: #374151; }
+.company .posted { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.company .posted.stale { color: #b45309; }
 .ring { width: 46px; height: 46px; border-radius: 50%; border: 3px solid #16a34a;
   display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
 .rec { font-size: 13px; font-weight: 600; }

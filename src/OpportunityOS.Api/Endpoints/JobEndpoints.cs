@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using OpportunityOS.Application.Discovery;
 using OpportunityOS.Application.Matching;
+using OpportunityOS.Domain.Enums;
 using OpportunityOS.Application.Normalization;
 using OpportunityOS.Application.Pipeline;
 using OpportunityOS.Contracts;
@@ -90,6 +91,39 @@ public static class JobEndpoints
                 .OrderByDescending(m => m.CreatedAtUtc)
                 .FirstOrDefaultAsync(ct);
             return match is null ? Results.NotFound() : Results.Ok(match.ToResponse());
+        });
+
+        // Validate posting links and expire dead ones (404/410), so stale vagas drop off.
+        group.MapPost("/validate-links", async (
+            int? limit, OpportunityOsDbContext db, IHttpClientFactory httpFactory, CancellationToken ct) =>
+        {
+            var max = Math.Clamp(limit ?? 100, 1, 500);
+            var jobs = await db.JobPostings
+                .Where(j => j.Status != JobPostingStatus.Expired && j.Status != JobPostingStatus.Archived)
+                .OrderBy(j => j.UpdatedAtUtc)
+                .Take(max)
+                .ToListAsync(ct);
+
+            var http = httpFactory.CreateClient();
+            http.Timeout = TimeSpan.FromSeconds(10);
+            int checkd = 0, expired = 0;
+            foreach (var job in jobs)
+            {
+                checkd++;
+                try
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Head, job.AbsoluteUrl);
+                    using var resp = await http.SendAsync(req, ct);
+                    if (resp.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Gone)
+                    {
+                        job.MarkExpired();
+                        expired++;
+                    }
+                }
+                catch { /* network hiccup: leave as-is */ }
+            }
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new ValidateLinksResponse(checkd, expired));
         });
 
         group.MapPost("/{id:guid}/archive", async (Guid id, OpportunityOsDbContext db, CancellationToken ct) =>

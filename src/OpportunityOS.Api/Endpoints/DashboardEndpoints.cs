@@ -46,32 +46,46 @@ public static class DashboardEndpoints
 
         // Best opportunities: latest match per job, enriched with job + company, by score.
         app.MapGet("/api/matches", async (
-            int? minScore, int? take, OpportunityOsDbContext db, CancellationToken ct) =>
+            int? minScore, int? take, int? freshDays, OpportunityOsDbContext db, CancellationToken ct) =>
         {
-            var min = minScore ?? 0;
+            var min = minScore ?? 60;                  // relevance-first: hide weak matches
             var limit = Math.Clamp(take ?? 10, 1, 100);
+            var freshSince = DateTime.UtcNow.AddDays(-(freshDays ?? 45));
 
             var matches = await db.OpportunityMatches.Where(m => m.OverallScore >= min).ToListAsync(ct);
-            var latest = matches
+            var latestByJob = matches
                 .GroupBy(m => m.JobPostingId)
                 .Select(g => g.OrderByDescending(m => m.CreatedAtUtc).First())
+                .ToList();
+            if (latestByJob.Count == 0) return Results.Ok(Array.Empty<BestOpportunityResponse>());
+
+            var jobIds = latestByJob.Select(m => m.JobPostingId).ToList();
+            var jobs = await db.JobPostings.Where(j => jobIds.Contains(j.Id)).ToDictionaryAsync(j => j.Id, ct);
+
+            // Fresh + active only (no expired/archived, no talent-pool, not stale).
+            // Fresh = recently discovered + link not dead (not Expired) + not a talent pool.
+            // The real publish date is shown to the user but isn't a hard gate (open older
+            // postings stay; dead ones are removed by link validation).
+            var ranked = latestByJob
+                .Where(m => jobs.TryGetValue(m.JobPostingId, out var j)
+                    && j.Status != JobPostingStatus.Expired && j.Status != JobPostingStatus.Archived
+                    && !j.IsTalentPool && j.CreatedAtUtc >= freshSince)
                 .OrderByDescending(m => m.OverallScore)
                 .Take(limit)
                 .ToList();
-            if (latest.Count == 0) return Results.Ok(Array.Empty<BestOpportunityResponse>());
+            if (ranked.Count == 0) return Results.Ok(Array.Empty<BestOpportunityResponse>());
 
-            var jobIds = latest.Select(m => m.JobPostingId).ToList();
-            var jobs = await db.JobPostings.Where(j => jobIds.Contains(j.Id)).ToDictionaryAsync(j => j.Id, ct);
-            var companyIds = jobs.Values.Select(j => j.CompanyId).Distinct().ToList();
+            var companyIds = ranked.Select(m => jobs[m.JobPostingId].CompanyId).Distinct().ToList();
             var companies = await db.Companies.Where(c => companyIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
 
-            var result = latest.Where(m => jobs.ContainsKey(m.JobPostingId)).Select(m =>
+            var result = ranked.Select(m =>
             {
                 var job = jobs[m.JobPostingId];
                 companies.TryGetValue(job.CompanyId, out var c);
                 return new BestOpportunityResponse(
                     m.Id, job.Id, job.Title, c?.Name ?? "(empresa)", job.ExtractedSkills.Take(4).ToList(),
-                    m.OverallScore, m.Recommendation.ToString(), job.AbsoluteUrl, c?.WebsiteUrl);
+                    m.OverallScore, m.Recommendation.ToString(), job.AbsoluteUrl, c?.WebsiteUrl,
+                    job.EffectiveDateUtc, m.Rationale);
             });
             return Results.Ok(result);
         }).WithTags("Matches");

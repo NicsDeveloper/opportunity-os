@@ -116,4 +116,19 @@ public sealed class JobPosting
         Status = JobPostingStatus.Archived;
         UpdatedAtUtc = DateTime.UtcNow;
     }
+
+    public void MarkExpired()
+    {
+        Status = JobPostingStatus.Expired;
+        UpdatedAtUtc = DateTime.UtcNow;
+    }
+
+    /// <summary>Best-known posting date for freshness (published, else discovered).</summary>
+    public DateTime EffectiveDateUtc => PublishedAtUtc ?? CreatedAtUtc;
+
+    /// <summary>Talent-pool / evergreen entries (not a real, datable vacancy) — often 404.</summary>
+    public bool IsTalentPool =>
+        Title.Contains("banco de talentos", StringComparison.OrdinalIgnoreCase)
+        || Title.Contains("talent pool", StringComparison.OrdinalIgnoreCase)
+        || Title.Contains("cadastro de currículo", StringComparison.OrdinalIgnoreCase);
 }

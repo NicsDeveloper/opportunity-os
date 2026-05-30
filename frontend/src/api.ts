@@ -42,7 +42,7 @@ export interface Summary {
 export interface BestOpportunity {
   matchId: string; jobPostingId: string; jobTitle: string; companyName: string;
   skills: string[]; overallScore: number; recommendation: string; jobUrl: string;
-  companyWebsiteUrl?: string | null;
+  companyWebsiteUrl?: string | null; postedAtUtc: string; rationale: string;
 }
 export interface Run {
   id: string; runType: string; status: string; startedAtUtc: string;
@@ -56,7 +56,7 @@ export interface Profile { fullName: string; headline: string; }
 export const api = {
   profile: () => get<Profile>("/candidate-profile"),
   summary: () => get<Summary>("/dashboard/summary"),
-  bestOpportunities: (take = 10, minScore = 0) =>
+  bestOpportunities: (take = 10, minScore = 60) =>
     get<BestOpportunity[]>(`/matches?take=${take}&minScore=${minScore}`),
   companies: () => get<Company[]>("/companies"),
   jobs: () => get<Job[]>("/jobs"),
