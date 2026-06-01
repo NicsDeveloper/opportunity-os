@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using OpportunityOS.Application.Discovery;
 using OpportunityOS.Contracts;
 using OpportunityOS.Domain.Entities;
 using OpportunityOS.Domain.Enums;
@@ -66,8 +67,8 @@ public static class DashboardEndpoints
         // Relevance + FRESHNESS first: stale postings (likely closed/404) are dropped, and
         // recent ones get a ranking bonus so a fresh role outranks an old high-scoring one.
         app.MapGet("/api/matches", async (
-            int? minScore, int? take, int? freshDays, int? maxAgeDays,
-            OpportunityOsDbContext db, CancellationToken ct) =>
+            int? minScore, int? take, int? freshDays, int? maxAgeDays, string? sort,
+            OpportunityOsDbContext db, IDiscoveryRankService ranker, CancellationToken ct) =>
         {
             var min = minScore ?? 60;                  // relevance-first: hide weak matches
             var limit = Math.Clamp(take ?? 10, 1, 100);
@@ -86,29 +87,40 @@ public static class DashboardEndpoints
             var jobIds = latestByJob.Select(m => m.JobPostingId).ToList();
             var jobs = await db.JobPostings.Where(j => jobIds.Contains(j.Id)).ToDictionaryAsync(j => j.Id, ct);
 
-            // Freshness bonus: very recent postings rise above older high-scoring ones,
-            // while relevance (score) stays the primary signal within the fresh window.
+            // Active + recent only: no expired/archived/talent-pool, discovered recently,
+            // and published within the freshness window (the real "stop showing obsolete" gate).
+            var filtered = latestByJob
+                .Where(m => jobs.TryGetValue(m.JobPostingId, out var j)
+                    && j.Status != JobPostingStatus.Expired && j.Status != JobPostingStatus.Archived
+                    && !j.IsTalentPool && j.CreatedAtUtc >= freshSince
+                    && j.EffectiveDateUtc >= publishedSince)
+                .ToList();
+            if (filtered.Count == 0) return Results.Ok(Array.Empty<BestOpportunityResponse>());
+
+            var companyIds = filtered.Select(m => jobs[m.JobPostingId].CompanyId).Distinct().ToList();
+            var companies = await db.Companies.Where(c => companyIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
+
+            int DiscoveryRankOf(Domain.Entities.OpportunityMatch m)
+            {
+                var job = jobs[m.JobPostingId];
+                companies.TryGetValue(job.CompanyId, out var c);
+                return ranker.ComputeDiscoveryRank(new DiscoveryRankInput(
+                    m.OverallScore, job.SourceConfidenceScore, job.EffectiveDateUtc, c?.Priority ?? CompanyPriority.Low));
+            }
+
+            // Freshness bonus keeps relevance primary within the fresh window (default sort);
+            // sort=rank orders by the full DiscoveryRank blend (Qualified view).
             static double FreshnessBonus(DateTime effectiveUtc)
             {
                 var ageDays = (DateTime.UtcNow - effectiveUtc).TotalDays;
                 return ageDays <= 7 ? 15 : ageDays <= 30 ? 10 : ageDays <= 60 ? 5 : 0;
             }
 
-            // Active + recent only: no expired/archived/talent-pool, discovered recently,
-            // and published within the freshness window (the real "stop showing obsolete" gate).
-            var ranked = latestByJob
-                .Where(m => jobs.TryGetValue(m.JobPostingId, out var j)
-                    && j.Status != JobPostingStatus.Expired && j.Status != JobPostingStatus.Archived
-                    && !j.IsTalentPool && j.CreatedAtUtc >= freshSince
-                    && j.EffectiveDateUtc >= publishedSince)
-                .OrderByDescending(m => m.OverallScore + FreshnessBonus(jobs[m.JobPostingId].EffectiveDateUtc))
-                .ThenByDescending(m => jobs[m.JobPostingId].EffectiveDateUtc)
-                .Take(limit)
-                .ToList();
-            if (ranked.Count == 0) return Results.Ok(Array.Empty<BestOpportunityResponse>());
-
-            var companyIds = ranked.Select(m => jobs[m.JobPostingId].CompanyId).Distinct().ToList();
-            var companies = await db.Companies.Where(c => companyIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
+            var ordered = string.Equals(sort, "rank", StringComparison.OrdinalIgnoreCase)
+                ? filtered.OrderByDescending(DiscoveryRankOf).ThenByDescending(m => jobs[m.JobPostingId].EffectiveDateUtc)
+                : filtered.OrderByDescending(m => m.OverallScore + FreshnessBonus(jobs[m.JobPostingId].EffectiveDateUtc))
+                          .ThenByDescending(m => jobs[m.JobPostingId].EffectiveDateUtc);
+            var ranked = ordered.Take(limit).ToList();
 
             var result = ranked.Select(m =>
             {
@@ -117,7 +129,9 @@ public static class DashboardEndpoints
                 return new BestOpportunityResponse(
                     m.Id, job.Id, job.Title, c?.Name ?? "(empresa)", job.ExtractedSkills.Take(4).ToList(),
                     m.OverallScore, m.Recommendation.ToString(), job.AbsoluteUrl, c?.WebsiteUrl,
-                    job.EffectiveDateUtc, m.Rationale);
+                    job.EffectiveDateUtc, m.Rationale,
+                    DiscoveryRankOf(m), job.SourceType.ToString(), job.SourceConfidenceScore,
+                    job.RequiresManualValidation, job.RealCompanyName, job.SourceName);
             });
             return Results.Ok(result);
         }).WithTags("Matches");
