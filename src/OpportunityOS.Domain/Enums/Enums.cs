@@ -132,6 +132,16 @@ public enum RawJobCandidateStatus
     Expired = 7
 }
 
+public enum JobVerificationStatus
+{
+    Unverified = 1,
+    AggregatorOnly = 2,
+    LikelyOriginal = 3,
+    VerifiedOriginal = 4,
+    OfficialAts = 5,
+    Expired = 6
+}
+
 public enum UserFeedbackType
 {
     Relevant = 1,

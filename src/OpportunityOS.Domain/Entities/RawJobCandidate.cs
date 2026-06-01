@@ -27,6 +27,7 @@ public sealed class RawJobCandidate
     public int? PreliminaryFitScore { get; private set; }
     public string? NormalizedFingerprint { get; private set; }
     public bool RequiresManualValidation { get; private set; }
+    public JobVerificationStatus VerificationStatus { get; private set; } = JobVerificationStatus.Unverified;
 
     // Provenance: which campaign/query produced this candidate (nullable for quick-search).
     public Guid? SearchCampaignId { get; private set; }
@@ -75,6 +76,13 @@ public sealed class RawJobCandidate
     public void SetFingerprint(string fingerprint) => NormalizedFingerprint = fingerprint;
     public void SetPreliminaryFit(int score) => PreliminaryFitScore = Math.Clamp(score, 0, 100);
     public void SetOriginalJobUrl(string url) => OriginalJobUrl = url;
+
+    public void SetVerification(JobVerificationStatus status, string? originalUrl, int confidenceBoost)
+    {
+        VerificationStatus = status;
+        if (!string.IsNullOrWhiteSpace(originalUrl)) OriginalJobUrl = originalUrl;
+        if (confidenceBoost > 0) SourceConfidenceScore = Math.Clamp(SourceConfidenceScore + confidenceBoost, 0, 100);
+    }
     public void SetStatus(RawJobCandidateStatus status) => Status = status;
 
     public void MarkPromoted(Guid jobPostingId)
