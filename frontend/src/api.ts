@@ -64,6 +64,21 @@ export interface Match {
   strengths: string[]; risks: string[]; missingRequirements: string[]; rationale: string;
 }
 export interface AnalyzeResult { analysis: unknown; match: Match; }
+export interface RawCandidate {
+  id: string; title: string; snippet?: string | null; discoveredUrl: string;
+  sourceProvider: string; sourceName: string; sourceType: string;
+  realCompanyName?: string | null; originalJobUrl?: string | null;
+  location?: string | null; discoveredAtUtc: string; publishedAtUtc?: string | null;
+  status: string; sourceConfidenceScore: number; preliminaryFitScore?: number | null;
+  requiresManualValidation: boolean; searchCampaignId?: string | null; query?: string | null;
+}
+export interface DiscoveryMetrics {
+  rawCandidatesToday: number; rawCandidatesThisWeek: number; queriesToday: number;
+  jobsPromotedToday: number; deduplicationRate: number; averageSourceConfidence: number;
+  averageFitScore: number; actionableOpportunities: number; weakSources: number;
+  relevantFeedback: number; irrelevantFeedback: number; bySourceType: Record<string, number>;
+}
+export interface PromotionResult { promoted: boolean; jobPostingId?: string | null; wasDuplicate: boolean; reason: string; }
 export interface Profile { fullName: string; headline: string; }
 
 export const api = {
@@ -71,6 +86,14 @@ export const api = {
   summary: () => get<Summary>("/dashboard/summary"),
   bestOpportunities: (take = 10, minScore = 60) =>
     get<BestOpportunity[]>(`/matches?take=${take}&minScore=${minScore}`),
+  // Three layers (P8): Action Today (acionável), Qualified (triado), Firehose (tudo).
+  actionToday: () => get<BestOpportunity[]>(`/matches?take=10&minScore=75`),
+  qualified: (take = 120) => get<BestOpportunity[]>(`/matches?take=${take}&minScore=60&sort=rank`),
+  rawCandidates: (take = 150) => get<RawCandidate[]>(`/discovery/raw-candidates?take=${take}`),
+  discoveryMetrics: () => get<DiscoveryMetrics>(`/discovery/metrics`),
+  promoteRaw: (id: string) => post<PromotionResult>(`/discovery/raw-candidates/${id}/promote`),
+  feedback: (type: string, body: { jobPostingId?: string; rawJobCandidateId?: string; reason?: string }) =>
+    post(`/feedback`, { type, ...body }),
   companies: () => get<Company[]>("/companies"),
   jobs: () => get<Job[]>("/jobs"),
   opportunities: () => get<Opportunity[]>("/opportunities"),
