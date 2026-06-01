@@ -46,6 +46,14 @@ public sealed class RecurringJobScheduler : IHostedService
             searchCron);
         _logger.LogInformation("Scheduled recurring job 'search-jobs' with cron {Cron}", searchCron);
 
+        // Expire dead links so the fresh feed never shows closed/404 vacancies.
+        var validateCron = _config.GetValue<string>("Jobs:ValidateLinksCron") ?? "30 */6 * * *";
+        _recurring.AddOrUpdate<ValidateLinksJob>(
+            "validate-links",
+            job => job.RunAsync(CancellationToken.None),
+            validateCron);
+        _logger.LogInformation("Scheduled recurring job 'validate-links' with cron {Cron}", validateCron);
+
         var digestCron = _config.GetValue<string>("Jobs:DailyDigestCron") ?? "0 9 * * *";
         _recurring.AddOrUpdate<SendDailyDigestJob>(
             "send-daily-digest",

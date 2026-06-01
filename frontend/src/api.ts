@@ -57,6 +57,11 @@ export interface GeneratedMessage {
   cvTailoringNotes: string; followUpMessage: string; humanReviewNotes: string;
   status: string; promptVersion: string; modelName: string; createdAtUtc: string;
 }
+export interface Match {
+  id: string; jobPostingId: string; overallScore: number; recommendation: string;
+  strengths: string[]; risks: string[]; missingRequirements: string[]; rationale: string;
+}
+export interface AnalyzeResult { analysis: unknown; match: Match; }
 export interface Profile { fullName: string; headline: string; }
 
 export const api = {
@@ -74,6 +79,7 @@ export const api = {
   search: (keywords: string[]) => post("/jobs/search", { keywords }),
   discover: (companyId?: string) => post("/jobs/discover", { companyId: companyId ?? null }),
   sendDigest: () => post<{ sent: boolean; itemCount: number; reason: string }>("/digest/send"),
+  analyze: (jobId: string) => post<AnalyzeResult>(`/jobs/${jobId}/ai/analyze`),
   generateOutreach: (jobId: string) => post<GeneratedMessage>(`/jobs/${jobId}/ai/generate-outreach`),
   backfillWebsites: () => post<{ processed: number; found: number }>("/companies/backfill-websites"),
 };

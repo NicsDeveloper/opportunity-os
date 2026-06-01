@@ -172,6 +172,14 @@ function OppCard({ o, notify, onChanged }: {
   const [msg, setMsg] = useState<GeneratedMessage | null>(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
+  const [why, setWhy] = useState(o.rationale);
+  const [score, setScore] = useState(o.overallScore);
+  const [rec, setRec] = useState(o.recommendation);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzed, setAnalyzed] = useState(false);
+
+  // Heuristic rationale reads like "Score 68/100 — Técnico 65…"; the LLM one is prose.
+  const isTerse = /^score\s+\d+\/100/i.test(why.trim());
 
   const generate = async () => {
     if (msg) { setOpen((v) => !v); return; }
@@ -184,6 +192,17 @@ function OppCard({ o, notify, onChanged }: {
     finally { setBusy(false); }
   };
 
+  const analyze = async () => {
+    setAnalyzing(true); notify("Analisando com IA…");
+    try {
+      const r = await api.analyze(o.jobPostingId);
+      setWhy(r.match.rationale); setScore(r.match.overallScore); setRec(r.match.recommendation);
+      setAnalyzed(true); notify("Análise concluída.");
+      onChanged();
+    } catch { notify("Não foi possível analisar agora."); }
+    finally { setAnalyzing(false); }
+  };
+
   return (
     <div className="oppcard">
       <div className="opp">
@@ -192,15 +211,20 @@ function OppCard({ o, notify, onChanged }: {
           <div>
             <div className="title">{o.jobTitle}</div>
             <div className="chips">{o.skills.slice(0, 6).map((sk) => <span className="chip" key={sk}>{sk}</span>)}</div>
-            {o.rationale && <div className="why"><strong>Por que combina:</strong> {o.rationale}</div>}
+            {why && <div className="why"><strong>Por que combina:</strong> {why}</div>}
+            {(isTerse && !analyzed) && (
+              <button className="why-link" disabled={analyzing} onClick={analyze}>
+                {analyzing ? "Analisando…" : "↻ Analisar com IA (por que combina em detalhe)"}
+              </button>
+            )}
           </div>
         </div>
         <div className="company">
           {o.companyName}
           <div className={"posted" + (isStale(o.postedAtUtc) ? " stale" : "")}>{ago(o.postedAtUtc)}</div>
         </div>
-        <div className="ring" style={{ borderColor: ringColor(o.overallScore) }}>{o.overallScore}</div>
-        <div className={"rec " + recClass(o.recommendation)}>{recLabel(o.recommendation)}</div>
+        <div className="ring" style={{ borderColor: ringColor(score) }}>{score}</div>
+        <div className={"rec " + recClass(rec)}>{recLabel(rec)}</div>
         <div className="opp-actions">
           <a className="btn" href={o.jobUrl} target="_blank" rel="noreferrer">Ver vaga</a>
           <button className="btn primary" disabled={busy} onClick={generate}>
