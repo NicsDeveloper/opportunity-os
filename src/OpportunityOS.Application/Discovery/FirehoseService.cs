@@ -29,12 +29,13 @@ public sealed class FirehoseService : IFirehoseService
     private readonly IQueryBudgetManager _budget;
     private readonly DiscoveryBudgetOptions _budgetOptions;
     private readonly ISourceClassifierService _classifier;
+    private readonly ICompanyNameResolver _companyResolver;
     private readonly ILogger<FirehoseService> _logger;
 
     public FirehoseService(
         IEnumerable<IRawSearchProvider> providers, QueryExpansionService expansion,
         IFirehoseStore store, IQueryBudgetManager budget, DiscoveryBudgetOptions budgetOptions,
-        ISourceClassifierService classifier, ILogger<FirehoseService> logger)
+        ISourceClassifierService classifier, ICompanyNameResolver companyResolver, ILogger<FirehoseService> logger)
     {
         _providers = providers;
         _expansion = expansion;
@@ -42,6 +43,7 @@ public sealed class FirehoseService : IFirehoseService
         _budget = budget;
         _budgetOptions = budgetOptions;
         _classifier = classifier;
+        _companyResolver = companyResolver;
         _logger = logger;
     }
 
@@ -163,9 +165,11 @@ public sealed class FirehoseService : IFirehoseService
                     if (await _store.RawCandidateExistsByUrlAsync(r.Url, ct)) { dupCount++; stats.Duplicates++; continue; }
 
                     var cls = _classifier.Classify(r.Url, r.Title, r.Snippet);
+                    var resolved = _companyResolver.Resolve(r.Title, r.Url, cls.SourceName, cls.SourceType);
                     var candidate = new RawJobCandidate(
                         r.Title, r.Url, provider.ProviderName, cls.SourceName, cls.SourceType,
                         cls.SourceConfidenceScore, cls.RequiresManualValidation, r.Snippet,
+                        realCompanyName: resolved.RealCompanyName,
                         publishedAtUtc: r.PublishedAtUtc,
                         searchCampaignId: campaignId == Guid.Empty ? null : campaignId,
                         query: query);
