@@ -65,6 +65,24 @@ public static class DiscoveryEndpoints
             PromoteBatchRequest? req, IRawCandidatePromotionService promo, CancellationToken ct) =>
             Results.Ok(await promo.PromoteBatchAsync(req ?? new PromoteBatchRequest(null, null, null), ct)));
 
+        // P7 — resolve the original posting for an aggregator candidate (updates verification).
+        group.MapPost("/raw-candidates/{id:guid}/resolve-original", async (
+            Guid id, IFirehoseStore store, IOriginalJobResolver resolver, CancellationToken ct) =>
+        {
+            var c = await store.GetRawCandidateAsync(id, ct);
+            if (c is null) return Results.NotFound();
+            var r = await resolver.ResolveAsync(c, ct);
+            if (r.Found)
+            {
+                var status = r.AtsProvider is not null ? JobVerificationStatus.OfficialAts
+                    : r.Confidence >= 70 ? JobVerificationStatus.VerifiedOriginal : JobVerificationStatus.LikelyOriginal;
+                c.SetVerification(status, r.OriginalUrl, Math.Min(20, r.Confidence / 5));
+            }
+            else c.SetVerification(JobVerificationStatus.AggregatorOnly, null, 0);
+            await store.SaveChangesAsync(ct);
+            return Results.Ok(r);
+        });
+
         // P16 — volume metrics.
         group.MapGet("/metrics", async (OpportunityOsDbContext db, CancellationToken ct) =>
         {

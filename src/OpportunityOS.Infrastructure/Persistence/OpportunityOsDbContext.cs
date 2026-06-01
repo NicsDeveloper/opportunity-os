@@ -222,6 +222,7 @@ public sealed class OpportunityOsDbContext : DbContext
             e.Property(x => x.DiscoveredUrl).IsRequired();
             e.Property(x => x.Status).HasConversion<int>();
             e.Property(x => x.SourceType).HasConversion<int>();
+            e.Property(x => x.VerificationStatus).HasConversion<int>();
             e.HasIndex(x => x.DiscoveredUrl);
             e.HasIndex(x => x.Status);
             e.HasIndex(x => x.DiscoveredAtUtc);
