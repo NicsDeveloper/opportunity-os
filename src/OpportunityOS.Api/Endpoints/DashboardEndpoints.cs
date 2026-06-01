@@ -44,13 +44,19 @@ public static class DashboardEndpoints
                 emails, emailsToday, pending, nextInDays));
         }).WithTags("Dashboard");
 
-        // Best opportunities: latest match per job, enriched with job + company, by score.
+        // Best opportunities: latest match per job, enriched with job + company.
+        // Relevance + FRESHNESS first: stale postings (likely closed/404) are dropped, and
+        // recent ones get a ranking bonus so a fresh role outranks an old high-scoring one.
         app.MapGet("/api/matches", async (
-            int? minScore, int? take, int? freshDays, OpportunityOsDbContext db, CancellationToken ct) =>
+            int? minScore, int? take, int? freshDays, int? maxAgeDays,
+            OpportunityOsDbContext db, CancellationToken ct) =>
         {
             var min = minScore ?? 60;                  // relevance-first: hide weak matches
             var limit = Math.Clamp(take ?? 10, 1, 100);
             var freshSince = DateTime.UtcNow.AddDays(-(freshDays ?? 45));
+            // Drop postings whose REAL publish date is older than this (default 120d): a
+            // .NET role posted months ago is almost always closed -> "obsolete jobs" problem.
+            var publishedSince = DateTime.UtcNow.AddDays(-(maxAgeDays ?? 120));
 
             var matches = await db.OpportunityMatches.Where(m => m.OverallScore >= min).ToListAsync(ct);
             var latestByJob = matches
@@ -62,15 +68,23 @@ public static class DashboardEndpoints
             var jobIds = latestByJob.Select(m => m.JobPostingId).ToList();
             var jobs = await db.JobPostings.Where(j => jobIds.Contains(j.Id)).ToDictionaryAsync(j => j.Id, ct);
 
-            // Fresh + active only (no expired/archived, no talent-pool, not stale).
-            // Fresh = recently discovered + link not dead (not Expired) + not a talent pool.
-            // The real publish date is shown to the user but isn't a hard gate (open older
-            // postings stay; dead ones are removed by link validation).
+            // Freshness bonus: very recent postings rise above older high-scoring ones,
+            // while relevance (score) stays the primary signal within the fresh window.
+            static double FreshnessBonus(DateTime effectiveUtc)
+            {
+                var ageDays = (DateTime.UtcNow - effectiveUtc).TotalDays;
+                return ageDays <= 7 ? 15 : ageDays <= 30 ? 10 : ageDays <= 60 ? 5 : 0;
+            }
+
+            // Active + recent only: no expired/archived/talent-pool, discovered recently,
+            // and published within the freshness window (the real "stop showing obsolete" gate).
             var ranked = latestByJob
                 .Where(m => jobs.TryGetValue(m.JobPostingId, out var j)
                     && j.Status != JobPostingStatus.Expired && j.Status != JobPostingStatus.Archived
-                    && !j.IsTalentPool && j.CreatedAtUtc >= freshSince)
-                .OrderByDescending(m => m.OverallScore)
+                    && !j.IsTalentPool && j.CreatedAtUtc >= freshSince
+                    && j.EffectiveDateUtc >= publishedSince)
+                .OrderByDescending(m => m.OverallScore + FreshnessBonus(jobs[m.JobPostingId].EffectiveDateUtc))
+                .ThenByDescending(m => jobs[m.JobPostingId].EffectiveDateUtc)
                 .Take(limit)
                 .ToList();
             if (ranked.Count == 0) return Results.Ok(Array.Empty<BestOpportunityResponse>());
