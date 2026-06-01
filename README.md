@@ -325,6 +325,13 @@ empresas-alvo de varredura de vagas .NET/C#. `GET /api/discovery/bacen-financial
 (`minimumPriority` default High, exclui cooperativas por padrão). Sem LLM; Bacen é fonte de
 empresas, não de vagas. Reusa `SweepCompaniesAsync` (queries por empresa, budget-guarded).
 
+**Novos providers (P13)** — por decisão da própria spec ("só depois da base"), os platforms
+extras (Workday, Teamtailor, Recruitee, Workable, Breezy, Programathor, GeekHunter, Coodesh,
+Remotar, APInfo, Trampos) são alcançados **via Firehose** (filtros `site:` em `QueryExpansionService`)
+e classificados pelo `SourceClassifier` (ATS hosts conhecidos). Parsers dedicados por plataforma
+(`IJobSourceProvider`) ficam para depois, guiados pelo Provider Quality Dashboard (P12) — cada um
+exigindo SourceConfidence, dedup, rate-limit, fixture e métricas.
+
 **Consulting Radar (P3)** — descobre consultorias/software houses automaticamente
 (`ConsultingCompanyCandidate`): roda queries de consultoria, deriva candidatos do host, pontua por
 sinais explicáveis (`ConsultingSignals`: +consultoria/+outsourcing/+transformação/+carreiras/
