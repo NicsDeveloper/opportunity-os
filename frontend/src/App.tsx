@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Icon } from "./icons";
 import {
-  api, type BestOpportunity, type GeneratedMessage, type Run,
+  api, type BestOpportunity, type GeneratedMessage, type RawCandidate, type Run,
 } from "./api";
 
 export function App() {
@@ -88,22 +88,15 @@ const SEARCH_KEYWORDS = [
   "programador c# pleno", "vaga .net remoto", "desenvolvedor .net fintech",
 ];
 
+type FeedView = "action" | "qualified" | "firehose";
+
 function Feed({ reload, notify, onChanged }: {
   reload: number; notify: (m: string) => void; onChanged: () => void;
 }) {
   const summary = useAsync(api.summary, [reload]);
-  const opps = useAsync(() => api.bestOpportunities(120), [reload]);
+  const [view, setView] = useState<FeedView>("action");
   const [busy, setBusy] = useState(false);
-  const [page, setPage] = useState(0);
   const s = summary.data;
-
-  const all = opps.data ?? [];
-  const pageCount = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
-  const current = Math.min(page, pageCount - 1);
-  const pageItems = all.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE);
-
-  // Reset to the first page whenever the underlying data refreshes.
-  useEffect(() => { setPage(0); }, [opps.data?.length]);
 
   const runSearch = async () => {
     setBusy(true); notify("Buscando vagas .NET…");
@@ -118,8 +111,8 @@ function Feed({ reload, notify, onChanged }: {
   return (
     <>
       <div className="statgrid">
-        <Stat icon="target" label="Oportunidades relevantes" n={all.length}
-          delta={s ? `${s.matchesAbove75} fortes (75+)` : ""} />
+        <Stat icon="target" label="Acionáveis hoje" n={s?.matchesAbove75}
+          delta={s ? `+${s.matchesAbove75Today} hoje` : ""} />
         <Stat icon="briefcase" label="Vagas descobertas" n={s?.jobsDiscovered}
           delta={s ? `+${s.jobsToday} hoje` : ""} />
         <Stat icon="chat" label="Mensagens geradas" n={s?.messagesGenerated}
@@ -130,36 +123,104 @@ function Feed({ reload, notify, onChanged }: {
 
       <div className="panel">
         <div className="panel-head">
-          <div>
-            <h3>Melhores oportunidades</h3>
-            <p className="sub" style={{ margin: "2px 0 0" }}>
-              Ordenadas por relevância e frescor. Clique em “Gerar mensagem” para um rascunho pronto pra copiar.
-            </p>
+          <div className="tabs">
+            <button className={"tab" + (view === "action" ? " active" : "")} onClick={() => setView("action")}>
+              ⚡ Action Today
+            </button>
+            <button className={"tab" + (view === "qualified" ? " active" : "")} onClick={() => setView("qualified")}>
+              ✓ Qualified
+            </button>
+            <button className={"tab" + (view === "firehose" ? " active" : "")} onClick={() => setView("firehose")}>
+              🌊 Firehose
+            </button>
           </div>
           <button className="btn primary" disabled={busy} onClick={runSearch}>
             <Icon name="search" /> {busy ? "Buscando…" : "Buscar agora"}
           </button>
         </div>
 
-        {opps.error && <p className="err">{opps.error}</p>}
-        {pageItems.map((o) => (
-          <OppCard key={o.matchId} o={o} notify={notify} onChanged={onChanged} />
-        ))}
-        {all.length === 0 && (
-          <p className="placeholder">
-            Nenhuma oportunidade relevante ainda. Clique em <strong>Buscar agora</strong> — a descoberta contínua
-            também roda sozinha em segundo plano.
-          </p>
-        )}
-
-        {all.length > PAGE_SIZE && (
-          <div className="pager">
-            <button className="btn" disabled={current === 0} onClick={() => setPage(current - 1)}>‹ Anterior</button>
-            <span className="pager-info">Página {current + 1} de {pageCount} · {all.length} vagas</span>
-            <button className="btn" disabled={current >= pageCount - 1} onClick={() => setPage(current + 1)}>Próxima ›</button>
-          </div>
-        )}
+        {view === "action" && <ActionView reload={reload} notify={notify} onChanged={onChanged} />}
+        {view === "qualified" && <QualifiedView reload={reload} notify={notify} onChanged={onChanged} />}
+        {view === "firehose" && <FirehoseView reload={reload} notify={notify} onChanged={onChanged} />}
       </div>
+    </>
+  );
+}
+
+/* ---------- Action Today: poucas, acionáveis (Fit >= 75) ---------- */
+function ActionView({ reload, notify, onChanged }: { reload: number; notify: (m: string) => void; onChanged: () => void }) {
+  const opps = useAsync(api.actionToday, [reload]);
+  const all = opps.data ?? [];
+  return (
+    <>
+      <p className="sub" style={{ marginTop: 0 }}>Quais vagas atacar hoje: relevância alta, frescas, fonte verificável.</p>
+      {opps.error && <p className="err">{opps.error}</p>}
+      {all.map((o) => <OppCard key={o.matchId} o={o} notify={notify} onChanged={onChanged} mode="action" />)}
+      {all.length === 0 && <p className="placeholder">Nada acionável agora. Veja <strong>Qualified</strong> ou rode uma busca.</p>}
+    </>
+  );
+}
+
+/* ---------- Qualified: triado, ordenado por DiscoveryRank, paginado ---------- */
+function QualifiedView({ reload, notify, onChanged }: { reload: number; notify: (m: string) => void; onChanged: () => void }) {
+  const opps = useAsync(() => api.qualified(120), [reload]);
+  const [page, setPage] = useState(0);
+  const all = opps.data ?? [];
+  const pageCount = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+  const current = Math.min(page, pageCount - 1);
+  useEffect(() => { setPage(0); }, [opps.data?.length]);
+  return (
+    <>
+      <p className="sub" style={{ marginTop: 0 }}>O que parece bom após triagem — ordenado por DiscoveryRank (relevância + fonte + frescor).</p>
+      {opps.error && <p className="err">{opps.error}</p>}
+      {all.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE).map((o) =>
+        <OppCard key={o.matchId} o={o} notify={notify} onChanged={onChanged} mode="qualified" />)}
+      {all.length === 0 && <p className="placeholder">Sem vagas qualificadas ainda.</p>}
+      {all.length > PAGE_SIZE && (
+        <div className="pager">
+          <button className="btn" disabled={current === 0} onClick={() => setPage(current - 1)}>‹ Anterior</button>
+          <span className="pager-info">Página {current + 1} de {pageCount} · {all.length} vagas</span>
+          <button className="btn" disabled={current >= pageCount - 1} onClick={() => setPage(current + 1)}>Próxima ›</button>
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ---------- Firehose: tudo que foi encontrado (RawJobCandidate) ---------- */
+function FirehoseView({ reload, notify, onChanged }: { reload: number; notify: (m: string) => void; onChanged: () => void }) {
+  const raw = useAsync(() => api.rawCandidates(200), [reload]);
+  const metrics = useAsync(api.discoveryMetrics, [reload]);
+  const [page, setPage] = useState(0);
+  const all = raw.data ?? [];
+  const FIRE_PAGE = 12;
+  const pageCount = Math.max(1, Math.ceil(all.length / FIRE_PAGE));
+  const current = Math.min(page, pageCount - 1);
+  const m = metrics.data;
+  useEffect(() => { setPage(0); }, [raw.data?.length]);
+  return (
+    <>
+      <p className="sub" style={{ marginTop: 0 }}>Tudo que o sistema encontrou — com ruído. Classificado por fonte; promova o que valer.</p>
+      {m && (
+        <div className="fire-metrics">
+          <span><b>{m.rawCandidatesThisWeek}</b> brutos/semana</span>
+          <span><b>{m.queriesToday}</b> queries hoje</span>
+          <span><b>{m.jobsPromotedToday}</b> promovidas hoje</span>
+          <span><b>{m.weakSources}</b> fontes fracas</span>
+          <span><b>{(m.deduplicationRate * 100).toFixed(0)}%</b> duplicadas</span>
+        </div>
+      )}
+      {raw.error && <p className="err">{raw.error}</p>}
+      {all.slice(current * FIRE_PAGE, current * FIRE_PAGE + FIRE_PAGE).map((c) =>
+        <RawCandidateCard key={c.id} c={c} notify={notify} onChanged={onChanged} />)}
+      {all.length === 0 && <p className="placeholder">Firehose vazio. Rode <strong>Buscar agora</strong> ou uma campanha agressiva.</p>}
+      {all.length > FIRE_PAGE && (
+        <div className="pager">
+          <button className="btn" disabled={current === 0} onClick={() => setPage(current - 1)}>‹ Anterior</button>
+          <span className="pager-info">Página {current + 1} de {pageCount} · {all.length} candidatos</span>
+          <button className="btn" disabled={current >= pageCount - 1} onClick={() => setPage(current + 1)}>Próxima ›</button>
+        </div>
+      )}
     </>
   );
 }
@@ -189,8 +250,8 @@ function Logo({ name, website }: { name: string; website?: string | null }) {
 }
 
 /* one opportunity, with inline expandable generated message */
-function OppCard({ o, notify, onChanged }: {
-  o: BestOpportunity; notify: (m: string) => void; onChanged: () => void;
+function OppCard({ o, notify, onChanged, mode }: {
+  o: BestOpportunity; notify: (m: string) => void; onChanged: () => void; mode?: "action" | "qualified";
 }) {
   const [msg, setMsg] = useState<GeneratedMessage | null>(null);
   const [busy, setBusy] = useState(false);
@@ -234,12 +295,16 @@ function OppCard({ o, notify, onChanged }: {
           <div>
             <div className="title">{o.jobTitle}</div>
             <div className="chips">{o.skills.slice(0, 6).map((sk) => <span className="chip" key={sk}>{sk}</span>)}</div>
+            <SourceBadge sourceType={o.sourceType} confidence={o.sourceConfidenceScore}
+              sourceName={o.sourceName} realCompany={o.realCompanyName} manual={o.requiresManualValidation}
+              rank={mode === "qualified" ? o.discoveryRank : undefined} />
             {why && <div className="why"><strong>Por que combina:</strong> {why}</div>}
             {(isTerse && !analyzed) && (
               <button className="why-link" disabled={analyzing} onClick={analyze}>
                 {analyzing ? "Analisando…" : "↻ Analisar com IA (por que combina em detalhe)"}
               </button>
             )}
+            <FeedbackBar notify={notify} body={{ jobPostingId: o.jobPostingId }} extra={mode === "action"} />
           </div>
         </div>
         <div className="company">
@@ -257,6 +322,88 @@ function OppCard({ o, notify, onChanged }: {
       </div>
 
       {msg && open && <MessagePanel msg={msg} notify={notify} />}
+    </div>
+  );
+}
+
+/* source provenance badge: "Empresa X via Fonte Y" + tipo/confiança */
+function SourceBadge({ sourceType, confidence, sourceName, realCompany, manual, rank }: {
+  sourceType?: string; confidence?: number; sourceName?: string | null;
+  realCompany?: string | null; manual?: boolean; rank?: number;
+}) {
+  if (!sourceType && !sourceName && rank == null) return null;
+  const cls = sourceType === "OfficialAts" || sourceType === "OfficialCareerPage" ? "src-official"
+    : sourceType === "SocialIndexed" ? "src-social"
+    : sourceType === "Aggregator" ? "src-agg" : "src-web";
+  return (
+    <div className="srcbadge">
+      {sourceType && <span className={"src-pill " + cls}>{sourceTypeLabel(sourceType)} · {confidence ?? 0}</span>}
+      {realCompany
+        ? <span className="src-co">{realCompany}{sourceName ? <> via {sourceName}</> : null}</span>
+        : (sourceName && <span className="src-co muted">empresa não confirmada · via {sourceName}</span>)}
+      {manual && <span className="src-pill src-manual">⚠ revisão manual</span>}
+      {rank != null && <span className="src-pill src-rank">rank {rank}</span>}
+    </div>
+  );
+}
+
+/* quick feedback buttons (P11) */
+function FeedbackBar({ notify, body, extra }: {
+  notify: (m: string) => void; body: { jobPostingId?: string; rawJobCandidateId?: string }; extra?: boolean;
+}) {
+  const [sent, setSent] = useState<string | null>(null);
+  const send = async (type: string, label: string) => {
+    try { await api.feedback(type, body); setSent(label); notify(`Feedback: ${label}`); }
+    catch { notify("Não foi possível registrar o feedback."); }
+  };
+  if (sent) return <div className="fbbar"><span className="fb-done">✓ {sent}</span></div>;
+  return (
+    <div className="fbbar">
+      <button className="fb" onClick={() => send("Relevant", "relevante")}>👍 Relevante</button>
+      <button className="fb" onClick={() => send("Irrelevant", "irrelevante")}>👎 Irrelevante</button>
+      <button className="fb" onClick={() => send("BadCompanyDetection", "empresa errada")}>🏢 Empresa errada</button>
+      {extra && <button className="fb" onClick={() => send("Applied", "já apliquei")}>✅ Já apliquei</button>}
+    </div>
+  );
+}
+
+/* one raw firehose candidate */
+function RawCandidateCard({ c, notify, onChanged }: {
+  c: RawCandidate; notify: (m: string) => void; onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [promoted, setPromoted] = useState<string | null>(null);
+  const promote = async () => {
+    setBusy(true); notify("Promovendo…");
+    try {
+      const r = await api.promoteRaw(c.id);
+      setPromoted(r.promoted ? (r.wasDuplicate ? "duplicada (ocorrência)" : "promovida") : null);
+      notify(r.reason);
+      if (r.promoted) onChanged();
+    } catch { notify("Falha ao promover."); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="rawcard">
+      <div className="raw-main">
+        <div className="title">{c.title}</div>
+        <SourceBadge sourceType={c.sourceType} confidence={c.sourceConfidenceScore}
+          sourceName={c.sourceName} realCompany={c.realCompanyName} manual={c.requiresManualValidation} />
+        {c.snippet && <div className="raw-snippet">{c.snippet}</div>}
+        <FeedbackBar notify={notify} body={{ rawJobCandidateId: c.id }} />
+      </div>
+      <div className="raw-meta">
+        <span className="posted">{ago(c.discoveredAtUtc)}</span>
+        <span className={"pill raw-status"}>{c.status}</span>
+      </div>
+      <div className="opp-actions">
+        <a className="btn" href={c.discoveredUrl} target="_blank" rel="noreferrer">Abrir</a>
+        {promoted
+          ? <span className="fb-done">✓ {promoted}</span>
+          : <button className="btn primary" disabled={busy || !c.realCompanyName} title={c.realCompanyName ? "" : "empresa não confirmada"} onClick={promote}>
+              {busy ? "…" : "Promover"}
+            </button>}
+      </div>
     </div>
   );
 }
@@ -340,6 +487,13 @@ function recLabel(r: string) {
   if (r === "Apply") return "Bom match";
   if (r === "SaveForLater") return "Vale revisar";
   return "Baixo";
+}
+function sourceTypeLabel(t: string) {
+  const map: Record<string, string> = {
+    OfficialAts: "ATS oficial", OfficialCareerPage: "Carreira oficial", JobBoard: "Job board",
+    Aggregator: "Agregador", SearchResult: "Web", SocialIndexed: "LinkedIn/social", Unknown: "?",
+  };
+  return map[t] ?? t;
 }
 function recClass(r: string) {
   if (r === "Strategic" || r === "Prioritize") return "exc";
