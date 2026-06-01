@@ -198,19 +198,32 @@ Além dos ATS providers, o sistema descobre vagas de forma **contínua** e **mai
   pwsh src/OpportunityOS.Worker/bin/Debug/net10.0/playwright.ps1 install chromium
   ```
 
-- **Busca web-aberta do Google** (`GoogleWebJobSearchProvider`, flag
-  `FeatureFlags:EnableGoogleWebSearch`) — usa o engine **whole-web** (grandfathered) com
-  `dateRestrict=m3` para achar vagas **.NET recentes** em qualquer site, não só nos ATS
-  conhecidos. Compartilha a cota diária com os demais chamadores do Google CSE via
-  `GoogleQuotaGuard` (`Search:DailyQueryBudget`, default 90 de 100/dia) — quando a cota
-  acaba, os providers simplesmente param de chamar o Google até o reset (UTC).
+- **Busca web-aberta via Serper.dev** (`SerperWebJobSearchProvider`, flag
+  `FeatureFlags:EnableSerperWebSearch`) — busca **.NET/C# recentes na web inteira** (índice
+  Google real), não só nos ATS conhecidos. Cada resultado orgânico vira oportunidade; a
+  empresa é derivada do host; agregadores (LinkedIn/Indeed/Glassdoor/ZipRecruiter/…) são
+  filtrados. Frescor via `tbs=qdr:m` (último mês, configurável em `Search:SerperFreshness`).
+  O tier grátis limita rajadas, então há um `Search:SerperDelayMs` (default 1200ms) entre
+  queries e um teto `Search:SerperMaxQueriesPerCall` (default 4) para preservar os créditos.
 
-  > **Requer `Search:ApiKey` _e_ `Search:SearchEngineId`** nos user-secrets. Com apenas o
-  > `SearchEngineId` configurado, a busca web-aberta fica **dormente** (cai no fallback
-  > heurístico). Configure a chave:
+  > **Requer `Search:SerperApiKey`** nos user-secrets. Sem ela o provider fica **dormente**
+  > (não é registrado). Configure:
   > ```bash
-  > dotnet user-secrets set "Search:ApiKey" "<sua-chave>" --project src/OpportunityOS.Api
+  > dotnet user-secrets set "Search:SerperApiKey" "<sua-chave>" --project src/OpportunityOS.Api
+  > dotnet user-secrets set "Search:SerperApiKey" "<sua-chave>" --project src/OpportunityOS.Worker
   > ```
+  >
+  > **Por que não o Google CSE?** A JSON API do Google **não serve mais engines whole-web**
+  > (restrição de jan/2026): mesmo com chave e projeto corretos, um `cx` de web-aberta
+  > retorna `403 "This project does not have the access to Custom Search JSON API"`. O
+  > `GoogleWebJobSearchProvider` segue no código (flag `EnableGoogleWebSearch`) só funciona com
+  > um `cx` **escopado a sites**; para web-aberta de verdade, use o Serper.
+
+- **Auto-score na descoberta** — todo job recém-descoberto (qualquer provider) é pontuado
+  na hora contra o perfil ativo pelo **match engine heurístico** (sem LLM, barato), criando
+  um `OpportunityMatch`. É isso que faz a vaga **aparecer na tela** sem passo manual. Jobs
+  antigos sem match são pontuados quando reencontrados (backfill). Falha de score nunca
+  interrompe a descoberta.
 
 ## AI Copilot Layer (Fase 3)
 

@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Logging;
+using OpportunityOS.Application.Matching;
+using OpportunityOS.Application.Normalization;
 using OpportunityOS.Domain.Entities;
 
 namespace OpportunityOS.Application.Discovery;
@@ -32,17 +34,23 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
     private readonly IEnumerable<IJobSourceProvider> _providers;
     private readonly IEnumerable<IJobSearchProvider> _searchProviders;
     private readonly IDiscoveryStore _store;
+    private readonly IJobNormalizer _normalizer;
+    private readonly IMatchEngine _matchEngine;
     private readonly ILogger<JobDiscoveryService> _logger;
 
     public JobDiscoveryService(
         IEnumerable<IJobSourceProvider> providers,
         IEnumerable<IJobSearchProvider> searchProviders,
         IDiscoveryStore store,
+        IJobNormalizer normalizer,
+        IMatchEngine matchEngine,
         ILogger<JobDiscoveryService> logger)
     {
         _providers = providers;
         _searchProviders = searchProviders;
         _store = store;
+        _normalizer = normalizer;
+        _matchEngine = matchEngine;
         _logger = logger;
     }
 
@@ -54,6 +62,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
         int newJobs = 0, updatedJobs = 0, providersInvoked = 0;
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var companies = new HashSet<Guid>();
+        var profile = await _store.GetActiveProfileAsync(ct);
 
         foreach (var provider in _searchProviders)
         {
@@ -68,7 +77,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
 
                     var company = await _store.FindOrCreateCompanyByNameAsync(dto.CompanyName, ct);
                     companies.Add(company.Id);
-                    if (await UpsertAsync(company.Id, dto, ct)) newJobs++;
+                    if (await UpsertAsync(company.Id, dto, profile, ct)) newJobs++;
                     else updatedJobs++;
                 }
                 await _store.SaveChangesAsync(ct);
@@ -98,6 +107,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
 
         int newJobs = 0, updatedJobs = 0, providersInvoked = 0;
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        var profile = await _store.GetActiveProfileAsync(ct);
 
         foreach (var company in companies)
         {
@@ -115,7 +125,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
                         var key = $"{dto.SourceProvider}::{dto.ExternalId}";
                         if (!seen.Add(key)) continue; // ignore intra-run duplicates
 
-                        if (await UpsertAsync(company.Id, dto, ct)) newJobs++;
+                        if (await UpsertAsync(company.Id, dto, profile, ct)) newJobs++;
                         else updatedJobs++;
                     }
                     run.RecordSuccess();
@@ -140,7 +150,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
     }
 
     /// <returns>true if a new posting was created; false if an existing one was refreshed.</returns>
-    private async Task<bool> UpsertAsync(Guid companyId, DiscoveredJobDto dto, CancellationToken ct)
+    private async Task<bool> UpsertAsync(Guid companyId, DiscoveredJobDto dto, CandidateProfile? profile, CancellationToken ct)
     {
         var existing = await _store.FindJobAsync(dto.SourceProvider, dto.ExternalId, ct);
         if (existing is null)
@@ -151,6 +161,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
                 dto.Location, dto.Language, dto.PublishedAtUtc, dto.UpdatedAtUtc);
             await _store.AddJobAsync(job, ct);
             _logger.LogInformation("JobDiscovered {Provider} {ExternalId} {Title}", dto.SourceProvider, dto.ExternalId, dto.Title);
+            await AutoScoreAsync(job, profile, alreadyMatched: false, ct);
             return true;
         }
 
@@ -158,7 +169,38 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
             dto.Title, dto.AbsoluteUrl, dto.DescriptionText ?? string.Empty, dto.DescriptionHtml,
             dto.Department, dto.Location, dto.Language, dto.UpdatedAtUtc);
         _logger.LogInformation("JobUpdated {Provider} {ExternalId}", dto.SourceProvider, dto.ExternalId);
+        // Backfill a score for previously-discovered jobs that were never matched.
+        await AutoScoreAsync(existing, profile, alreadyMatched: null, ct);
         return false;
+    }
+
+    /// <summary>
+    /// Score a job against the active profile with the heuristic engine (no LLM) so it
+    /// surfaces on the living screen. Best-effort: a scoring failure never breaks discovery.
+    /// <paramref name="alreadyMatched"/>: false = known-new (skip the DB check); null = check first.
+    /// </summary>
+    private async Task AutoScoreAsync(JobPosting job, CandidateProfile? profile, bool? alreadyMatched, CancellationToken ct)
+    {
+        if (profile is null) return;
+        try
+        {
+            if (alreadyMatched is null && await _store.JobHasMatchAsync(job.Id, ct)) return;
+
+            var norm = _normalizer.Normalize(job);
+            job.ApplyNormalization(norm.Seniority, norm.WorkMode, norm.Language, norm.Skills, norm.Domains);
+
+            var r = _matchEngine.Evaluate(profile, job);
+            var match = new OpportunityMatch(
+                job.Id, profile.Id, r.OverallScore, r.TechnicalScore, r.DomainScore, r.SeniorityScore,
+                r.LocationScore, r.LanguageScore, r.Recommendation, r.Strengths, r.Risks,
+                r.MissingRequirements, r.Rationale);
+            job.MarkAnalyzed();
+            await _store.AddMatchAsync(match, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Auto-score failed for job {JobId}", job.Id);
+        }
     }
 
     private async Task<IReadOnlyList<Company>> GetSingleCompany(Guid id, CancellationToken ct)

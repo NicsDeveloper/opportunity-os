@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using OpportunityOS.Application.Discovery;
+using OpportunityOS.Application.Matching;
+using OpportunityOS.Application.Normalization;
 using OpportunityOS.Domain.Entities;
 using OpportunityOS.Domain.Enums;
 using OpportunityOS.UnitTests.Fakes;
@@ -16,8 +18,11 @@ public sealed class JobDiscoveryServiceTests
         return c;
     }
 
+    private static readonly IJobNormalizer Normalizer = new JobNormalizer();
+    private static readonly IMatchEngine Engine = new HeuristicMatchEngine(Normalizer);
+
     private static JobDiscoveryService Build(FakeDiscoveryStore store, params IJobSourceProvider[] providers) =>
-        new(providers, Array.Empty<IJobSearchProvider>(), store, NullLogger<JobDiscoveryService>.Instance);
+        new(providers, Array.Empty<IJobSearchProvider>(), store, Normalizer, Engine, NullLogger<JobDiscoveryService>.Instance);
 
     [Fact]
     public async Task Discover_CreatesNewJob()
@@ -98,7 +103,8 @@ public sealed class JobDiscoveryServiceTests
             FakeJobSourceProvider.Job("g-1", "Gupy", "Desenvolvedor .NET") with { CompanyName = "Lumini IT" }
         });
         var service = new JobDiscoveryService(
-            Array.Empty<IJobSourceProvider>(), new[] { search }, store, NullLogger<JobDiscoveryService>.Instance);
+            Array.Empty<IJobSourceProvider>(), new[] { search }, store, Normalizer, Engine,
+            NullLogger<JobDiscoveryService>.Instance);
 
         var result = await service.SearchAsync(new[] { ".net", "c#" }, CancellationToken.None);
 
