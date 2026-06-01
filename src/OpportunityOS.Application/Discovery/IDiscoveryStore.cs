@@ -27,5 +27,13 @@ public interface IDiscoveryStore
 
     Task AddExecutionRunAsync(ExecutionRun run, CancellationToken ct);
 
+    /// <summary>The active candidate profile (latest), or null when none exists.</summary>
+    Task<CandidateProfile?> GetActiveProfileAsync(CancellationToken ct);
+
+    /// <summary>True if the job already has at least one match (skip re-scoring).</summary>
+    Task<bool> JobHasMatchAsync(Guid jobPostingId, CancellationToken ct);
+
+    Task AddMatchAsync(OpportunityMatch match, CancellationToken ct);
+
     Task SaveChangesAsync(CancellationToken ct);
 }

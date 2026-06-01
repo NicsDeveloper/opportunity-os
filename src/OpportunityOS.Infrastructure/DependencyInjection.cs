@@ -102,6 +102,21 @@ public static class DependencyInjection
             services.AddScoped<IAtsBoardFinder>(sp => sp.GetRequiredService<HeuristicAtsBoardFinder>());
         }
 
+        // Open-web job search via Serper.dev (real Google web index — independent of the
+        // Google CSE whole-web restriction). Registered on its own key, not the CSE block.
+        var serper = new SerperSearchOptions
+        {
+            ApiKey = config["Search:SerperApiKey"] ?? string.Empty,
+            MaxQueriesPerCall = config.GetValue("Search:SerperMaxQueriesPerCall", 4),
+            Freshness = config.GetValue("Search:SerperFreshness", "qdr:m") ?? "qdr:m",
+            DelayMsBetweenQueries = config.GetValue("Search:SerperDelayMs", 1200),
+        };
+        if (serper.IsConfigured && config.GetValue("FeatureFlags:EnableSerperWebSearch", true))
+        {
+            services.AddSingleton(serper);
+            services.AddHttpClient<IJobSearchProvider, SerperWebJobSearchProvider>(ConfigureClient);
+        }
+
         var bacenOptions = new BacenOptions();
         config.GetSection("Bacen").Bind(bacenOptions);
         services.AddSingleton(bacenOptions);
