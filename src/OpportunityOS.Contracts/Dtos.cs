@@ -161,7 +161,9 @@ public sealed record DashboardSummaryResponse(
 public sealed record BestOpportunityResponse(
     Guid MatchId, Guid JobPostingId, string JobTitle, string CompanyName,
     List<string> Skills, int OverallScore, string Recommendation, string JobUrl,
-    string? CompanyWebsiteUrl, DateTime PostedAtUtc, string Rationale);
+    string? CompanyWebsiteUrl, DateTime PostedAtUtc, string Rationale,
+    int DiscoveryRank, string SourceType, int SourceConfidenceScore,
+    bool RequiresManualValidation, string? RealCompanyName, string? SourceName);
 
 public sealed record ExecutionRunResponse(
     Guid Id, string RunType, string Status, DateTime StartedAtUtc,

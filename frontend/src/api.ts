@@ -43,6 +43,8 @@ export interface BestOpportunity {
   matchId: string; jobPostingId: string; jobTitle: string; companyName: string;
   skills: string[]; overallScore: number; recommendation: string; jobUrl: string;
   companyWebsiteUrl?: string | null; postedAtUtc: string; rationale: string;
+  discoveryRank?: number; sourceType?: string; sourceConfidenceScore?: number;
+  requiresManualValidation?: boolean; realCompanyName?: string | null; sourceName?: string | null;
 }
 export interface Run {
   id: string; runType: string; status: string; startedAtUtc: string;
