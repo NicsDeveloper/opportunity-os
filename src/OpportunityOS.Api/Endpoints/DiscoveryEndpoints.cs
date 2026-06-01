@@ -49,5 +49,17 @@ public static class DiscoveryEndpoints
         // Raw volume (so the user can see everything the Firehose collected).
         group.MapGet("/raw-candidates", async (int? take, IFirehoseService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetRawCandidatesAsync(take ?? 100, ct)));
+
+        // Promotion: RawJobCandidate -> JobPosting (+ source occurrence, dedup by fingerprint).
+        group.MapPost("/raw-candidates/{id:guid}/promote", async (
+            Guid id, IRawCandidatePromotionService promo, CancellationToken ct) =>
+        {
+            var r = await promo.PromoteAsync(id, ct);
+            return r.Promoted ? Results.Ok(r) : Results.UnprocessableEntity(r);
+        });
+
+        group.MapPost("/promote-batch", async (
+            PromoteBatchRequest? req, IRawCandidatePromotionService promo, CancellationToken ct) =>
+            Results.Ok(await promo.PromoteBatchAsync(req ?? new PromoteBatchRequest(null, null, null), ct)));
     }
 }

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using OpportunityOS.Application.Discovery;
 using OpportunityOS.Contracts;
 using OpportunityOS.Domain.Entities;
+using OpportunityOS.Domain.Enums;
 using Xunit;
 
 namespace OpportunityOS.UnitTests;
@@ -142,6 +143,70 @@ public sealed class FirehoseTests
             Task.FromResult(_results);
     }
 
+    // ---------- Promotion (P0) ----------
+
+    private static RawCandidatePromotionService Promo(FakeFirehoseStore fh, OpportunityOS.UnitTests.Fakes.FakeDiscoveryStore disc)
+    {
+        var norm = new OpportunityOS.Application.Normalization.JobNormalizer();
+        return new RawCandidatePromotionService(fh, disc, new JobFingerprintService(), norm,
+            new OpportunityOS.Application.Matching.HeuristicMatchEngine(norm),
+            NullLogger<RawCandidatePromotionService>.Instance);
+    }
+
+    [Fact]
+    public async Task Promote_WithRealCompany_CreatesJobPosting_AndOccurrence()
+    {
+        var fh = new FakeFirehoseStore();
+        var disc = new OpportunityOS.UnitTests.Fakes.FakeDiscoveryStore();
+        var c = new RawJobCandidate("Desenvolvedor .NET", "https://acme.gupy.io/jobs/1", "SerperRaw",
+            "acme.gupy.io", SourceType.OfficialAts, 80, false, realCompanyName: "Acme");
+        fh.RawCandidates.Add(c);
+
+        var r = await Promo(fh, disc).PromoteAsync(c.Id, CancellationToken.None);
+
+        Assert.True(r.Promoted);
+        Assert.False(r.WasDuplicate);
+        Assert.Single(disc.Jobs);
+        Assert.Single(fh.Occurrences);
+        Assert.Equal("PromotedToJobPosting", c.Status.ToString());
+    }
+
+    [Fact]
+    public async Task Promote_WithoutRealCompany_IsRejected()
+    {
+        var fh = new FakeFirehoseStore();
+        var disc = new OpportunityOS.UnitTests.Fakes.FakeDiscoveryStore();
+        var c = new RawJobCandidate("NET Developer Jobs", "https://indeed.com/x", "SerperRaw",
+            "indeed.com", SourceType.Aggregator, 35, true, realCompanyName: null);
+        fh.RawCandidates.Add(c);
+
+        var r = await Promo(fh, disc).PromoteAsync(c.Id, CancellationToken.None);
+
+        Assert.False(r.Promoted);
+        Assert.Empty(disc.Jobs);
+        Assert.Equal("Rejected", c.Status.ToString());
+    }
+
+    [Fact]
+    public async Task Promote_DuplicateFingerprint_AddsOccurrence_NoNewJob()
+    {
+        var fh = new FakeFirehoseStore();
+        var disc = new OpportunityOS.UnitTests.Fakes.FakeDiscoveryStore();
+        var existing = new JobPosting(Guid.NewGuid(), "ext", "Greenhouse", "Desenvolvedor .NET",
+            "https://boards.greenhouse.io/acme/jobs/1", "desc");
+        fh.JobByFingerprint = _ => existing; // any fingerprint resolves to the existing job
+        var c = new RawJobCandidate("Desenvolvedor .NET", "https://jobgether.com/x", "SerperRaw",
+            "jobgether.com", SourceType.Aggregator, 35, true, realCompanyName: "Acme");
+        fh.RawCandidates.Add(c);
+
+        var r = await Promo(fh, disc).PromoteAsync(c.Id, CancellationToken.None);
+
+        Assert.True(r.Promoted);
+        Assert.True(r.WasDuplicate);
+        Assert.Empty(disc.Jobs);          // no new posting
+        Assert.Single(fh.Occurrences);    // recorded as an occurrence
+    }
+
     private static FirehoseService Build(FakeFirehoseStore store, params IRawSearchProvider[] providers) =>
         BuildWith(store, new FakeBudget(int.MaxValue), new DiscoveryBudgetOptions(), providers);
 
@@ -215,6 +280,12 @@ public sealed class FirehoseTests
         public Task AddExecutionRunAsync(ExecutionRun r, CancellationToken ct) { Runs.Add(r); return Task.CompletedTask; }
         public Task<IReadOnlyList<RawJobCandidate>> GetRawCandidatesAsync(int take, CancellationToken ct) => Task.FromResult<IReadOnlyList<RawJobCandidate>>(RawCandidates.Take(take).ToList());
         public Task<int> CountRawCandidatesAsync(DateTime? since, CancellationToken ct) => Task.FromResult(RawCandidates.Count);
+        public Task<RawJobCandidate?> GetRawCandidateAsync(Guid id, CancellationToken ct) => Task.FromResult(RawCandidates.FirstOrDefault(c => c.Id == id));
+        public Task<IReadOnlyList<RawJobCandidate>> GetPromotableAsync(int minConf, bool requireCompany, int take, CancellationToken ct) => Task.FromResult<IReadOnlyList<RawJobCandidate>>(RawCandidates.Take(take).ToList());
+        public List<JobPostingSourceOccurrence> Occurrences { get; } = new();
+        public Func<string, JobPosting?> JobByFingerprint { get; set; } = _ => null;
+        public Task<JobPosting?> FindJobByFingerprintAsync(string fp, CancellationToken ct) => Task.FromResult(JobByFingerprint(fp));
+        public Task AddSourceOccurrenceAsync(JobPostingSourceOccurrence o, CancellationToken ct) { Occurrences.Add(o); return Task.CompletedTask; }
         public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
     }
 }

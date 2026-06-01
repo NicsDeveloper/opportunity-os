@@ -58,6 +58,7 @@ public static class DependencyInjection
         services.AddSingleton<IQueryBudgetManager, QueryBudgetManager>();
         services.AddScoped<IFirehoseStore, EfFirehoseStore>();
         services.AddScoped<IFirehoseService, FirehoseService>();
+        services.AddScoped<IRawCandidatePromotionService, RawCandidatePromotionService>();
 
         services.AddScoped<IOpportunityStore, EfOpportunityStore>();
         services.AddScoped<IOpportunityPipeline, OpportunityPipeline>();

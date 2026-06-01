@@ -91,6 +91,7 @@ public sealed class OpportunityOsDbContext : DbContext
             e.HasKey(x => x.Id);
             e.Property(x => x.Status).HasConversion<int>();
             e.Property(x => x.SourceType).HasConversion<int>();
+            e.HasIndex(x => x.NormalizedFingerprint);
             e.Property(x => x.ExtractedSkills).HasConversion(stringListConverter).HasColumnType("jsonb")
                 .Metadata.SetValueComparer(stringListComparer);
             e.Property(x => x.ExtractedDomains).HasConversion(stringListConverter).HasColumnType("jsonb")
