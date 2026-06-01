@@ -82,18 +82,33 @@ function Topbar({ firstName }: { firstName: string }) {
 
 /* ---------- the one living screen ---------- */
 
+const PAGE_SIZE = 6;
+const SEARCH_KEYWORDS = [
+  "desenvolvedor .net", "desenvolvedor backend c#", "engenheiro de software .net",
+  "programador c# pleno", "vaga .net remoto", "desenvolvedor .net fintech",
+];
+
 function Feed({ reload, notify, onChanged }: {
   reload: number; notify: (m: string) => void; onChanged: () => void;
 }) {
   const summary = useAsync(api.summary, [reload]);
-  const opps = useAsync(() => api.bestOpportunities(40), [reload]);
+  const opps = useAsync(() => api.bestOpportunities(120), [reload]);
   const [busy, setBusy] = useState(false);
+  const [page, setPage] = useState(0);
   const s = summary.data;
+
+  const all = opps.data ?? [];
+  const pageCount = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+  const current = Math.min(page, pageCount - 1);
+  const pageItems = all.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE);
+
+  // Reset to the first page whenever the underlying data refreshes.
+  useEffect(() => { setPage(0); }, [opps.data?.length]);
 
   const runSearch = async () => {
     setBusy(true); notify("Buscando vagas .NET…");
     try {
-      await api.search([".net", "c#", "desenvolvedor .net", "backend .net", "pagamentos"]);
+      await api.search(SEARCH_KEYWORDS);
       notify("Busca disparada. Os resultados aparecem aqui em instantes.");
       onChanged();
     } catch { notify("Falha na busca."); }
@@ -103,7 +118,7 @@ function Feed({ reload, notify, onChanged }: {
   return (
     <>
       <div className="statgrid">
-        <Stat icon="target" label="Oportunidades relevantes" n={opps.data?.length}
+        <Stat icon="target" label="Oportunidades relevantes" n={all.length}
           delta={s ? `${s.matchesAbove75} fortes (75+)` : ""} />
         <Stat icon="briefcase" label="Vagas descobertas" n={s?.jobsDiscovered}
           delta={s ? `+${s.jobsToday} hoje` : ""} />
@@ -118,7 +133,7 @@ function Feed({ reload, notify, onChanged }: {
           <div>
             <h3>Melhores oportunidades</h3>
             <p className="sub" style={{ margin: "2px 0 0" }}>
-              Ordenadas por relevância para o seu perfil .NET. Clique em “Gerar mensagem” para um rascunho pronto pra copiar.
+              Ordenadas por relevância e frescor. Clique em “Gerar mensagem” para um rascunho pronto pra copiar.
             </p>
           </div>
           <button className="btn primary" disabled={busy} onClick={runSearch}>
@@ -127,14 +142,22 @@ function Feed({ reload, notify, onChanged }: {
         </div>
 
         {opps.error && <p className="err">{opps.error}</p>}
-        {(opps.data ?? []).map((o) => (
+        {pageItems.map((o) => (
           <OppCard key={o.matchId} o={o} notify={notify} onChanged={onChanged} />
         ))}
-        {opps.data?.length === 0 && (
+        {all.length === 0 && (
           <p className="placeholder">
             Nenhuma oportunidade relevante ainda. Clique em <strong>Buscar agora</strong> — a descoberta contínua
             também roda sozinha em segundo plano.
           </p>
+        )}
+
+        {all.length > PAGE_SIZE && (
+          <div className="pager">
+            <button className="btn" disabled={current === 0} onClick={() => setPage(current - 1)}>‹ Anterior</button>
+            <span className="pager-info">Página {current + 1} de {pageCount} · {all.length} vagas</span>
+            <button className="btn" disabled={current >= pageCount - 1} onClick={() => setPage(current + 1)}>Próxima ›</button>
+          </div>
         )}
       </div>
     </>

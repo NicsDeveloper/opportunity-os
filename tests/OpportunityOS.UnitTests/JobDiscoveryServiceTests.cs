@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using OpportunityOS.Application.AI;
 using OpportunityOS.Application.Discovery;
 using OpportunityOS.Application.Matching;
 using OpportunityOS.Application.Normalization;
@@ -27,8 +28,24 @@ public sealed class JobDiscoveryServiceTests
     }
     private static readonly IJobContentEnricher Enricher = new NoEnricher();
 
+    // Never invoked in these tests (no active profile -> auto-score returns early).
+    private sealed class UnusedUnderstanding : IJobUnderstandingService
+    {
+        public Task<JobAnalysisResult> AnalyzeAsync(JobPosting job, CancellationToken ct) =>
+            throw new NotSupportedException();
+    }
+    private sealed class UnusedFit : ICandidateFitAnalysisService
+    {
+        public Task<OpportunityMatch> AnalyzeFitAsync(
+            CandidateProfile profile, JobPosting job, JobAnalysisResult a, CancellationToken ct) =>
+            throw new NotSupportedException();
+    }
+    private static readonly IJobUnderstandingService Understanding = new UnusedUnderstanding();
+    private static readonly ICandidateFitAnalysisService Fit = new UnusedFit();
+
     private static JobDiscoveryService Build(FakeDiscoveryStore store, params IJobSourceProvider[] providers) =>
-        new(providers, Array.Empty<IJobSearchProvider>(), store, Normalizer, Engine, Enricher, NullLogger<JobDiscoveryService>.Instance);
+        new(providers, Array.Empty<IJobSearchProvider>(), store, Normalizer, Engine, Enricher,
+            Understanding, Fit, NullLogger<JobDiscoveryService>.Instance);
 
     [Fact]
     public async Task Discover_CreatesNewJob()
@@ -110,7 +127,7 @@ public sealed class JobDiscoveryServiceTests
         });
         var service = new JobDiscoveryService(
             Array.Empty<IJobSourceProvider>(), new[] { search }, store, Normalizer, Engine, Enricher,
-            NullLogger<JobDiscoveryService>.Instance);
+            Understanding, Fit, NullLogger<JobDiscoveryService>.Instance);
 
         var result = await service.SearchAsync(new[] { ".net", "c#" }, CancellationToken.None);
 

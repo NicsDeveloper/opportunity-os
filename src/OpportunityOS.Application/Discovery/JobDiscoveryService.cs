@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using OpportunityOS.Application.AI;
 using OpportunityOS.Application.Matching;
 using OpportunityOS.Application.Normalization;
 using OpportunityOS.Domain.Entities;
@@ -35,6 +36,10 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
     // capped per run so continuous discovery doesn't hammer sites.
     private const int ThinDescriptionChars = 300;
     private const int MaxEnrichmentsPerRun = 8;
+    // Promising fresh jobs (heuristic >= gate) get an authoritative LLM score on discovery
+    // so the displayed score is final "de bate pronto" — capped per run to bound LLM cost.
+    private const int LlmAutoAnalyzeGate = 60;
+    private const int MaxLlmAnalysesPerRun = 6;
 
     private readonly IEnumerable<IJobSourceProvider> _providers;
     private readonly IEnumerable<IJobSearchProvider> _searchProviders;
@@ -42,8 +47,11 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
     private readonly IJobNormalizer _normalizer;
     private readonly IMatchEngine _matchEngine;
     private readonly IJobContentEnricher _enricher;
+    private readonly IJobUnderstandingService _understanding;
+    private readonly ICandidateFitAnalysisService _fit;
     private readonly ILogger<JobDiscoveryService> _logger;
     private int _enrichmentsLeft;
+    private int _llmAnalysesLeft;
 
     public JobDiscoveryService(
         IEnumerable<IJobSourceProvider> providers,
@@ -52,6 +60,8 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
         IJobNormalizer normalizer,
         IMatchEngine matchEngine,
         IJobContentEnricher enricher,
+        IJobUnderstandingService understanding,
+        ICandidateFitAnalysisService fit,
         ILogger<JobDiscoveryService> logger)
     {
         _providers = providers;
@@ -60,6 +70,8 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
         _normalizer = normalizer;
         _matchEngine = matchEngine;
         _enricher = enricher;
+        _understanding = understanding;
+        _fit = fit;
         _logger = logger;
     }
 
@@ -73,6 +85,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
         var companies = new HashSet<Guid>();
         var profile = await _store.GetActiveProfileAsync(ct);
         _enrichmentsLeft = MaxEnrichmentsPerRun;
+        _llmAnalysesLeft = MaxLlmAnalysesPerRun;
 
         foreach (var provider in _searchProviders)
         {
@@ -119,6 +132,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var profile = await _store.GetActiveProfileAsync(ct);
         _enrichmentsLeft = MaxEnrichmentsPerRun;
+        _llmAnalysesLeft = MaxLlmAnalysesPerRun;
 
         foreach (var company in companies)
         {
@@ -212,16 +226,42 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
             job.ApplyNormalization(norm.Seniority, norm.WorkMode, norm.Language, norm.Skills, norm.Domains);
 
             var r = _matchEngine.Evaluate(profile, job);
+            job.MarkAnalyzed();
+
+            // Upgrade promising jobs to an authoritative LLM score on the spot, so the feed
+            // shows the final number without a manual "Analisar" click. Capped per run.
+            if (r.OverallScore >= LlmAutoAnalyzeGate && _llmAnalysesLeft > 0)
+            {
+                _llmAnalysesLeft--;
+                var llmMatch = await TryLlmMatchAsync(profile, job, ct);
+                if (llmMatch is not null) { await _store.AddMatchAsync(llmMatch, ct); return; }
+            }
+
             var match = new OpportunityMatch(
                 job.Id, profile.Id, r.OverallScore, r.TechnicalScore, r.DomainScore, r.SeniorityScore,
                 r.LocationScore, r.LanguageScore, r.Recommendation, r.Strengths, r.Risks,
                 r.MissingRequirements, r.Rationale);
-            job.MarkAnalyzed();
             await _store.AddMatchAsync(match, ct);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Auto-score failed for job {JobId}", job.Id);
+        }
+    }
+
+    private async Task<OpportunityMatch?> TryLlmMatchAsync(CandidateProfile profile, JobPosting job, CancellationToken ct)
+    {
+        try
+        {
+            var analysis = await _understanding.AnalyzeAsync(job, ct);
+            job.ApplyNormalization(analysis.Seniority, analysis.WorkMode, analysis.Language,
+                analysis.RequiredSkills.Concat(analysis.NiceToHaveSkills), analysis.Domains);
+            return await _fit.AnalyzeFitAsync(profile, job, analysis, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "LLM auto-analysis failed for job {JobId}; keeping heuristic score", job.Id);
+            return null;
         }
     }
 
