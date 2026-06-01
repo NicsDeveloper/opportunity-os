@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using OpportunityOS.Application.Discovery;
 using OpportunityOS.Domain.Entities;
+using OpportunityOS.Domain.Enums;
 
 namespace OpportunityOS.Infrastructure.Persistence;
 
@@ -36,6 +37,25 @@ public sealed class EfFirehoseStore : IFirehoseStore
 
     public async Task<IReadOnlyList<RawJobCandidate>> GetRawCandidatesAsync(int take, CancellationToken ct) =>
         await _db.RawJobCandidates.OrderByDescending(c => c.DiscoveredAtUtc).Take(take).ToListAsync(ct);
+
+    public Task<RawJobCandidate?> GetRawCandidateAsync(Guid id, CancellationToken ct) =>
+        _db.RawJobCandidates.FirstOrDefaultAsync(c => c.Id == id, ct);
+
+    public async Task<IReadOnlyList<RawJobCandidate>> GetPromotableAsync(int minSourceConfidence, bool requireRealCompany, int take, CancellationToken ct)
+    {
+        var q = _db.RawJobCandidates.Where(c =>
+            (c.Status == RawJobCandidateStatus.Discovered || c.Status == RawJobCandidateStatus.Classified)
+            && c.SourceConfidenceScore >= minSourceConfidence);
+        if (requireRealCompany) q = q.Where(c => c.RealCompanyName != null && c.RealCompanyName != "");
+        return await q.OrderByDescending(c => c.SourceConfidenceScore).ThenByDescending(c => c.DiscoveredAtUtc)
+            .Take(take).ToListAsync(ct);
+    }
+
+    public Task<JobPosting?> FindJobByFingerprintAsync(string fingerprint, CancellationToken ct) =>
+        _db.JobPostings.FirstOrDefaultAsync(j => j.NormalizedFingerprint == fingerprint, ct);
+
+    public async Task AddSourceOccurrenceAsync(JobPostingSourceOccurrence occurrence, CancellationToken ct) =>
+        await _db.JobPostingSourceOccurrences.AddAsync(occurrence, ct);
 
     public Task<int> CountRawCandidatesAsync(DateTime? sinceUtc, CancellationToken ct) =>
         sinceUtc is { } since

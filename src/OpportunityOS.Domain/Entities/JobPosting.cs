@@ -35,6 +35,7 @@ public sealed class JobPosting
     public string? SourceName { get; private set; }
     public string? RealCompanyName { get; private set; }
     public string? OriginalJobUrl { get; private set; }
+    public string? NormalizedFingerprint { get; private set; }
 
     private JobPosting() { }
 
@@ -124,6 +125,8 @@ public sealed class JobPosting
         Status = JobPostingStatus.Archived;
         UpdatedAtUtc = DateTime.UtcNow;
     }
+
+    public void SetFingerprint(string fingerprint) => NormalizedFingerprint = fingerprint;
 
     public void SetSourceQuality(
         SourceType sourceType, string? sourceName, int sourceConfidenceScore,

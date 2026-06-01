@@ -293,7 +293,17 @@ de agregador **nunca** vira empresa sem evidência; sem empresa clara → "empre
 **Dedup semântica (`IJobFingerprintService` + `JobPostingSourceOccurrence`)** — fingerprint
 estável (título+empresa+localização+senioridade+skills+hash da descrição). A mesma vaga em fontes
 diferentes é marcada `Duplicate` (continua visível como ocorrência, não some do volume); a melhor
-fonte fica como principal na promoção (futuro). `RawJobCandidate.NormalizedFingerprint` indexado.
+fonte fica como principal na promoção. `RawJobCandidate.NormalizedFingerprint` indexado.
+
+**Promoção (`IRawCandidatePromotionService`)** — a ponte Firehose → fluxo qualificado:
+`POST /api/discovery/raw-candidates/{id}/promote` e `POST /api/discovery/promote-batch`. Cria
+`JobPosting` (com fingerprint + qualidade de fonte) só quando há **empresa confirmada** (agregador
+sem empresa não vira Company); dedup por fingerprint vira `JobPostingSourceOccurrence` na vaga
+existente (melhor fonte como principal); pontua heurístico para já aparecer no feed. Sem LLM.
+
+**Ranking (`IDiscoveryRankService`)** — dois scores: `FitScore` (relevância) e `DiscoveryRank`
+(Fit·0.50 + SourceConfidence·0.20 + Freshness·0.15 + CompanyPriority·0.10 + Feedback·0.05).
+`GET /api/matches?sort=rank` ordena pelo DiscoveryRank (base do Qualified view).
 
 ## AI Copilot Layer (Fase 3)
 

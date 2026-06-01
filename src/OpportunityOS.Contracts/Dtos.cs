@@ -363,3 +363,22 @@ public sealed record RawJobCandidateResponse(
     bool RequiresManualValidation,
     Guid? SearchCampaignId,
     string? Query);
+
+// ---- Firehose promotion (RawJobCandidate -> JobPosting) ----
+
+public sealed record PromoteBatchRequest(
+    int? MaxCandidates,
+    int? MinSourceConfidence,
+    bool? RequireRealCompany);
+
+public sealed record PromotionResultResponse(
+    bool Promoted,
+    Guid? JobPostingId,
+    bool WasDuplicate,
+    string Reason);
+
+public sealed record BatchPromotionResponse(
+    int Considered,
+    int Promoted,
+    int Duplicates,
+    int Skipped);
