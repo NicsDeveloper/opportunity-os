@@ -34,6 +34,7 @@ public static class DependencyInjection
         services.AddScoped<IJobNormalizer, JobNormalizer>();
         services.AddScoped<IMatchEngine, HeuristicMatchEngine>();
         services.AddSingleton<ISourceClassifierService, SourceClassifierService>();
+        services.AddSingleton<ICompanyNameResolver, CompanyNameResolver>();
 
         // Link validation (HEAD-check -> expire dead postings), used by API + Worker.
         services.AddHttpClient<IJobLinkValidator, JobLinkValidator>(ConfigureClient);

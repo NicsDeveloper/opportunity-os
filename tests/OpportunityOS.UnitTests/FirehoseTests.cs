@@ -118,7 +118,8 @@ public sealed class FirehoseTests
     private static FirehoseService BuildWith(
         FakeFirehoseStore store, IQueryBudgetManager budget, DiscoveryBudgetOptions opts, params IRawSearchProvider[] providers) =>
         new(providers, new QueryExpansionService(), store, budget, opts,
-            new OpportunityOS.Infrastructure.Providers.SourceClassifierService(), NullLogger<FirehoseService>.Instance);
+            new OpportunityOS.Infrastructure.Providers.SourceClassifierService(),
+            new OpportunityOS.Infrastructure.Providers.CompanyNameResolver(), NullLogger<FirehoseService>.Instance);
 
     [Fact]
     public async Task AggressiveSearch_StopsWithBudgetLimit_WhenBudgetExhausted()
