@@ -21,6 +21,7 @@ builder.Services.AddHangfireServer();
 
 builder.Services.AddScoped<DiscoverJobsJob>();
 builder.Services.AddScoped<SearchJobsJob>();
+builder.Services.AddScoped<ValidateLinksJob>();
 builder.Services.AddScoped<SendDailyDigestJob>();
 builder.Services.AddHostedService<RecurringJobScheduler>();
 

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using OpportunityOS.Contracts;
+using OpportunityOS.Domain.Entities;
 using OpportunityOS.Domain.Enums;
 using OpportunityOS.Infrastructure.Persistence;
 
@@ -18,8 +19,25 @@ public static class DashboardEndpoints
             var jobs = await db.JobPostings.CountAsync(ct);
             var jobsToday = await db.JobPostings.CountAsync(j => j.CreatedAtUtc >= today, ct);
 
-            var matches75 = await db.OpportunityMatches.CountAsync(m => m.OverallScore >= 75, ct);
-            var matches75Today = await db.OpportunityMatches.CountAsync(m => m.OverallScore >= 75 && m.CreatedAtUtc >= today, ct);
+            // "Fortes (75+)" must mean the same as the feed: strong AND fresh/active — not
+            // stale/closed postings. Load strong matches + their jobs and filter in memory
+            // (EffectiveDateUtc / IsTalentPool are computed, not SQL-mappable).
+            var publishedSince = DateTime.UtcNow.AddDays(-120);
+            var strong = await db.OpportunityMatches.Where(m => m.OverallScore >= 75).ToListAsync(ct);
+            var strongLatest = strong
+                .GroupBy(m => m.JobPostingId)
+                .Select(g => g.OrderByDescending(m => m.CreatedAtUtc).First())
+                .ToList();
+            var strongJobIds = strongLatest.Select(m => m.JobPostingId).ToList();
+            var strongJobs = await db.JobPostings
+                .Where(j => strongJobIds.Contains(j.Id)).ToDictionaryAsync(j => j.Id, ct);
+            bool FreshActive(JobPosting j) =>
+                j.Status != JobPostingStatus.Expired && j.Status != JobPostingStatus.Archived
+                && !j.IsTalentPool && j.EffectiveDateUtc >= publishedSince;
+
+            var matches75 = strongLatest.Count(m => strongJobs.TryGetValue(m.JobPostingId, out var j) && FreshActive(j));
+            var matches75Today = strongLatest.Count(m =>
+                m.CreatedAtUtc >= today && strongJobs.TryGetValue(m.JobPostingId, out var j) && FreshActive(j));
 
             var messages = await db.GeneratedMessages.CountAsync(ct);
             var messagesToday = await db.GeneratedMessages.CountAsync(m => m.CreatedAtUtc >= today, ct);

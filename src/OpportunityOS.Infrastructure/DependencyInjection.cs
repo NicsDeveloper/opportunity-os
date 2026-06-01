@@ -34,6 +34,9 @@ public static class DependencyInjection
         services.AddScoped<IJobNormalizer, JobNormalizer>();
         services.AddScoped<IMatchEngine, HeuristicMatchEngine>();
 
+        // Link validation (HEAD-check -> expire dead postings), used by API + Worker.
+        services.AddHttpClient<IJobLinkValidator, JobLinkValidator>(ConfigureClient);
+
         // Headless renderer for JS-heavy career pages (shared browser); HTTP fallback if absent.
         services.AddSingleton<IPageRenderer, PlaywrightPageRenderer>();
 

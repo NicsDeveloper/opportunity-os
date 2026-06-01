@@ -137,6 +137,10 @@ tr:last-child td { border-bottom: none; }
 .opp .why { font-size: 12px; color: #4b5563; margin-top: 6px; line-height: 1.4;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .opp .why strong { color: #374151; }
+.why-link { margin-top: 6px; padding: 0; border: none; background: none; cursor: pointer;
+  color: var(--accent); font-size: 12px; font-weight: 600; }
+.why-link:hover { text-decoration: underline; }
+.why-link:disabled { opacity: .6; cursor: default; }
 .oppcard { border-bottom: 1px solid var(--border); }
 .oppcard:last-child { border-bottom: none; }
 .oppcard .opp { border-bottom: none; }
