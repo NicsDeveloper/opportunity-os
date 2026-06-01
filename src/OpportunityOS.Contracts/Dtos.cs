@@ -293,3 +293,71 @@ public sealed record MatchResponse(
     List<string> MissingRequirements,
     string Rationale,
     DateTime CreatedAtUtc);
+
+// ---- Firehose (massive discovery) ----
+
+public sealed record CreateCampaignRequest(
+    string Name,
+    string? Description,
+    string? Priority,
+    List<string> BaseKeywords,
+    List<string>? TargetSources,
+    List<string>? ExcludedDomains,
+    int? DailyQueryBudget);
+
+public sealed record SearchCampaignResponse(
+    Guid Id,
+    string Name,
+    string Description,
+    string Status,
+    string Priority,
+    List<string> BaseKeywords,
+    List<string> TargetSources,
+    List<string> ExcludedDomains,
+    int DailyQueryBudget,
+    DateTime CreatedAtUtc,
+    DateTime? LastRunAtUtc);
+
+public sealed record QuickSearchRequest(
+    string Query,
+    int? Take,
+    bool? SaveRawCandidates);
+
+public sealed record AggressiveSearchRequest(
+    Guid? CampaignId,
+    int? MaxQueries,
+    int? MaxResultsPerQuery,
+    bool? SaveRawCandidates,
+    bool? PromoteAutomatically);
+
+public sealed record FirehoseRunResponse(
+    Guid ExecutionRunId,
+    string Status,
+    Guid? CampaignId,
+    int QueriesExecuted,
+    int ResultsCount,
+    int NewCandidates,
+    int Duplicates,
+    int Errors);
+
+public sealed record RawJobCandidateResponse(
+    Guid Id,
+    string Title,
+    string? Snippet,
+    string DiscoveredUrl,
+    string SourceProvider,
+    string SourceName,
+    string SourceType,
+    string? RealCompanyName,
+    string? OriginalJobUrl,
+    string? Location,
+    string? WorkMode,
+    string? Language,
+    DateTime DiscoveredAtUtc,
+    DateTime? PublishedAtUtc,
+    string Status,
+    int SourceConfidenceScore,
+    int? PreliminaryFitScore,
+    bool RequiresManualValidation,
+    Guid? SearchCampaignId,
+    string? Query);

@@ -241,6 +241,40 @@ Além dos ATS providers, o sistema descobre vagas de forma **contínua** e **mai
   chama `/ai/analyze` (LLM) e troca por um "por que combina" em prosa + score refinado, sem
   custo de LLM até você pedir.
 
+## Firehose — descoberta massiva (camada de coleta)
+
+Nova arquitetura em 3 camadas: **Firehose** (coleta tudo, com ruído) → **Qualified** (triado)
+→ **Action Today** (poucas acionáveis). Tese: *coletar muito, organizar o caos, classificar a
+qualidade, agir seletivamente.* O Firehose **não usa LLM** e **salva o resultado bruto antes de
+filtro forte** — não descarta por score baixo.
+
+- **`SearchCampaign`** — campanha nomeada (keywords-semente, fontes-alvo, domínios excluídos,
+  budget de queries). **`SearchQueryTemplate`** — templates com placeholders. **`SearchQueryExecution`** —
+  auditoria de cada query (resultados, novos, duplicados). **`RawJobCandidate`** — candidato bruto
+  com `SourceType`, `SourceConfidenceScore`, `RequiresManualValidation`, fingerprint, etc.
+- **`QueryExpansionService`** — combina dimensões (role × stack × work-mode × domínio) e aplica
+  filtros `site:` para gerar **centenas de queries** a partir de poucas sementes. Sem LLM.
+- **`FirehoseService`** + **`IRawSearchProvider`** (`SerperRawSearchProvider`, query verbatim,
+  paginação de 10/req pois Serper rejeita `num>10`) — roda as queries, classifica a fonte por host
+  (ATS oficial / job board / agregador / social-indexed / search result), **dedup por URL**, salva
+  todo resultado como `RawJobCandidate` e audita tudo (`SearchQueryExecution` + `ExecutionRun`).
+- **LinkedIn indexado** = `SocialIndexed`, **revisão manual obrigatória** (sem scrape, sem login,
+  sem automação). Agregadores aparecem, mas marcados.
+
+Endpoints (`/api/discovery`): `POST /campaigns` · `GET /campaigns` · `GET /campaigns/{id}` ·
+`POST /campaigns/{id}/run` · `POST /quick-search` · `POST /aggressive-search` · `GET /raw-candidates`.
+
+```bash
+# coleta massiva (gera 100+ queries, salva centenas de candidatos brutos)
+curl -X POST localhost:5077/api/discovery/aggressive-search \
+  -H "Content-Type: application/json" \
+  -d '{"maxQueries":200,"maxResultsPerQuery":10,"saveRawCandidates":true}'
+curl "localhost:5077/api/discovery/raw-candidates?take=200"   # ver o volume bruto
+```
+
+> Requer `Search:SerperApiKey` (mesma chave do fluxo qualificado). O fluxo antigo de matches/
+> oportunidades segue intacto — o Firehose é uma camada nova e aditiva.
+
 ## AI Copilot Layer (Fase 3)
 
 Camada explícita de IA que **interpreta, analisa e redige** — mantendo ações externas

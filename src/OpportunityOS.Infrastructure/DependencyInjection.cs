@@ -46,6 +46,11 @@ public static class DependencyInjection
         services.AddScoped<IDiscoveryStore, EfDiscoveryStore>();
         services.AddScoped<IJobDiscoveryService, JobDiscoveryService>();
 
+        // Firehose (massive discovery): raw search providers, query expansion, store, service.
+        services.AddSingleton<QueryExpansionService>();
+        services.AddScoped<IFirehoseStore, EfFirehoseStore>();
+        services.AddScoped<IFirehoseService, FirehoseService>();
+
         services.AddScoped<IOpportunityStore, EfOpportunityStore>();
         services.AddScoped<IOpportunityPipeline, OpportunityPipeline>();
 
@@ -121,6 +126,8 @@ public static class DependencyInjection
         {
             services.AddSingleton(serper);
             services.AddHttpClient<IJobSearchProvider, SerperWebJobSearchProvider>(ConfigureClient);
+            // Firehose raw search (verbatim queries) over the same Serper key.
+            services.AddHttpClient<IRawSearchProvider, SerperRawSearchProvider>(ConfigureClient);
         }
 
         var bacenOptions = new BacenOptions();
