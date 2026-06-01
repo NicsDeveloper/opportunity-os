@@ -45,17 +45,17 @@ function StatusRail({ reload, name, headline }: { reload: number; name?: string;
       <div className="live">
         <span className="pulse" />
         <div>
-          <div className="live-t">Descoberta contínua</div>
+          <div className="live-t">Buscando vagas pra você</div>
           <div className="live-s">
-            {last ? `Última atividade ${ago(last.startedAtUtc)}` : "Aguardando primeira execução…"}
+            {last ? `Atualizado ${ago(last.startedAtUtc)}` : "Começando a procurar…"}
           </div>
         </div>
       </div>
 
-      <div className="nav-label">Atividade do sistema</div>
+      <div className="nav-label">O que rolou por aqui</div>
       <div className="rail-runs">
         {(runs.data ?? []).map((r) => <RunRow key={r.id} r={r} />)}
-        {runs.data?.length === 0 && <p className="placeholder small">Nenhuma execução ainda.</p>}
+        {runs.data?.length === 0 && <p className="placeholder small">Ainda nada por aqui.</p>}
       </div>
 
       <div className="usercard">
@@ -111,13 +111,13 @@ function Feed({ reload, notify, onChanged }: {
   return (
     <>
       <div className="statgrid">
-        <Stat icon="target" label="Acionáveis hoje" n={s?.matchesAbove75}
+        <Stat icon="target" label="Boas vagas pra você" n={s?.matchesAbove75}
           delta={s ? `+${s.matchesAbove75Today} hoje` : ""} />
-        <Stat icon="briefcase" label="Vagas descobertas" n={s?.jobsDiscovered}
+        <Stat icon="briefcase" label="Vagas encontradas" n={s?.jobsDiscovered}
           delta={s ? `+${s.jobsToday} hoje` : ""} />
-        <Stat icon="chat" label="Mensagens geradas" n={s?.messagesGenerated}
+        <Stat icon="chat" label="Mensagens prontas" n={s?.messagesGenerated}
           delta={s ? `+${s.messagesToday} hoje` : ""} />
-        <Stat icon="calendar" label="Follow-ups pendentes" n={s?.followUpsPending}
+        <Stat icon="calendar" label="Lembretes" n={s?.followUpsPending}
           delta={s?.nextFollowUpInDays != null ? `Próximo: ${s.nextFollowUpInDays} dia(s)` : "—"} mutedDelta />
       </div>
 
@@ -125,17 +125,17 @@ function Feed({ reload, notify, onChanged }: {
         <div className="panel-head">
           <div className="tabs">
             <button className={"tab" + (view === "action" ? " active" : "")} onClick={() => setView("action")}>
-              ⚡ Action Today
+              ✨ Pra você hoje
             </button>
             <button className={"tab" + (view === "qualified" ? " active" : "")} onClick={() => setView("qualified")}>
-              ✓ Qualified
+              📋 Boas opções
             </button>
             <button className={"tab" + (view === "firehose" ? " active" : "")} onClick={() => setView("firehose")}>
-              🌊 Firehose
+              🔎 Explorar tudo
             </button>
           </div>
           <button className="btn primary" disabled={busy} onClick={runSearch}>
-            <Icon name="search" /> {busy ? "Buscando…" : "Buscar agora"}
+            <Icon name="search" /> {busy ? "Procurando…" : "Procurar vagas"}
           </button>
         </div>
 
@@ -153,10 +153,10 @@ function ActionView({ reload, notify, onChanged }: { reload: number; notify: (m:
   const all = opps.data ?? [];
   return (
     <>
-      <p className="sub" style={{ marginTop: 0 }}>Quais vagas atacar hoje: relevância alta, frescas, fonte verificável.</p>
+      <p className="sub" style={{ marginTop: 0 }}>As vagas mais a ver com o seu perfil pra você olhar agora — recentes e de fonte confiável.</p>
       {opps.error && <p className="err">{opps.error}</p>}
       {all.map((o) => <OppCard key={o.matchId} o={o} notify={notify} onChanged={onChanged} mode="action" />)}
-      {all.length === 0 && <p className="placeholder">Nada acionável agora. Veja <strong>Qualified</strong> ou rode uma busca.</p>}
+      {all.length === 0 && <p className="placeholder">Nada por aqui agora. Veja <strong>Boas opções</strong> ou toque em <strong>Procurar vagas</strong>.</p>}
     </>
   );
 }
@@ -171,11 +171,11 @@ function QualifiedView({ reload, notify, onChanged }: { reload: number; notify: 
   useEffect(() => { setPage(0); }, [opps.data?.length]);
   return (
     <>
-      <p className="sub" style={{ marginTop: 0 }}>O que parece bom após triagem — ordenado por DiscoveryRank (relevância + fonte + frescor).</p>
+      <p className="sub" style={{ marginTop: 0 }}>Vagas selecionadas que valem a pena conferir — ordenadas pelas mais promissoras pra você.</p>
       {opps.error && <p className="err">{opps.error}</p>}
       {all.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE).map((o) =>
         <OppCard key={o.matchId} o={o} notify={notify} onChanged={onChanged} mode="qualified" />)}
-      {all.length === 0 && <p className="placeholder">Sem vagas qualificadas ainda.</p>}
+      {all.length === 0 && <p className="placeholder">Ainda sem boas opções. Toque em <strong>Procurar vagas</strong>.</p>}
       {all.length > PAGE_SIZE && (
         <div className="pager">
           <button className="btn" disabled={current === 0} onClick={() => setPage(current - 1)}>‹ Anterior</button>
@@ -200,24 +200,23 @@ function FirehoseView({ reload, notify, onChanged }: { reload: number; notify: (
   useEffect(() => { setPage(0); }, [raw.data?.length]);
   return (
     <>
-      <p className="sub" style={{ marginTop: 0 }}>Tudo que o sistema encontrou — com ruído. Classificado por fonte; promova o que valer.</p>
+      <p className="sub" style={{ marginTop: 0 }}>Tudo que encontramos pela internet — inclusive vagas que ainda precisam de uma olhada. Salve as que te interessarem.</p>
       {m && (
         <div className="fire-metrics">
-          <span><b>{m.rawCandidatesThisWeek}</b> brutos/semana</span>
-          <span><b>{m.queriesToday}</b> queries hoje</span>
-          <span><b>{m.jobsPromotedToday}</b> promovidas hoje</span>
-          <span><b>{m.weakSources}</b> fontes fracas</span>
-          <span><b>{(m.deduplicationRate * 100).toFixed(0)}%</b> duplicadas</span>
+          <span><b>{m.rawCandidatesThisWeek}</b> encontradas esta semana</span>
+          <span><b>{m.jobsPromotedToday}</b> salvas hoje</span>
+          <span><b>{m.weakSources}</b> pra revisar</span>
+          <span><b>{(m.deduplicationRate * 100).toFixed(0)}%</b> repetidas</span>
         </div>
       )}
       {raw.error && <p className="err">{raw.error}</p>}
       {all.slice(current * FIRE_PAGE, current * FIRE_PAGE + FIRE_PAGE).map((c) =>
         <RawCandidateCard key={c.id} c={c} notify={notify} onChanged={onChanged} />)}
-      {all.length === 0 && <p className="placeholder">Firehose vazio. Rode <strong>Buscar agora</strong> ou uma campanha agressiva.</p>}
+      {all.length === 0 && <p className="placeholder">Nada encontrado ainda. Toque em <strong>Procurar vagas</strong>.</p>}
       {all.length > FIRE_PAGE && (
         <div className="pager">
           <button className="btn" disabled={current === 0} onClick={() => setPage(current - 1)}>‹ Anterior</button>
-          <span className="pager-info">Página {current + 1} de {pageCount} · {all.length} candidatos</span>
+          <span className="pager-info">Página {current + 1} de {pageCount} · {all.length} vagas</span>
           <button className="btn" disabled={current >= pageCount - 1} onClick={() => setPage(current + 1)}>Próxima ›</button>
         </div>
       )}
@@ -296,8 +295,7 @@ function OppCard({ o, notify, onChanged, mode }: {
             <div className="title">{o.jobTitle}</div>
             <div className="chips">{o.skills.slice(0, 6).map((sk) => <span className="chip" key={sk}>{sk}</span>)}</div>
             <SourceBadge sourceType={o.sourceType} confidence={o.sourceConfidenceScore}
-              sourceName={o.sourceName} realCompany={o.realCompanyName} manual={o.requiresManualValidation}
-              rank={mode === "qualified" ? o.discoveryRank : undefined} />
+              sourceName={o.sourceName} realCompany={o.realCompanyName} manual={o.requiresManualValidation} />
             {why && <div className="why"><strong>Por que combina:</strong> {why}</div>}
             {(isTerse && !analyzed) && (
               <button className="why-link" disabled={analyzing} onClick={analyze}>
@@ -327,22 +325,25 @@ function OppCard({ o, notify, onChanged, mode }: {
 }
 
 /* source provenance badge: "Empresa X via Fonte Y" + tipo/confiança */
-function SourceBadge({ sourceType, confidence, sourceName, realCompany, manual, rank }: {
+function SourceBadge({ sourceType, confidence, sourceName, realCompany, manual }: {
   sourceType?: string; confidence?: number; sourceName?: string | null;
-  realCompany?: string | null; manual?: boolean; rank?: number;
+  realCompany?: string | null; manual?: boolean;
 }) {
-  if (!sourceType && !sourceName && rank == null) return null;
+  // rank is intentionally not shown to the user (internal ranking signal).
+  if (!sourceType && !sourceName) return null;
   const cls = sourceType === "OfficialAts" || sourceType === "OfficialCareerPage" ? "src-official"
     : sourceType === "SocialIndexed" ? "src-social"
     : sourceType === "Aggregator" ? "src-agg" : "src-web";
+  const trusted = (confidence ?? 0) >= 70;
   return (
     <div className="srcbadge">
-      {sourceType && <span className={"src-pill " + cls}>{sourceTypeLabel(sourceType)} · {confidence ?? 0}</span>}
+      {sourceType && sourceType !== "Unknown" && (
+        <span className={"src-pill " + cls}>{trusted ? "✓ " : ""}{sourceTypeLabel(sourceType)}</span>
+      )}
       {realCompany
-        ? <span className="src-co">{realCompany}{sourceName ? <> via {sourceName}</> : null}</span>
-        : (sourceName && <span className="src-co muted">empresa não confirmada · via {sourceName}</span>)}
-      {manual && <span className="src-pill src-manual">⚠ revisão manual</span>}
-      {rank != null && <span className="src-pill src-rank">rank {rank}</span>}
+        ? <span className="src-co">{realCompany}{sourceName ? <> · via {sourceName}</> : null}</span>
+        : (sourceName && <span className="src-co muted">empresa a confirmar{sourceName ? <> · via {sourceName}</> : null}</span>)}
+      {manual && <span className="src-pill src-manual">⚠ vale revisar a fonte</span>}
     </div>
   );
 }
@@ -377,8 +378,8 @@ function RawCandidateCard({ c, notify, onChanged }: {
     setBusy(true); notify("Promovendo…");
     try {
       const r = await api.promoteRaw(c.id);
-      setPromoted(r.promoted ? (r.wasDuplicate ? "duplicada (ocorrência)" : "promovida") : null);
-      notify(r.reason);
+      setPromoted(r.promoted ? (r.wasDuplicate ? "já estava salva" : "salva") : null);
+      notify(r.promoted ? (r.wasDuplicate ? "Essa vaga já estava salva." : "Vaga salva!") : "Não deu pra salvar (confirme a empresa).");
       if (r.promoted) onChanged();
     } catch { notify("Falha ao promover."); }
     finally { setBusy(false); }
@@ -394,14 +395,15 @@ function RawCandidateCard({ c, notify, onChanged }: {
       </div>
       <div className="raw-meta">
         <span className="posted">{ago(c.discoveredAtUtc)}</span>
-        <span className={"pill raw-status"}>{c.status}</span>
+        <span className={"pill raw-status"}>{candidateStatusLabel(c.status)}</span>
       </div>
       <div className="opp-actions">
-        <a className="btn" href={c.discoveredUrl} target="_blank" rel="noreferrer">Abrir</a>
+        <a className="btn" href={c.discoveredUrl} target="_blank" rel="noreferrer">Abrir vaga</a>
         {promoted
           ? <span className="fb-done">✓ {promoted}</span>
-          : <button className="btn primary" disabled={busy || !c.realCompanyName} title={c.realCompanyName ? "" : "empresa não confirmada"} onClick={promote}>
-              {busy ? "…" : "Promover"}
+          : <button className="btn primary" disabled={busy || !c.realCompanyName}
+              title={c.realCompanyName ? "Adicionar às suas vagas" : "Precisa confirmar a empresa primeiro"} onClick={promote}>
+              {busy ? "…" : "Salvar vaga"}
             </button>}
       </div>
     </div>
@@ -490,10 +492,19 @@ function recLabel(r: string) {
 }
 function sourceTypeLabel(t: string) {
   const map: Record<string, string> = {
-    OfficialAts: "ATS oficial", OfficialCareerPage: "Carreira oficial", JobBoard: "Job board",
-    Aggregator: "Agregador", SearchResult: "Web", SocialIndexed: "LinkedIn/social", Unknown: "?",
+    OfficialAts: "Site oficial de vagas", OfficialCareerPage: "Página de carreira",
+    JobBoard: "Portal de vagas", Aggregator: "Site agregador", SearchResult: "Encontrada na web",
+    SocialIndexed: "LinkedIn", Unknown: "Fonte a confirmar",
   };
-  return map[t] ?? t;
+  return map[t] ?? "Fonte a confirmar";
+}
+// Friendly status for raw candidates (no enum jargon).
+function candidateStatusLabel(s: string) {
+  const map: Record<string, string> = {
+    Discovered: "nova", Classified: "nova", Enriched: "nova",
+    Duplicate: "repetida", PromotedToJobPosting: "salva", Rejected: "descartada", Expired: "expirada",
+  };
+  return map[s] ?? s;
 }
 function recClass(r: string) {
   if (r === "Strategic" || r === "Prioritize") return "exc";
@@ -502,11 +513,14 @@ function recClass(r: string) {
 }
 function runLabel(t: string) {
   const map: Record<string, string> = {
-    DiscoverJobs: "Busca de vagas (ATS)", SearchJobs: "Busca por palavras-chave",
-    SendDailyDigest: "Envio de digest", CompanyOnboarding: "Onboarding de empresas",
-    BacenPixParticipantsImport: "Import Bacen", BacenPixParticipantsPromotion: "Promoção Bacen",
+    DiscoverJobs: "Procurando vagas", SearchJobs: "Procurando por palavra-chave",
+    FirehoseQuickSearch: "Busca rápida", FirehoseAggressive: "Busca ampla",
+    BacenFinancialSweep: "Vagas em bancos e fintechs", ConsultingRadar: "Procurando consultorias",
+    ValidateLinks: "Conferindo links", SendDailyDigest: "Enviando resumo",
+    CompanyOnboarding: "Preparando empresas",
+    BacenPixParticipantsImport: "Atualizando empresas financeiras", BacenPixParticipantsPromotion: "Organizando empresas",
   };
-  return map[t] ?? t;
+  return map[t] ?? "Procurando vagas";
 }
 function ago(iso: string) {
   const days = Math.floor((Date.now() - +new Date(iso)) / 86400000);
