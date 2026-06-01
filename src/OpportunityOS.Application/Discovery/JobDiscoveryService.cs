@@ -36,10 +36,13 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
     // capped per run so continuous discovery doesn't hammer sites.
     private const int ThinDescriptionChars = 300;
     private const int MaxEnrichmentsPerRun = 8;
-    // Promising fresh jobs (heuristic >= gate) get an authoritative LLM score on discovery
-    // so the displayed score is final "de bate pronto" — capped per run to bound LLM cost.
-    private const int LlmAutoAnalyzeGate = 60;
+    // Promising fresh jobs get an authoritative LLM score on discovery (P10): only when the
+    // heuristic fit AND source confidence clear the gates, capped per run AND by the daily
+    // LLM budget (QueryBudgetManager). Firehose raw candidates never get LLM.
+    private const int LlmAutoAnalyzeGate = 65;        // PreliminaryFit gate (spec P10)
+    private const int LlmMinSourceConfidence = 40;    // SourceConfidence gate (spec P10)
     private const int MaxLlmAnalysesPerRun = 6;
+    private const string LlmCostCenter = "LlmAuto";
 
     private readonly IEnumerable<IJobSourceProvider> _providers;
     private readonly IEnumerable<IJobSearchProvider> _searchProviders;
@@ -50,6 +53,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
     private readonly IJobUnderstandingService _understanding;
     private readonly ICandidateFitAnalysisService _fit;
     private readonly ISourceClassifierService _sourceClassifier;
+    private readonly IQueryBudgetManager _budget;
     private readonly ILogger<JobDiscoveryService> _logger;
     private int _enrichmentsLeft;
     private int _llmAnalysesLeft;
@@ -64,6 +68,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
         IJobUnderstandingService understanding,
         ICandidateFitAnalysisService fit,
         ISourceClassifierService sourceClassifier,
+        IQueryBudgetManager budget,
         ILogger<JobDiscoveryService> logger)
     {
         _providers = providers;
@@ -75,6 +80,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
         _sourceClassifier = sourceClassifier;
         _understanding = understanding;
         _fit = fit;
+        _budget = budget;
         _logger = logger;
     }
 
@@ -233,13 +239,21 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
             var r = _matchEngine.Evaluate(profile, job);
             job.MarkAnalyzed();
 
-            // Upgrade promising jobs to an authoritative LLM score on the spot, so the feed
-            // shows the final number without a manual "Analisar" click. Capped per run.
-            if (r.OverallScore >= LlmAutoAnalyzeGate && _llmAnalysesLeft > 0)
+            // Upgrade promising jobs to an authoritative LLM score on the spot (P10): only past
+            // the fit + source-confidence gates, capped per run AND by the daily LLM budget.
+            if (r.OverallScore >= LlmAutoAnalyzeGate
+                && job.SourceConfidenceScore >= LlmMinSourceConfidence
+                && _llmAnalysesLeft > 0
+                && await _budget.CanExecuteAsync(LlmCostCenter, ct))
             {
                 _llmAnalysesLeft--;
                 var llmMatch = await TryLlmMatchAsync(profile, job, ct);
-                if (llmMatch is not null) { await _store.AddMatchAsync(llmMatch, ct); return; }
+                if (llmMatch is not null)
+                {
+                    await _budget.RecordExecutionAsync(LlmCostCenter, 1, ct);
+                    await _store.AddMatchAsync(llmMatch, ct);
+                    return;
+                }
             }
 
             var match = new OpportunityMatch(

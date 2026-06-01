@@ -310,6 +310,15 @@ errada/duplicada/já apliquei/…) persistido para métricas. `GET /api/discover
 hoje/semana, queries, promovidas, taxa de dedup, confiança/fit médios, acionáveis, por fonte) e
 `GET /api/discovery/provider-quality` (por provider: queries, brutos, promovidos, dup-rate, confiança).
 
+**IA depois da triagem (P10)** — o Firehose **nunca** usa LLM. A análise LLM automática só roda
+na descoberta qualificada e só quando: heurística ≥ 65 **e** `SourceConfidence` ≥ 40 **e** dentro
+do **budget diário de LLM** (`DiscoveryBudget:LlmDailyAutoAnalyses`, cost-center "LlmAuto" no
+`QueryBudgetManager`) **e** sob o teto por run. O resto fica sob demanda (`/ai/analyze`,
+"Analisar com IA" = user-requested), com os prompts sempre auditados em `PromptExecutionLog`.
+
+**3 telas (P8)** — Action Today (Fit≥75, acionáveis), Qualified (`sort=rank` por DiscoveryRank),
+Firehose (RawJobCandidate com `SourceBadge` "Empresa X via Fonte Y" + métricas + Promover + feedback).
+
 ## AI Copilot Layer (Fase 3)
 
 Camada explícita de IA que **interpreta, analisa e redige** — mantendo ações externas
