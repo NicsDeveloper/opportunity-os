@@ -22,6 +22,9 @@ public sealed class EfFirehoseStore : IFirehoseStore
     public Task<bool> RawCandidateExistsByUrlAsync(string url, CancellationToken ct) =>
         _db.RawJobCandidates.AnyAsync(c => c.DiscoveredUrl == url, ct);
 
+    public Task<bool> RawCandidateExistsByFingerprintAsync(string fingerprint, CancellationToken ct) =>
+        _db.RawJobCandidates.AnyAsync(c => c.NormalizedFingerprint == fingerprint, ct);
+
     public async Task AddRawCandidateAsync(RawJobCandidate candidate, CancellationToken ct) =>
         await _db.RawJobCandidates.AddAsync(candidate, ct);
 

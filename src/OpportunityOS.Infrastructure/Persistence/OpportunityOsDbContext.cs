@@ -24,6 +24,7 @@ public sealed class OpportunityOsDbContext : DbContext
     public DbSet<SearchQueryTemplate> SearchQueryTemplates => Set<SearchQueryTemplate>();
     public DbSet<SearchQueryExecution> SearchQueryExecutions => Set<SearchQueryExecution>();
     public DbSet<RawJobCandidate> RawJobCandidates => Set<RawJobCandidate>();
+    public DbSet<JobPostingSourceOccurrence> JobPostingSourceOccurrences => Set<JobPostingSourceOccurrence>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -223,6 +224,15 @@ public sealed class OpportunityOsDbContext : DbContext
             e.HasIndex(x => x.DiscoveredAtUtc);
             e.HasIndex(x => x.SearchCampaignId);
             e.HasIndex(x => x.NormalizedFingerprint);
+        });
+
+        b.Entity<JobPostingSourceOccurrence>(e =>
+        {
+            e.ToTable("job_posting_source_occurrences");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SourceType).HasConversion<int>();
+            e.HasIndex(x => x.JobPostingId);
+            e.HasIndex(x => x.Url);
         });
     }
 }
