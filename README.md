@@ -319,6 +319,19 @@ do **budget diário de LLM** (`DiscoveryBudget:LlmDailyAutoAnalyses`, cost-cente
 **3 telas (P8)** — Action Today (Fit≥75, acionáveis), Qualified (`sort=rank` por DiscoveryRank),
 Firehose (RawJobCandidate com `SourceBadge` "Empresa X via Fonte Y" + métricas + Promover + feedback).
 
+**Bacen Financial Sweep (P2)** — usa instituições financeiras promovidas (Source=Bacen) como
+empresas-alvo de varredura de vagas .NET/C#. `GET /api/discovery/bacen-financial-sweep/preview`
+(quantas por prioridade, queries estimadas, custo) e `POST /api/discovery/bacen-financial-sweep`
+(`minimumPriority` default High, exclui cooperativas por padrão). Sem LLM; Bacen é fonte de
+empresas, não de vagas. Reusa `SweepCompaniesAsync` (queries por empresa, budget-guarded).
+
+**Consulting Radar (P3)** — descobre consultorias/software houses automaticamente
+(`ConsultingCompanyCandidate`): roda queries de consultoria, deriva candidatos do host, pontua por
+sinais explicáveis (`ConsultingSignals`: +consultoria/+outsourcing/+transformação/+carreiras/
++.NET/−SaaS/−sem-site…) e semeia uma lista conhecida (GFT, Stefanini, CI&T, Zup…). Promove a
+Company (Source=SearchDiscovery, tags consulting/outsourcing/software-house, prioridade por
+confiança) **só com confiança ≥ 70**. Endpoints `/api/consulting-radar/*`.
+
 ## AI Copilot Layer (Fase 3)
 
 Camada explícita de IA que **interpreta, analisa e redige** — mantendo ações externas

@@ -26,6 +26,7 @@ public sealed class OpportunityOsDbContext : DbContext
     public DbSet<RawJobCandidate> RawJobCandidates => Set<RawJobCandidate>();
     public DbSet<JobPostingSourceOccurrence> JobPostingSourceOccurrences => Set<JobPostingSourceOccurrence>();
     public DbSet<UserFeedback> UserFeedbacks => Set<UserFeedback>();
+    public DbSet<ConsultingCompanyCandidate> ConsultingCompanyCandidates => Set<ConsultingCompanyCandidate>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -245,6 +246,19 @@ public sealed class OpportunityOsDbContext : DbContext
             e.HasIndex(x => x.JobPostingId);
             e.HasIndex(x => x.RawJobCandidateId);
             e.HasIndex(x => x.Type);
+        });
+
+        b.Entity<ConsultingCompanyCandidate>(e =>
+        {
+            e.ToTable("consulting_company_candidates");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).IsRequired();
+            e.Property(x => x.Status).HasConversion<int>();
+            e.Property(x => x.Signals).HasConversion(stringListConverter).HasColumnType("jsonb")
+                .Metadata.SetValueComparer(stringListComparer);
+            e.HasIndex(x => x.Name);
+            e.HasIndex(x => x.Status);
+            e.HasIndex(x => x.ConsultingConfidenceScore);
         });
     }
 }

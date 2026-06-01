@@ -36,6 +36,7 @@ app.MapBacenEndpoints();
 app.MapDashboardEndpoints();
 app.MapDiscoveryEndpoints();
 app.MapFeedbackEndpoints();
+app.MapConsultingRadarEndpoints();
 
 app.Run();
 

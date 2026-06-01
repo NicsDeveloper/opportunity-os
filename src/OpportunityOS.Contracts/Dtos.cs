@@ -412,3 +412,32 @@ public sealed record ProviderQualityResponse(
     int PromotedJobs,
     double DuplicateRate,
     int AverageSourceConfidence);
+
+// ---- Bacen Financial Sweep (P2) ----
+
+public sealed record BacenSweepRequest(
+    string? MinimumPriority,
+    int? MaxCompanies,
+    int? MaxQueriesPerCompany,
+    bool? IncludeCooperatives,
+    bool? SaveRawCandidates);
+
+public sealed record BacenSweepPreviewResponse(
+    int Companies, int Strategic, int High, int Medium, int Low,
+    int EstimatedQueries, int EstimatedBudgetCost);
+
+// ---- Consulting Radar (P3) ----
+
+public sealed record ConsultingDiscoverRequest(int? MaxQueries, bool? IncludeSeeds);
+
+public sealed record ConsultingDiscoverResponse(
+    Guid ExecutionRunId, string Status, int QueriesExecuted, int CandidatesFound, int Duplicates);
+
+public sealed record ConsultingCandidateResponse(
+    Guid Id, string Name, string? WebsiteUrl, string? LinkedInCompanyUrl, string Country,
+    string Source, List<string> Signals, int ConsultingConfidenceScore, string Status,
+    DateTime CreatedAtUtc, DateTime? PromotedAtUtc);
+
+public sealed record PromoteConsultingBatchRequest(int? MinConfidence, int? Max);
+
+public sealed record ConsultingPromotionResponse(int Considered, int Promoted, int Skipped);

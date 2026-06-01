@@ -59,6 +59,8 @@ public static class DependencyInjection
         services.AddScoped<IFirehoseStore, EfFirehoseStore>();
         services.AddScoped<IFirehoseService, FirehoseService>();
         services.AddScoped<IRawCandidatePromotionService, RawCandidatePromotionService>();
+        services.AddScoped<IConsultingStore, EfConsultingStore>();
+        services.AddScoped<IConsultingRadarService, ConsultingRadarService>();
 
         services.AddScoped<IOpportunityStore, EfOpportunityStore>();
         services.AddScoped<IOpportunityPipeline, OpportunityPipeline>();

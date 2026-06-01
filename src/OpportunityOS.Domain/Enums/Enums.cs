@@ -15,7 +15,16 @@ public enum CompanySource
     SearchEngine = 3,
     PublicRegistry = 4,
     AtsDiscovery = 5,
-    Bacen = 6
+    Bacen = 6,
+    SearchDiscovery = 7
+}
+
+public enum ConsultingCompanyCandidateStatus
+{
+    Candidate = 1,
+    PromotedToCompany = 2,
+    Rejected = 3,
+    Duplicate = 4
 }
 
 public enum JobPostingStatus
