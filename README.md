@@ -285,6 +285,16 @@ roda no fluxo qualificado (`JobPosting` ganhou `SourceType`/`SourceConfidenceSco
 1000/dia, etc.), reset UTC. Quando esgota, a busca agressiva **para com `CompletedWithBudgetLimit`**
 (nunca quebra em silêncio). Protege a cota antes das varreduras massivas.
 
+**Empresa real × fonte (`ICompanyNameResolver`)** — extrai a empresa contratante do título/host
+(ex.: `"... at MARGO - Jobgether"` → MARGO via Jobgether; `"[FORTIS SRT] ..."` → FORTIS SRT). Host
+de agregador **nunca** vira empresa sem evidência; sem empresa clara → "empresa não confirmada".
+(Fallback LLM previsto, adiado por custo.)
+
+**Dedup semântica (`IJobFingerprintService` + `JobPostingSourceOccurrence`)** — fingerprint
+estável (título+empresa+localização+senioridade+skills+hash da descrição). A mesma vaga em fontes
+diferentes é marcada `Duplicate` (continua visível como ocorrência, não some do volume); a melhor
+fonte fica como principal na promoção (futuro). `RawJobCandidate.NormalizedFingerprint` indexado.
+
 ## AI Copilot Layer (Fase 3)
 
 Camada explícita de IA que **interpreta, analisa e redige** — mantendo ações externas

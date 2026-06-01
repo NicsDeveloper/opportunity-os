@@ -11,6 +11,8 @@ public interface IFirehoseStore
 
     /// <summary>True if a raw candidate with this discovered URL already exists (URL dedup).</summary>
     Task<bool> RawCandidateExistsByUrlAsync(string url, CancellationToken ct);
+    /// <summary>True if a raw candidate with this semantic fingerprint already exists.</summary>
+    Task<bool> RawCandidateExistsByFingerprintAsync(string fingerprint, CancellationToken ct);
     Task AddRawCandidateAsync(RawJobCandidate candidate, CancellationToken ct);
 
     Task AddQueryExecutionAsync(SearchQueryExecution execution, CancellationToken ct);

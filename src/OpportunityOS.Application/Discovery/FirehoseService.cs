@@ -30,12 +30,14 @@ public sealed class FirehoseService : IFirehoseService
     private readonly DiscoveryBudgetOptions _budgetOptions;
     private readonly ISourceClassifierService _classifier;
     private readonly ICompanyNameResolver _companyResolver;
+    private readonly IJobFingerprintService _fingerprint;
     private readonly ILogger<FirehoseService> _logger;
 
     public FirehoseService(
         IEnumerable<IRawSearchProvider> providers, QueryExpansionService expansion,
         IFirehoseStore store, IQueryBudgetManager budget, DiscoveryBudgetOptions budgetOptions,
-        ISourceClassifierService classifier, ICompanyNameResolver companyResolver, ILogger<FirehoseService> logger)
+        ISourceClassifierService classifier, ICompanyNameResolver companyResolver,
+        IJobFingerprintService fingerprint, ILogger<FirehoseService> logger)
     {
         _providers = providers;
         _expansion = expansion;
@@ -44,6 +46,7 @@ public sealed class FirehoseService : IFirehoseService
         _budgetOptions = budgetOptions;
         _classifier = classifier;
         _companyResolver = companyResolver;
+        _fingerprint = fingerprint;
         _logger = logger;
     }
 
@@ -170,11 +173,24 @@ public sealed class FirehoseService : IFirehoseService
                         r.Title, r.Url, provider.ProviderName, cls.SourceName, cls.SourceType,
                         cls.SourceConfidenceScore, cls.RequiresManualValidation, r.Snippet,
                         realCompanyName: resolved.RealCompanyName,
+                        location: null, workMode: null, language: null,
                         publishedAtUtc: r.PublishedAtUtc,
                         searchCampaignId: campaignId == Guid.Empty ? null : campaignId,
                         query: query);
+
+                    // Semantic dedup: same vacancy across sources -> flag as Duplicate (kept
+                    // visible as an occurrence in the Firehose), don't drop the volume.
+                    var fp = _fingerprint.GenerateFingerprint(new JobFingerprintInput(
+                        r.Title, resolved.RealCompanyName, null, null));
+                    candidate.SetFingerprint(fp);
+                    if (!stats.SeenFingerprints.Add(fp) || await _store.RawCandidateExistsByFingerprintAsync(fp, ct))
+                    {
+                        candidate.SetStatus(Domain.Enums.RawJobCandidateStatus.Duplicate);
+                        dupCount++; stats.Duplicates++;
+                    }
+                    else { newCount++; stats.New++; }
+
                     await _store.AddRawCandidateAsync(candidate, ct);
-                    newCount++; stats.New++;
                 }
                 exec.Succeed(results.Count, newCount, dupCount);
                 run.RecordSuccess();
@@ -209,5 +225,6 @@ public sealed class FirehoseService : IFirehoseService
         public int Queries, Results, New, Duplicates;
         public bool BudgetExhausted;
         public readonly HashSet<string> SeenUrls = new(StringComparer.OrdinalIgnoreCase);
+        public readonly HashSet<string> SeenFingerprints = new(StringComparer.Ordinal);
     }
 }
