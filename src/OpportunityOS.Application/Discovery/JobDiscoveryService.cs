@@ -31,12 +31,19 @@ public interface IJobDiscoveryService
 /// </summary>
 public sealed class JobDiscoveryService : IJobDiscoveryService
 {
+    // Thin search snippets get enriched with the real page text before scoring,
+    // capped per run so continuous discovery doesn't hammer sites.
+    private const int ThinDescriptionChars = 300;
+    private const int MaxEnrichmentsPerRun = 8;
+
     private readonly IEnumerable<IJobSourceProvider> _providers;
     private readonly IEnumerable<IJobSearchProvider> _searchProviders;
     private readonly IDiscoveryStore _store;
     private readonly IJobNormalizer _normalizer;
     private readonly IMatchEngine _matchEngine;
+    private readonly IJobContentEnricher _enricher;
     private readonly ILogger<JobDiscoveryService> _logger;
+    private int _enrichmentsLeft;
 
     public JobDiscoveryService(
         IEnumerable<IJobSourceProvider> providers,
@@ -44,6 +51,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
         IDiscoveryStore store,
         IJobNormalizer normalizer,
         IMatchEngine matchEngine,
+        IJobContentEnricher enricher,
         ILogger<JobDiscoveryService> logger)
     {
         _providers = providers;
@@ -51,6 +59,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
         _store = store;
         _normalizer = normalizer;
         _matchEngine = matchEngine;
+        _enricher = enricher;
         _logger = logger;
     }
 
@@ -63,6 +72,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var companies = new HashSet<Guid>();
         var profile = await _store.GetActiveProfileAsync(ct);
+        _enrichmentsLeft = MaxEnrichmentsPerRun;
 
         foreach (var provider in _searchProviders)
         {
@@ -108,6 +118,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
         int newJobs = 0, updatedJobs = 0, providersInvoked = 0;
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var profile = await _store.GetActiveProfileAsync(ct);
+        _enrichmentsLeft = MaxEnrichmentsPerRun;
 
         foreach (var company in companies)
         {
@@ -155,9 +166,20 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
         var existing = await _store.FindJobAsync(dto.SourceProvider, dto.ExternalId, ct);
         if (existing is null)
         {
+            // Thin snippet (e.g. open-web search) -> fetch the real page text so the
+            // heuristic score is accurate and good roles aren't filtered out.
+            var description = dto.DescriptionText ?? string.Empty;
+            if (description.Length < ThinDescriptionChars && _enrichmentsLeft > 0)
+            {
+                _enrichmentsLeft--;
+                var enriched = await _enricher.FetchTextAsync(dto.AbsoluteUrl, ct);
+                if (!string.IsNullOrWhiteSpace(enriched) && enriched.Length > description.Length)
+                    description = enriched;
+            }
+
             var job = new JobPosting(
                 companyId, dto.ExternalId, dto.SourceProvider, dto.Title, dto.AbsoluteUrl,
-                dto.DescriptionText ?? string.Empty, dto.DescriptionHtml, dto.Department,
+                description, dto.DescriptionHtml, dto.Department,
                 dto.Location, dto.Language, dto.PublishedAtUtc, dto.UpdatedAtUtc);
             await _store.AddJobAsync(job, ct);
             _logger.LogInformation("JobDiscovered {Provider} {ExternalId} {Title}", dto.SourceProvider, dto.ExternalId, dto.Title);

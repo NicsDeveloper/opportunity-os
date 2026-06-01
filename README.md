@@ -225,6 +225,22 @@ Além dos ATS providers, o sistema descobre vagas de forma **contínua** e **mai
   antigos sem match são pontuados quando reencontrados (backfill). Falha de score nunca
   interrompe a descoberta.
 
+- **Enriquecimento de snippet** (`IJobContentEnricher`/`HtmlJobContentEnricher`) — vagas da
+  web aberta vêm com só o snippet da busca; antes de pontuar, o sistema **busca o texto real
+  da página** (HTTP GET + strip de tags; fallback Playwright para SPA) para o heurístico ter
+  material e não subestimar boas vagas. Limitado por run (8) e só para descrições curtas
+  (<300 chars), pra não martelar sites na descoberta contínua.
+
+- **Ranking frescor-primeiro + validação de links** — o feed (`/api/matches`) descarta
+  postagens publicadas há mais de `maxAgeDays` (default 120, provavelmente fechadas) e dá
+  bônus de frescor na ordenação (recentes sobem); o `ValidateLinksJob` (cron
+  `Jobs:ValidateLinksCron`) faz HEAD-check e expira 404/410. Os contadores do dashboard
+  ("fortes 75+") respeitam o mesmo filtro, então o número não inclui vagas mortas.
+
+- **"Analisar com IA" sob demanda** — quando o rationale é o do heurístico (seco), um clique
+  chama `/ai/analyze` (LLM) e troca por um "por que combina" em prosa + score refinado, sem
+  custo de LLM até você pedir.
+
 ## AI Copilot Layer (Fase 3)
 
 Camada explícita de IA que **interpreta, analisa e redige** — mantendo ações externas

@@ -21,8 +21,14 @@ public sealed class JobDiscoveryServiceTests
     private static readonly IJobNormalizer Normalizer = new JobNormalizer();
     private static readonly IMatchEngine Engine = new HeuristicMatchEngine(Normalizer);
 
+    private sealed class NoEnricher : IJobContentEnricher
+    {
+        public Task<string?> FetchTextAsync(string url, CancellationToken ct) => Task.FromResult<string?>(null);
+    }
+    private static readonly IJobContentEnricher Enricher = new NoEnricher();
+
     private static JobDiscoveryService Build(FakeDiscoveryStore store, params IJobSourceProvider[] providers) =>
-        new(providers, Array.Empty<IJobSearchProvider>(), store, Normalizer, Engine, NullLogger<JobDiscoveryService>.Instance);
+        new(providers, Array.Empty<IJobSearchProvider>(), store, Normalizer, Engine, Enricher, NullLogger<JobDiscoveryService>.Instance);
 
     [Fact]
     public async Task Discover_CreatesNewJob()
@@ -103,7 +109,7 @@ public sealed class JobDiscoveryServiceTests
             FakeJobSourceProvider.Job("g-1", "Gupy", "Desenvolvedor .NET") with { CompanyName = "Lumini IT" }
         });
         var service = new JobDiscoveryService(
-            Array.Empty<IJobSourceProvider>(), new[] { search }, store, Normalizer, Engine,
+            Array.Empty<IJobSourceProvider>(), new[] { search }, store, Normalizer, Engine, Enricher,
             NullLogger<JobDiscoveryService>.Instance);
 
         var result = await service.SearchAsync(new[] { ".net", "c#" }, CancellationToken.None);
