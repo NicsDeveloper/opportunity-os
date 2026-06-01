@@ -122,3 +122,17 @@ public enum RawJobCandidateStatus
     Rejected = 6,
     Expired = 7
 }
+
+public enum UserFeedbackType
+{
+    Relevant = 1,
+    Irrelevant = 2,
+    HideSimilar = 3,
+    BadCompanyDetection = 4,
+    BadScore = 5,
+    Duplicate = 6,
+    Expired = 7,
+    InterestingCompany = 8,
+    Applied = 9,
+    ContactedRecruiter = 10
+}
