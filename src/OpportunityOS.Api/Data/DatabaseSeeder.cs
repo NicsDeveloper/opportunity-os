@@ -51,6 +51,31 @@ public static class DatabaseSeeder
                     new[] { "fintech", "payments" }));
         }
 
+        // P14 — seed discovery campaigns (idempotent: only when none exist).
+        if (!await db.SearchCampaigns.AnyAsync(ct))
+        {
+            db.SearchCampaigns.AddRange(
+                new SearchCampaign(".NET Brasil Volume", "Volume .NET/C# no Brasil (web aberta + Gupy + ATS)",
+                    SearchCampaignPriority.Aggressive,
+                    new[] { "desenvolvedor .net", "programador c#", "engenheiro de software .net", "backend c#", ".net developer" },
+                    new[] { "web", "gupy", "ats" }),
+                new SearchCampaign("Consultorias Brasil", "Consultorias/outsourcing que contratam .NET",
+                    SearchCampaignPriority.High,
+                    new[] { "GFT", "Stefanini", "BRQ", "CI&T", "Compass", "FCamara", "TIVIT", "NTT Data", "Accenture", "Capgemini", "IBM", "K2 Partnering", "Act Digital" }),
+                new SearchCampaign("Bacen Financial Institutions", "Instituições financeiras (Bacen) — varredura .NET/Pix",
+                    SearchCampaignPriority.High,
+                    new[] { ".net", "c#", "backend", "Pix", "Open Finance", "payments", "desenvolvedor", "software engineer" }),
+                new SearchCampaign("Fintech Payments", "Fintech/pagamentos .NET",
+                    SearchCampaignPriority.High,
+                    new[] { ".NET payments", "C# fintech", "backend pix", "open finance developer", "banco digital .net", "pagamentos c#" }),
+                new SearchCampaign("International Remote", "Vagas remotas internacionais .NET/C#",
+                    SearchCampaignPriority.Medium,
+                    new[] { "remote .NET developer", "senior C# backend engineer", ".NET contractor LATAM", "C# software engineer remote", "payments engineer .NET" }),
+                new SearchCampaign("LinkedIn Indexed Manual", "LinkedIn indexado — REVISÃO MANUAL (sem scrape/login/automação)",
+                    SearchCampaignPriority.Low,
+                    new[] { "site:linkedin.com/jobs/view \".NET\" \"remoto\"", "site:linkedin.com/jobs/view \"C#\" \"Brazil\"", "site:linkedin.com/jobs/view \"backend .NET\" \"remote\"" }));
+        }
+
         await db.SaveChangesAsync(ct);
     }
 
