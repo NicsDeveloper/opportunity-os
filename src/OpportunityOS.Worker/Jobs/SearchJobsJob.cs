@@ -10,7 +10,11 @@ namespace OpportunityOS.Worker.Jobs;
 public sealed class SearchJobsJob
 {
     private static readonly string[] Keywords =
-        { ".net", "c#", "desenvolvedor .net", "backend .net", "engenheiro de software .net" };
+    {
+        "desenvolvedor .net", "desenvolvedor backend c#", "engenheiro de software .net",
+        "programador c# pleno", "vaga .net remoto", "desenvolvedor .net fintech",
+        "arquiteto .net", "desenvolvedor c# sênior",
+    };
 
     private readonly IJobDiscoveryService _discovery;
     private readonly ILogger<SearchJobsJob> _logger;
