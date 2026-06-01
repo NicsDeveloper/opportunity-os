@@ -1,5 +1,8 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using OpportunityOS.Application.AI;
 using OpportunityOS.Application.Discovery;
+using OpportunityOS.Application.Matching;
+using OpportunityOS.Application.Normalization;
 using OpportunityOS.Domain.Entities;
 using OpportunityOS.Domain.Enums;
 using OpportunityOS.UnitTests.Fakes;
@@ -16,8 +19,35 @@ public sealed class JobDiscoveryServiceTests
         return c;
     }
 
+    private static readonly IJobNormalizer Normalizer = new JobNormalizer();
+    private static readonly IMatchEngine Engine = new HeuristicMatchEngine(Normalizer);
+
+    private sealed class NoEnricher : IJobContentEnricher
+    {
+        public Task<string?> FetchTextAsync(string url, CancellationToken ct) => Task.FromResult<string?>(null);
+    }
+    private static readonly IJobContentEnricher Enricher = new NoEnricher();
+
+    // Never invoked in these tests (no active profile -> auto-score returns early).
+    private sealed class UnusedUnderstanding : IJobUnderstandingService
+    {
+        public Task<JobAnalysisResult> AnalyzeAsync(JobPosting job, CancellationToken ct) =>
+            throw new NotSupportedException();
+    }
+    private sealed class UnusedFit : ICandidateFitAnalysisService
+    {
+        public Task<OpportunityMatch> AnalyzeFitAsync(
+            CandidateProfile profile, JobPosting job, JobAnalysisResult a, CancellationToken ct) =>
+            throw new NotSupportedException();
+    }
+    private static readonly IJobUnderstandingService Understanding = new UnusedUnderstanding();
+    private static readonly ICandidateFitAnalysisService Fit = new UnusedFit();
+    private static readonly ISourceClassifierService SourceClassifier =
+        new OpportunityOS.Infrastructure.Providers.SourceClassifierService();
+
     private static JobDiscoveryService Build(FakeDiscoveryStore store, params IJobSourceProvider[] providers) =>
-        new(providers, Array.Empty<IJobSearchProvider>(), store, NullLogger<JobDiscoveryService>.Instance);
+        new(providers, Array.Empty<IJobSearchProvider>(), store, Normalizer, Engine, Enricher,
+            Understanding, Fit, SourceClassifier, NullLogger<JobDiscoveryService>.Instance);
 
     [Fact]
     public async Task Discover_CreatesNewJob()
@@ -98,7 +128,8 @@ public sealed class JobDiscoveryServiceTests
             FakeJobSourceProvider.Job("g-1", "Gupy", "Desenvolvedor .NET") with { CompanyName = "Lumini IT" }
         });
         var service = new JobDiscoveryService(
-            Array.Empty<IJobSourceProvider>(), new[] { search }, store, NullLogger<JobDiscoveryService>.Instance);
+            Array.Empty<IJobSourceProvider>(), new[] { search }, store, Normalizer, Engine, Enricher,
+            Understanding, Fit, SourceClassifier, NullLogger<JobDiscoveryService>.Instance);
 
         var result = await service.SearchAsync(new[] { ".net", "c#" }, CancellationToken.None);
 

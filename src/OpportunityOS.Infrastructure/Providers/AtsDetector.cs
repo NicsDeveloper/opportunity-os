@@ -6,11 +6,11 @@ using OpportunityOS.Domain.Entities;
 namespace OpportunityOS.Infrastructure.Providers;
 
 /// <summary>
-/// Detects a company's ATS by inspecting its public website and careers page.
-/// Strategy: scan the given URLs' HTML for known ATS host patterns; if none,
-/// follow up to a few "careers"-looking links one level deep and scan those.
+/// Detects a company's ATS from text (a page's HTML, or a board URL). Recognizes
+/// many ATS — but only Greenhouse/Lever/Gupy are <c>ProviderSupported</c> (we can
+/// fetch their jobs today); the rest are detected/linked until a provider exists.
 /// </summary>
-public sealed partial class AtsDetector : IAtsDetector
+public sealed class AtsDetector : IAtsDetector
 {
     private const int MaxPages = 4;
 
@@ -23,16 +23,71 @@ public sealed partial class AtsDetector : IAtsDetector
         _logger = logger;
     }
 
+    // Ordered: token-canonical (fetchable) first, then host-based (detect/link only).
+    private sealed record Spec(string Ats, bool Supported, Regex Rx, Func<Match, string> Board, string TokenGroup);
+
+    private static readonly Spec[] Specs =
+    {
+        new("Greenhouse", true,  Rx(@"(?:job-)?boards\.greenhouse\.io/(?<t>[A-Za-z0-9_-]+)"),
+            m => $"https://boards.greenhouse.io/{m.Groups["t"].Value}", "t"),
+        new("Lever", true,       Rx(@"jobs\.lever\.co/(?<t>[A-Za-z0-9_.-]+)"),
+            m => $"https://jobs.lever.co/{m.Groups["t"].Value}", "t"),
+        new("Gupy", true,        Rx(@"(?<t>[A-Za-z0-9-]+)\.gupy\.io"),
+            m => $"https://{m.Groups["t"].Value}.gupy.io", "t"),
+        new("Workday", false,    Rx(@"(?<h>[A-Za-z0-9-]+\.(?:wd\d+\.)?myworkdayjobs\.com)"),
+            m => $"https://{m.Groups["h"].Value}", "h"),
+        new("Ashby", true,       Rx(@"jobs\.ashbyhq\.com/(?<t>[A-Za-z0-9_-]+)"),
+            m => $"https://jobs.ashbyhq.com/{m.Groups["t"].Value}", "t"),
+        new("SmartRecruiters", true, Rx(@"(?:jobs|careers)\.smartrecruiters\.com/(?<t>[A-Za-z0-9._-]+)"),
+            m => $"https://jobs.smartrecruiters.com/{m.Groups["t"].Value}", "t"),
+        new("Workable", false,   Rx(@"(?<t>[A-Za-z0-9_-]+)\.workable\.com"),
+            m => $"https://{m.Groups["t"].Value}.workable.com", "t"),
+        new("Recruitee", false,  Rx(@"(?<t>[A-Za-z0-9_-]+)\.recruitee\.com"),
+            m => $"https://{m.Groups["t"].Value}.recruitee.com", "t"),
+        new("Teamtailor", false, Rx(@"(?<t>[A-Za-z0-9_-]+)\.teamtailor\.com"),
+            m => $"https://{m.Groups["t"].Value}.teamtailor.com", "t"),
+        new("Breezy", false,     Rx(@"(?<t>[A-Za-z0-9_-]+)\.breezy\.hr"),
+            m => $"https://{m.Groups["t"].Value}.breezy.hr", "t"),
+        // Brazil
+        new("inhire", false,     Rx(@"(?<t>[A-Za-z0-9_-]+)\.inhire\.(?:app|io)"),
+            m => $"https://{m.Groups["t"].Value}.inhire.app", "t"),
+        new("Abler", false,      Rx(@"(?<t>[A-Za-z0-9_-]+)\.abler\.com\.br"),
+            m => $"https://{m.Groups["t"].Value}.abler.com.br", "t"),
+        new("Solides", false,    Rx(@"(?<h>[A-Za-z0-9_.-]+\.solides\.com\.br)"),
+            m => $"https://{m.Groups["h"].Value}", "h"),
+        new("Pandape", false,    Rx(@"(?<h>[A-Za-z0-9_.-]+\.pandape\.com(?:\.br)?)"),
+            m => $"https://{m.Groups["h"].Value}", "h"),
+        new("Kenoby", false,     Rx(@"(?<h>[A-Za-z0-9_.-]+\.kenoby\.com)"),
+            m => $"https://{m.Groups["h"].Value}", "h"),
+        new("Quickin", false,    Rx(@"(?<h>[A-Za-z0-9_.-]+\.quickin\.io)"),
+            m => $"https://{m.Groups["h"].Value}", "h"),
+        new("JobConvo", false,   Rx(@"(?<h>[A-Za-z0-9_.-]+\.jobconvo\.com)"),
+            m => $"https://{m.Groups["h"].Value}", "h"),
+        new("Taqe", false,       Rx(@"(?<h>[A-Za-z0-9_.-]+\.taqe\.com\.br)"),
+            m => $"https://{m.Groups["h"].Value}", "h"),
+        new("99jobs", false,     Rx(@"(?<h>[A-Za-z0-9_.-]+\.99jobs\.com)"),
+            m => $"https://{m.Groups["h"].Value}", "h"),
+        new("Recrutei", false,   Rx(@"(?<h>[A-Za-z0-9_.-]+\.recrutei\.com\.br)"),
+            m => $"https://{m.Groups["h"].Value}", "h"),
+        new("GeekHunter", false, Rx(@"(?<h>(?:www\.)?geekhunter\.com\.br)"),
+            m => $"https://{m.Groups["h"].Value}", "h"),
+        new("Coodesh", false,    Rx(@"(?<h>(?:www\.)?coodesh\.com)"),
+            m => $"https://{m.Groups["h"].Value}", "h"),
+        new("Programathor", false, Rx(@"(?<h>(?:www\.)?programathor\.com\.br)"),
+            m => $"https://{m.Groups["h"].Value}", "h"),
+    };
+
+    private static Regex Rx(string p) => new(p, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     public async Task<AtsDetectionResult> DetectAsync(Company company, CancellationToken ct)
     {
         var queue = new List<string>();
         if (!string.IsNullOrWhiteSpace(company.CareersUrl)) queue.Add(company.CareersUrl!);
         if (!string.IsNullOrWhiteSpace(company.WebsiteUrl)) queue.Add(company.WebsiteUrl!);
-        if (queue.Count == 0)
-            return NotDetected();
+        if (queue.Count == 0) return NotDetected();
 
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var careersFound = (string?)null;
+        string? careersFound = null;
         var fetches = 0;
 
         for (var i = 0; i < queue.Count && fetches < MaxPages; i++)
@@ -44,49 +99,27 @@ public sealed partial class AtsDetector : IAtsDetector
             fetches++;
             if (html is null) continue;
 
-            // 1) Direct ATS detection on this page.
             var hit = Detect(html);
-            if (hit is not null)
-                return hit with { CareersPageUrl = careersFound ?? url };
+            if (hit is not null) return hit with { CareersPageUrl = careersFound ?? url };
 
-            // 2) Otherwise queue careers-looking links (one level deep).
             foreach (var link in ExtractCareersLinks(html, url))
             {
                 careersFound ??= link;
                 if (!visited.Contains(link) && !queue.Contains(link)) queue.Add(link);
             }
         }
-
         return NotDetected() with { CareersPageUrl = careersFound };
     }
 
-    /// <summary>Scan HTML for the first known ATS host pattern.</summary>
-    public static AtsDetectionResult? Detect(string html)
+    /// <summary>Classify a chunk of text (page HTML or a board URL) by ATS host pattern.</summary>
+    public static AtsDetectionResult? Detect(string text)
     {
-        var gh = GreenhouseRegex().Match(html);
-        if (gh.Success)
+        foreach (var spec in Specs)
         {
-            var token = gh.Groups["token"].Value;
-            return new AtsDetectionResult(true, "Greenhouse", $"https://boards.greenhouse.io/{token}", token, null, ProviderSupported: true);
-        }
-        var lv = LeverRegex().Match(html);
-        if (lv.Success)
-        {
-            var token = lv.Groups["token"].Value;
-            return new AtsDetectionResult(true, "Lever", $"https://jobs.lever.co/{token}", token, null, ProviderSupported: true);
-        }
-        var gp = GupyRegex().Match(html);
-        if (gp.Success)
-        {
-            var token = gp.Groups["token"].Value;
-            // Gupy discovery is keyword-based (cross-company), but record the board.
-            return new AtsDetectionResult(true, "Gupy", $"https://{token}.gupy.io", token, null, ProviderSupported: true);
-        }
-        var wd = WorkdayRegex().Match(html);
-        if (wd.Success)
-        {
-            var token = wd.Groups["token"].Value;
-            return new AtsDetectionResult(true, "Workday", wd.Value.StartsWith("http") ? wd.Value : $"https://{wd.Value}", token, null, ProviderSupported: false);
+            var m = spec.Rx.Match(text);
+            if (!m.Success) continue;
+            var token = m.Groups[spec.TokenGroup].Success ? m.Groups[spec.TokenGroup].Value : null;
+            return new AtsDetectionResult(true, spec.Ats, spec.Board(m), token, null, spec.Supported);
         }
         return null;
     }
@@ -94,16 +127,12 @@ public sealed partial class AtsDetector : IAtsDetector
     public static IEnumerable<string> ExtractCareersLinks(string html, string baseUrl)
     {
         Uri.TryCreate(baseUrl, UriKind.Absolute, out var b);
-        foreach (Match m in HrefRegex().Matches(html))
+        foreach (Match m in HrefRegex.Matches(html))
         {
             var href = m.Groups["href"].Value;
-            if (string.IsNullOrWhiteSpace(href)) continue;
-            if (!CareersTermRegex().IsMatch(href)) continue;
-
-            if (Uri.TryCreate(href, UriKind.Absolute, out var abs))
-                yield return abs.ToString();
-            else if (b is not null && Uri.TryCreate(b, href, out var rel))
-                yield return rel.ToString();
+            if (string.IsNullOrWhiteSpace(href) || !CareersTermRegex.IsMatch(href)) continue;
+            if (Uri.TryCreate(href, UriKind.Absolute, out var abs)) yield return abs.ToString();
+            else if (b is not null && Uri.TryCreate(b, href, out var rel)) yield return rel.ToString();
         }
     }
 
@@ -112,8 +141,7 @@ public sealed partial class AtsDetector : IAtsDetector
         try
         {
             using var response = await AtsHttp.GetWithRetryAsync(_http, url, ct);
-            if (!response.IsSuccessStatusCode) return null;
-            return await response.Content.ReadAsStringAsync(ct);
+            return response.IsSuccessStatusCode ? await response.Content.ReadAsStringAsync(ct) : null;
         }
         catch (Exception ex)
         {
@@ -122,24 +150,12 @@ public sealed partial class AtsDetector : IAtsDetector
         }
     }
 
-    private static AtsDetectionResult NotDetected() =>
-        new(false, null, null, null, null, false);
+    private static AtsDetectionResult NotDetected() => new(false, null, null, null, null, false);
 
-    [GeneratedRegex(@"(?:job-)?boards\.greenhouse\.io/(?<token>[A-Za-z0-9_-]+)", RegexOptions.IgnoreCase)]
-    private static partial Regex GreenhouseRegex();
+    private static readonly Regex HrefRegex =
+        new("href\\s*=\\s*[\"'](?<href>[^\"']+)[\"']", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    [GeneratedRegex(@"jobs\.lever\.co/(?<token>[A-Za-z0-9_.-]+)", RegexOptions.IgnoreCase)]
-    private static partial Regex LeverRegex();
-
-    [GeneratedRegex(@"(?<token>[A-Za-z0-9-]+)\.gupy\.io", RegexOptions.IgnoreCase)]
-    private static partial Regex GupyRegex();
-
-    [GeneratedRegex(@"(?<token>[A-Za-z0-9-]+\.(?:wd\d+\.)?myworkdayjobs\.com)", RegexOptions.IgnoreCase)]
-    private static partial Regex WorkdayRegex();
-
-    [GeneratedRegex("href\\s*=\\s*[\"'](?<href>[^\"']+)[\"']", RegexOptions.IgnoreCase)]
-    private static partial Regex HrefRegex();
-
-    [GeneratedRegex(@"carreira|career|careers|jobs|vagas|trabalhe|join-?us|oportunidades|positions", RegexOptions.IgnoreCase)]
-    private static partial Regex CareersTermRegex();
+    private static readonly Regex CareersTermRegex =
+        new(@"carreira|career|careers|jobs|vagas|trabalhe|join-?us|oportunidades|positions",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
 }

@@ -4,12 +4,14 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using OpportunityOS.Application.AI;
+using OpportunityOS.Application.Bacen;
 using OpportunityOS.Application.Digest;
 using OpportunityOS.Application.Discovery;
 using OpportunityOS.Application.Matching;
 using OpportunityOS.Application.Normalization;
 using OpportunityOS.Application.Pipeline;
 using OpportunityOS.Infrastructure.Ai;
+using OpportunityOS.Infrastructure.Bacen;
 using OpportunityOS.Infrastructure.Email;
 using OpportunityOS.Infrastructure.Persistence;
 using OpportunityOS.Infrastructure.Providers;
@@ -31,9 +33,30 @@ public static class DependencyInjection
 
         services.AddScoped<IJobNormalizer, JobNormalizer>();
         services.AddScoped<IMatchEngine, HeuristicMatchEngine>();
+        services.AddSingleton<ISourceClassifierService, SourceClassifierService>();
+        services.AddSingleton<ICompanyNameResolver, CompanyNameResolver>();
+        services.AddSingleton<IJobFingerprintService, JobFingerprintService>();
+
+        // Link validation (HEAD-check -> expire dead postings), used by API + Worker.
+        services.AddHttpClient<IJobLinkValidator, JobLinkValidator>(ConfigureClient);
+
+        // Enriches thin search snippets with the real job-page text before scoring.
+        services.AddHttpClient<IJobContentEnricher, HtmlJobContentEnricher>(ConfigureClient);
+
+        // Headless renderer for JS-heavy career pages (shared browser); HTTP fallback if absent.
+        services.AddSingleton<IPageRenderer, PlaywrightPageRenderer>();
 
         services.AddScoped<IDiscoveryStore, EfDiscoveryStore>();
         services.AddScoped<IJobDiscoveryService, JobDiscoveryService>();
+
+        // Firehose (massive discovery): raw search providers, query expansion, store, service.
+        services.AddSingleton<QueryExpansionService>();
+        var discoveryBudget = new DiscoveryBudgetOptions();
+        config.GetSection("DiscoveryBudget").Bind(discoveryBudget);
+        services.AddSingleton(discoveryBudget);
+        services.AddSingleton<IQueryBudgetManager, QueryBudgetManager>();
+        services.AddScoped<IFirehoseStore, EfFirehoseStore>();
+        services.AddScoped<IFirehoseService, FirehoseService>();
 
         services.AddScoped<IOpportunityStore, EfOpportunityStore>();
         services.AddScoped<IOpportunityPipeline, OpportunityPipeline>();
@@ -51,10 +74,75 @@ public static class DependencyInjection
         if (config.GetValue("FeatureFlags:EnableLeverProvider", true))
             services.AddHttpClient<IJobSourceProvider, LeverJobSourceProvider>(ConfigureClient);
 
+        if (config.GetValue("FeatureFlags:EnableSmartRecruitersProvider", true))
+            services.AddHttpClient<IJobSourceProvider, SmartRecruitersJobSourceProvider>(ConfigureClient);
+
+        if (config.GetValue("FeatureFlags:EnableAshbyProvider", true))
+            services.AddHttpClient<IJobSourceProvider, AshbyJobSourceProvider>(ConfigureClient);
+
+        if (config.GetValue("FeatureFlags:EnableGenericCrawler", true))
+            services.AddHttpClient<IJobSourceProvider, GenericCareersCrawler>(ConfigureClient);
+
         if (config.GetValue("FeatureFlags:EnableGupyProvider", true))
             services.AddHttpClient<IJobSearchProvider, GupyJobSearchProvider>(ConfigureClient);
 
         services.AddHttpClient<IAtsDetector, AtsDetector>(ConfigureClient);
+        services.AddScoped<ICompanyOnboardingService, CompanyOnboardingService>();
+
+        // Heuristic website discovery (the no-CSE default and the Google fallback).
+        services.AddHttpClient<CompanyWebsiteDiscoverer>(ConfigureClient);
+
+        var googleSearch = new GoogleSearchOptions
+        {
+            ApiKey = config["Search:ApiKey"] ?? string.Empty,
+            SearchEngineId = config["Search:SearchEngineId"] ?? string.Empty
+        };
+        if (googleSearch.IsConfigured)
+        {
+            services.AddSingleton(googleSearch);
+            // Shared daily quota across every Google CSE caller (free tier = 100/day).
+            services.AddSingleton(new GoogleQuotaGuard(config.GetValue("Search:DailyQueryBudget", 90)));
+            // Website discovery via Google (whole-web), heuristic fallback.
+            services.AddHttpClient<GoogleWebsiteDiscoverer>(ConfigureClient);
+            services.AddScoped<ICompanyWebsiteDiscoverer>(sp => sp.GetRequiredService<GoogleWebsiteDiscoverer>());
+            services.AddScoped<HeuristicAtsBoardFinder>();
+            // ATS board finder via Google CSE (board first, then website crawl), heuristic fallback.
+            services.AddHttpClient<GoogleAtsBoardFinder>(ConfigureClient);
+            services.AddScoped<IAtsBoardFinder>(sp => sp.GetRequiredService<GoogleAtsBoardFinder>());
+            // Open-web job search (recent .NET postings), quota-guarded.
+            if (config.GetValue("FeatureFlags:EnableGoogleWebSearch", true))
+                services.AddHttpClient<IJobSearchProvider, GoogleWebJobSearchProvider>(ConfigureClient);
+        }
+        else
+        {
+            services.AddScoped<ICompanyWebsiteDiscoverer>(sp => sp.GetRequiredService<CompanyWebsiteDiscoverer>());
+            services.AddScoped<HeuristicAtsBoardFinder>();
+            services.AddScoped<IAtsBoardFinder>(sp => sp.GetRequiredService<HeuristicAtsBoardFinder>());
+        }
+
+        // Open-web job search via Serper.dev (real Google web index — independent of the
+        // Google CSE whole-web restriction). Registered on its own key, not the CSE block.
+        var serper = new SerperSearchOptions
+        {
+            ApiKey = config["Search:SerperApiKey"] ?? string.Empty,
+            MaxQueriesPerCall = config.GetValue("Search:SerperMaxQueriesPerCall", 4),
+            Freshness = config.GetValue("Search:SerperFreshness", "qdr:m") ?? "qdr:m",
+            DelayMsBetweenQueries = config.GetValue("Search:SerperDelayMs", 1200),
+        };
+        if (serper.IsConfigured && config.GetValue("FeatureFlags:EnableSerperWebSearch", true))
+        {
+            services.AddSingleton(serper);
+            services.AddHttpClient<IJobSearchProvider, SerperWebJobSearchProvider>(ConfigureClient);
+            // Firehose raw search (verbatim queries) over the same Serper key.
+            services.AddHttpClient<IRawSearchProvider, SerperRawSearchProvider>(ConfigureClient);
+        }
+
+        var bacenOptions = new BacenOptions();
+        config.GetSection("Bacen").Bind(bacenOptions);
+        services.AddSingleton(bacenOptions);
+        services.AddHttpClient<IBacenPixParticipantsCsvProvider, BacenPixParticipantsCsvProvider>(ConfigureClient);
+        services.AddScoped<IBacenStore, EfBacenStore>();
+        services.AddScoped<IBacenRadarService, BacenRadarService>();
 
         AddAiCopilot(services, config);
 

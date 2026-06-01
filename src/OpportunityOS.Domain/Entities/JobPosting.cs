@@ -28,6 +28,14 @@ public sealed class JobPosting
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
 
+    // ---- Source quality (Priority 4/5) ----
+    public int SourceConfidenceScore { get; private set; }
+    public SourceType SourceType { get; private set; } = SourceType.Unknown;
+    public bool RequiresManualValidation { get; private set; }
+    public string? SourceName { get; private set; }
+    public string? RealCompanyName { get; private set; }
+    public string? OriginalJobUrl { get; private set; }
+
     private JobPosting() { }
 
     public JobPosting(
@@ -116,4 +124,32 @@ public sealed class JobPosting
         Status = JobPostingStatus.Archived;
         UpdatedAtUtc = DateTime.UtcNow;
     }
+
+    public void SetSourceQuality(
+        SourceType sourceType, string? sourceName, int sourceConfidenceScore,
+        bool requiresManualValidation, string? realCompanyName = null, string? originalJobUrl = null)
+    {
+        SourceType = sourceType;
+        SourceName = sourceName;
+        SourceConfidenceScore = Math.Clamp(sourceConfidenceScore, 0, 100);
+        RequiresManualValidation = requiresManualValidation;
+        if (!string.IsNullOrWhiteSpace(realCompanyName)) RealCompanyName = realCompanyName;
+        if (!string.IsNullOrWhiteSpace(originalJobUrl)) OriginalJobUrl = originalJobUrl;
+        UpdatedAtUtc = DateTime.UtcNow;
+    }
+
+    public void MarkExpired()
+    {
+        Status = JobPostingStatus.Expired;
+        UpdatedAtUtc = DateTime.UtcNow;
+    }
+
+    /// <summary>Best-known posting date for freshness (published, else discovered).</summary>
+    public DateTime EffectiveDateUtc => PublishedAtUtc ?? CreatedAtUtc;
+
+    /// <summary>Talent-pool / evergreen entries (not a real, datable vacancy) — often 404.</summary>
+    public bool IsTalentPool =>
+        Title.Contains("banco de talentos", StringComparison.OrdinalIgnoreCase)
+        || Title.Contains("talent pool", StringComparison.OrdinalIgnoreCase)
+        || Title.Contains("cadastro de currículo", StringComparison.OrdinalIgnoreCase);
 }

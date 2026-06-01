@@ -31,11 +31,13 @@ public sealed class HeuristicMatchEngine : IMatchEngine
         var location = ScoreLocation(norm.WorkMode, haystack, strengths, risks);
         var language = ScoreLanguage(norm.Language ?? job.Language, profile, risks);
 
+        // Technical fit dominates: a clear .NET/backend role is a strong match for this
+        // candidate even outside payments. Domain is a bonus, not a gate.
         var overall = (int)Math.Round(
-            technical * 0.35 +
-            domain * 0.25 +
+            technical * 0.45 +
+            domain * 0.20 +
             seniority * 0.15 +
-            location * 0.15 +
+            location * 0.10 +
             language * 0.10,
             MidpointRounding.AwayFromZero);
 
@@ -94,10 +96,10 @@ public sealed class HeuristicMatchEngine : IMatchEngine
         if (medium > 0)
         {
             risks.Add("Domínio adjacente (não-core financeiro)");
-            return Clamp(50 + Math.Min(medium * 4, 15));
+            return Clamp(60 + Math.Min(medium * 4, 15));
         }
-        risks.Add("Domínio distante das áreas de maior valor do candidato");
-        return 25;
+        // No domain signal isn't a red flag for a backend role — pagamentos é bônus, não gate.
+        return 50;
     }
 
     private static int ScoreSeniority(string? seniority, List<string> strengths, List<string> risks)

@@ -10,6 +10,8 @@ public sealed class FakeDiscoveryStore : IDiscoveryStore
     public List<Company> Companies { get; } = new();
     public List<JobPosting> Jobs { get; } = new();
     public List<ExecutionRun> Runs { get; } = new();
+    public List<OpportunityMatch> Matches { get; } = new();
+    public CandidateProfile? ActiveProfile { get; set; }
     public int SaveCount { get; private set; }
 
     public Task<IReadOnlyList<Company>> GetCompaniesByPriorityAsync(CancellationToken ct) =>
@@ -42,6 +44,18 @@ public sealed class FakeDiscoveryStore : IDiscoveryStore
     public Task AddExecutionRunAsync(ExecutionRun run, CancellationToken ct)
     {
         Runs.Add(run);
+        return Task.CompletedTask;
+    }
+
+    public Task<CandidateProfile?> GetActiveProfileAsync(CancellationToken ct) =>
+        Task.FromResult(ActiveProfile);
+
+    public Task<bool> JobHasMatchAsync(Guid jobPostingId, CancellationToken ct) =>
+        Task.FromResult(Matches.Any(m => m.JobPostingId == jobPostingId));
+
+    public Task AddMatchAsync(OpportunityMatch match, CancellationToken ct)
+    {
+        Matches.Add(match);
         return Task.CompletedTask;
     }
 

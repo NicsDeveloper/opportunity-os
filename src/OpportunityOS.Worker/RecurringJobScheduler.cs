@@ -30,6 +30,30 @@ public sealed class RecurringJobScheduler : IHostedService
             discoveryCron);
         _logger.LogInformation("Scheduled recurring job 'discover-jobs' with cron {Cron}", discoveryCron);
 
+        // Continuous discovery: keep finding jobs while the system runs (rate-friendly cadence).
+        var continuousCron = _config.GetValue<string>("Jobs:ContinuousDiscoveryCron") ?? "*/15 * * * *";
+        _recurring.AddOrUpdate<DiscoverJobsJob>(
+            "continuous-discovery",
+            job => job.RunAsync(CancellationToken.None),
+            continuousCron);
+        _logger.LogInformation("Scheduled recurring job 'continuous-discovery' with cron {Cron}", continuousCron);
+
+        // Keyword search (Gupy + open-web Google) a few times a day, to spread the Google quota.
+        var searchCron = _config.GetValue<string>("Jobs:SearchCron") ?? "0 */3 * * *";
+        _recurring.AddOrUpdate<SearchJobsJob>(
+            "search-jobs",
+            job => job.RunAsync(CancellationToken.None),
+            searchCron);
+        _logger.LogInformation("Scheduled recurring job 'search-jobs' with cron {Cron}", searchCron);
+
+        // Expire dead links so the fresh feed never shows closed/404 vacancies.
+        var validateCron = _config.GetValue<string>("Jobs:ValidateLinksCron") ?? "30 */6 * * *";
+        _recurring.AddOrUpdate<ValidateLinksJob>(
+            "validate-links",
+            job => job.RunAsync(CancellationToken.None),
+            validateCron);
+        _logger.LogInformation("Scheduled recurring job 'validate-links' with cron {Cron}", validateCron);
+
         var digestCron = _config.GetValue<string>("Jobs:DailyDigestCron") ?? "0 9 * * *";
         _recurring.AddOrUpdate<SendDailyDigestJob>(
             "send-daily-digest",

@@ -83,6 +83,52 @@ public static class CompanyEndpoints
                 r.Detected, r.Ats, r.BoardUrl, r.Token, r.CareersPageUrl, r.ProviderSupported));
         });
 
+        // Onboard companies missing a board: find ATS board (CSE-ATS or heuristic) — chains the funnel.
+        group.MapPost("/onboard", async (
+            int? limit, ICompanyOnboardingService onboarding, CancellationToken ct) =>
+        {
+            var r = await onboarding.OnboardAsync(Math.Clamp(limit ?? 25, 1, 200), ct);
+            return Results.Ok(new OnboardingResponse(
+                r.ExecutionRunId, r.Status, r.Processed, r.BoardsFound, r.Errors));
+        });
+
+        // Backfill websites for companies that have a match but no website yet (for logos).
+        group.MapPost("/backfill-websites", async (
+            int? limit, OpportunityOsDbContext db, ICompanyWebsiteDiscoverer discoverer, CancellationToken ct) =>
+        {
+            var max = Math.Clamp(limit ?? 20, 1, 200);
+            var matchedJobIds = await db.OpportunityMatches.Select(m => m.JobPostingId).Distinct().ToListAsync(ct);
+            var companyIds = await db.JobPostings.Where(j => matchedJobIds.Contains(j.Id))
+                .Select(j => j.CompanyId).Distinct().ToListAsync(ct);
+            var targets = await db.Companies
+                .Where(c => companyIds.Contains(c.Id) && (c.WebsiteUrl == null || c.WebsiteUrl == ""))
+                .Take(max).ToListAsync(ct);
+
+            var found = 0;
+            foreach (var c in targets)
+            {
+                var r = await discoverer.DiscoverAsync(c.Name, ct);
+                if (r is { Found: true, WebsiteUrl: { Length: > 0 } url }) { c.SetWebsiteUrl(url); found++; }
+            }
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new BackfillResponse(targets.Count, found));
+        });
+
+        // Discover a single company's website from its name (no persistence beyond setting it).
+        group.MapPost("/{id:guid}/discover-website", async (
+            Guid id, OpportunityOsDbContext db, ICompanyWebsiteDiscoverer discoverer, CancellationToken ct) =>
+        {
+            var company = await db.Companies.FindAsync([id], ct);
+            if (company is null) return Results.NotFound();
+            var r = await discoverer.DiscoverAsync(company.Name, ct);
+            if (r is { Found: true, WebsiteUrl: { Length: > 0 } url })
+            {
+                company.SetWebsiteUrl(url);
+                await db.SaveChangesAsync(ct);
+            }
+            return Results.Ok(new WebsiteDiscoveryResponse(r.Found, r.WebsiteUrl));
+        });
+
         // Bulk import companies from CSV (name,websiteUrl,careersUrl,industry,country).
         group.MapPost("/import-csv", async (HttpRequest request, OpportunityOsDbContext db, CancellationToken ct) =>
         {

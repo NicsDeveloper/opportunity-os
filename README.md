@@ -43,6 +43,19 @@ Direção das dependências: `Api → Infrastructure → Application → Domain`
 - .NET SDK 10
 - Docker + Docker Compose
 
+## Subir tudo com um comando
+
+Na raiz do repo (Windows), sobe Postgres + API + Worker + Frontend em janelas separadas:
+
+```cmd
+dev-up
+```
+(ou `powershell -ExecutionPolicy Bypass -File dev-up.ps1`). Depois abra **http://localhost:5173**.
+Para derrubar: `dev-down`.
+
+> Use este caminho (`dotnet run`) para ter Claude/Google/e-mail reais — as chaves ficam no
+> User Secrets, que o container Docker não enxerga. As etapas manuais abaixo são equivalentes.
+
 ## Como rodar localmente
 
 1. **Suba o PostgreSQL:**
@@ -118,6 +131,11 @@ Desabilite com `"SeedOnStartup": false` em `appsettings.json` ou via env var
 | PUT    | `/api/opportunities/{id}/status` | Muda status (**manual**; única via para status pós-revisão como `SentManually`) |
 | PUT    | `/api/opportunities/{id}/notes` | Atualiza notas |
 | PUT    | `/api/opportunities/{id}/follow-up` | Define `NextFollowUpAtUtc` |
+| POST   | `/api/companies/import-csv` | Importa empresas de um CSV (`name,websiteUrl,careersUrl,industry,country`) |
+| POST   | `/api/companies/{id}/detect-ats` | Detecta o ATS (Greenhouse/Lever/Gupy/Workday) crawleando o site |
+| POST   | `/api/companies/{id}/discover-website` | Descobre o site oficial a partir do nome (heurístico) |
+| POST   | `/api/companies/onboard?limit=N` | Encadeia: descobre site → detecta ATS para empresas sem site (maior prioridade primeiro) |
+| POST   | `/api/jobs/search` | Busca vagas por palavra-chave (Gupy); auto-cria empresas |
 | GET    | `/api/recruiters` | Lista recrutadores (adicionados manualmente) |
 | POST   | `/api/recruiters` | Cria recruiter lead |
 | PUT    | `/api/recruiters/{id}` | Atualiza recruiter lead |
@@ -155,6 +173,127 @@ A orquestração (`JobDiscoveryService`) é resiliente: falha de um provider/emp
 
 O Worker agenda `discover-jobs` diariamente; também é possível disparar manualmente via
 `POST /api/jobs/discover`.
+
+### Descoberta contínua + crawler de carreiras + busca web-aberta
+
+Além dos ATS providers, o sistema descobre vagas de forma **contínua** e **mais ampla**:
+
+- **Descoberta contínua** — o Worker roda `continuous-discovery` a cada 15 min
+  (`Jobs:ContinuousDiscoveryCron`, default `*/15 * * * *`) para manter o radar fresco
+  enquanto o sistema está de pé, e `search-jobs` a cada 3 h (`Jobs:SearchCron`) para
+  espalhar a cota do Google ao longo do dia.
+- **Crawler genérico de carreiras** (`GenericCareersCrawler`, flag
+  `FeatureFlags:EnableGenericCrawler`) — acessa o **site da empresa** direto, acha a página
+  de "Carreiras/Trabalhe Conosco" e extrai vagas por regex de cargo (mesmo domínio, exclui
+  hosts de ATS, `ExternalId` por hash da URL).
+- **Playwright (render de SPA)** — sites de fintech modernos são SPAs que só renderizam
+  vagas via JS. Quando o crawler não acha nada no HTML estático e o Chromium está instalado,
+  ele renderiza a página com Playwright (`IPageRenderer`/`PlaywrightPageRenderer`) e tenta de
+  novo. **Degrada graciosamente**: sem o browser, cai no fetch HTTP e loga a dica de
+  instalação. Instale uma vez:
+
+  ```bash
+  # após o build (Microsoft.Playwright vive no projeto Infrastructure; o script
+  # é copiado para o output de quem o referencia — Api/Worker):
+  pwsh src/OpportunityOS.Worker/bin/Debug/net10.0/playwright.ps1 install chromium
+  ```
+
+- **Busca web-aberta via Serper.dev** (`SerperWebJobSearchProvider`, flag
+  `FeatureFlags:EnableSerperWebSearch`) — busca **.NET/C# recentes na web inteira** (índice
+  Google real), não só nos ATS conhecidos. Cada resultado orgânico vira oportunidade; a
+  empresa é derivada do host; agregadores (LinkedIn/Indeed/Glassdoor/ZipRecruiter/…) são
+  filtrados. Frescor via `tbs=qdr:m` (último mês, configurável em `Search:SerperFreshness`).
+  O tier grátis limita rajadas, então há um `Search:SerperDelayMs` (default 1200ms) entre
+  queries e um teto `Search:SerperMaxQueriesPerCall` (default 4) para preservar os créditos.
+
+  > **Requer `Search:SerperApiKey`** nos user-secrets. Sem ela o provider fica **dormente**
+  > (não é registrado). Configure:
+  > ```bash
+  > dotnet user-secrets set "Search:SerperApiKey" "<sua-chave>" --project src/OpportunityOS.Api
+  > dotnet user-secrets set "Search:SerperApiKey" "<sua-chave>" --project src/OpportunityOS.Worker
+  > ```
+  >
+  > **Por que não o Google CSE?** A JSON API do Google **não serve mais engines whole-web**
+  > (restrição de jan/2026): mesmo com chave e projeto corretos, um `cx` de web-aberta
+  > retorna `403 "This project does not have the access to Custom Search JSON API"`. O
+  > `GoogleWebJobSearchProvider` segue no código (flag `EnableGoogleWebSearch`) só funciona com
+  > um `cx` **escopado a sites**; para web-aberta de verdade, use o Serper.
+
+- **Auto-score na descoberta** — todo job recém-descoberto (qualquer provider) é pontuado
+  na hora contra o perfil ativo pelo **match engine heurístico** (sem LLM, barato), criando
+  um `OpportunityMatch`. É isso que faz a vaga **aparecer na tela** sem passo manual. Jobs
+  antigos sem match são pontuados quando reencontrados (backfill). Falha de score nunca
+  interrompe a descoberta.
+
+- **Enriquecimento de snippet** (`IJobContentEnricher`/`HtmlJobContentEnricher`) — vagas da
+  web aberta vêm com só o snippet da busca; antes de pontuar, o sistema **busca o texto real
+  da página** (HTTP GET + strip de tags; fallback Playwright para SPA) para o heurístico ter
+  material e não subestimar boas vagas. Limitado por run (8) e só para descrições curtas
+  (<300 chars), pra não martelar sites na descoberta contínua.
+
+- **Ranking frescor-primeiro + validação de links** — o feed (`/api/matches`) descarta
+  postagens publicadas há mais de `maxAgeDays` (default 120, provavelmente fechadas) e dá
+  bônus de frescor na ordenação (recentes sobem); o `ValidateLinksJob` (cron
+  `Jobs:ValidateLinksCron`) faz HEAD-check e expira 404/410. Os contadores do dashboard
+  ("fortes 75+") respeitam o mesmo filtro, então o número não inclui vagas mortas.
+
+- **"Analisar com IA" sob demanda** — quando o rationale é o do heurístico (seco), um clique
+  chama `/ai/analyze` (LLM) e troca por um "por que combina" em prosa + score refinado, sem
+  custo de LLM até você pedir.
+
+## Firehose — descoberta massiva (camada de coleta)
+
+Nova arquitetura em 3 camadas: **Firehose** (coleta tudo, com ruído) → **Qualified** (triado)
+→ **Action Today** (poucas acionáveis). Tese: *coletar muito, organizar o caos, classificar a
+qualidade, agir seletivamente.* O Firehose **não usa LLM** e **salva o resultado bruto antes de
+filtro forte** — não descarta por score baixo.
+
+- **`SearchCampaign`** — campanha nomeada (keywords-semente, fontes-alvo, domínios excluídos,
+  budget de queries). **`SearchQueryTemplate`** — templates com placeholders. **`SearchQueryExecution`** —
+  auditoria de cada query (resultados, novos, duplicados). **`RawJobCandidate`** — candidato bruto
+  com `SourceType`, `SourceConfidenceScore`, `RequiresManualValidation`, fingerprint, etc.
+- **`QueryExpansionService`** — combina dimensões (role × stack × work-mode × domínio) e aplica
+  filtros `site:` para gerar **centenas de queries** a partir de poucas sementes. Sem LLM.
+- **`FirehoseService`** + **`IRawSearchProvider`** (`SerperRawSearchProvider`, query verbatim,
+  paginação de 10/req pois Serper rejeita `num>10`) — roda as queries, classifica a fonte por host
+  (ATS oficial / job board / agregador / social-indexed / search result), **dedup por URL**, salva
+  todo resultado como `RawJobCandidate` e audita tudo (`SearchQueryExecution` + `ExecutionRun`).
+- **LinkedIn indexado** = `SocialIndexed`, **revisão manual obrigatória** (sem scrape, sem login,
+  sem automação). Agregadores aparecem, mas marcados.
+
+Endpoints (`/api/discovery`): `POST /campaigns` · `GET /campaigns` · `GET /campaigns/{id}` ·
+`POST /campaigns/{id}/run` · `POST /quick-search` · `POST /aggressive-search` · `GET /raw-candidates`.
+
+```bash
+# coleta massiva (gera 100+ queries, salva centenas de candidatos brutos)
+curl -X POST localhost:5077/api/discovery/aggressive-search \
+  -H "Content-Type: application/json" \
+  -d '{"maxQueries":200,"maxResultsPerQuery":10,"saveRawCandidates":true}'
+curl "localhost:5077/api/discovery/raw-candidates?take=200"   # ver o volume bruto
+```
+
+> Requer `Search:SerperApiKey` (mesma chave do fluxo qualificado). O fluxo antigo de matches/
+> oportunidades segue intacto — o Firehose é uma camada nova e aditiva.
+
+**Qualidade de fonte (`ISourceClassifierService`)** — toda fonte é classificada (não descartada):
+ATS oficial 90 · Gupy 80 · página de carreira 90 · job board 70 · busca web 50 · agregador 35 ·
+LinkedIn/social 25 (**revisão manual obrigatória**) · snippet sem empresa 15. O mesmo classificador
+roda no fluxo qualificado (`JobPosting` ganhou `SourceType`/`SourceConfidenceScore`/`RequiresManualValidation`/
+`SourceName`/`RealCompanyName`/`OriginalJobUrl`).
+
+**Budget (`IQueryBudgetManager`, seção `DiscoveryBudget`)** — teto diário por provider (Serper
+1000/dia, etc.), reset UTC. Quando esgota, a busca agressiva **para com `CompletedWithBudgetLimit`**
+(nunca quebra em silêncio). Protege a cota antes das varreduras massivas.
+
+**Empresa real × fonte (`ICompanyNameResolver`)** — extrai a empresa contratante do título/host
+(ex.: `"... at MARGO - Jobgether"` → MARGO via Jobgether; `"[FORTIS SRT] ..."` → FORTIS SRT). Host
+de agregador **nunca** vira empresa sem evidência; sem empresa clara → "empresa não confirmada".
+(Fallback LLM previsto, adiado por custo.)
+
+**Dedup semântica (`IJobFingerprintService` + `JobPostingSourceOccurrence`)** — fingerprint
+estável (título+empresa+localização+senioridade+skills+hash da descrição). A mesma vaga em fontes
+diferentes é marcada `Duplicate` (continua visível como ocorrência, não some do volume); a melhor
+fonte fica como principal na promoção (futuro). `RawJobCandidate.NormalizedFingerprint` indexado.
 
 ## AI Copilot Layer (Fase 3)
 
@@ -227,6 +366,85 @@ dotnet user-secrets set "Email:Smtp:Port" "587"
 dotnet user-secrets set "Email:Smtp:Username" "voce@gmail.com"
 dotnet user-secrets set "Email:Smtp:Password" "<Gmail App Password (requer 2FA)>"
 ```
+
+## Bacen Pix Importer (radar de empresas)
+
+Popula o **radar inicial de empresas** a partir da **lista oficial de participantes do
+Pix do Banco Central** (CSV). É um processo de **dois estágios** para o radar não virar
+"lista gigante suja":
+
+1. **Import** → grava tudo em `BacenInstitution` (staging cru). Fonte = CSV oficial,
+   Latin1 / `;`-separado, **URL configurável** em `Bacen:PixParticipantsCsvUrl`
+   (sem scraping de HTML, sem adivinhar endpoint).
+2. **Promote** → cria/atualiza `Company` **apenas para instituições elegíveis** (autorizadas
+   pelo BCB e do tipo Instituição de Pagamento / Banco / Sociedade de Crédito Direto / SCFI),
+   com prioridade calculada (Strategic/High/Medium/Low) e tags herdadas + `company-radar`.
+   Cooperativas e não-autorizadas ficam de fora do radar.
+
+> O Bacen Importer **não busca vagas** — só monta o radar de empresas. A busca de vagas
+> continua nos ATS providers (Greenhouse/Lever/Gupy) + detecção de ATS / página de carreiras.
+
+**Encadeando o funil (onboarding):** as empresas promovidas vêm sem board. `POST
+/api/companies/onboard` acha o **board de vagas (ATS)** de cada uma e grava em `CareersUrl`.
+Duas estratégias por trás de `IAtsBoardFinder`:
+
+- **Google CSE** (recomendado): funciona com engine **escopado a ATS** (domínios
+  greenhouse.io/lever.co/gupy.io/inhire.app/…) **ou** com engine **de web aberta**
+  (grandfathered até 2027). `GoogleAtsBoardFinder` faz: pass 1 — se o resultado já é um
+  board de ATS, classifica e retorna; pass 2 — senão usa o 1º resultado orgânico como site
+  oficial e crawleia atrás do ATS (pula LinkedIn/agregadores). Configure `Search:ApiKey` +
+  `Search:SearchEngineId`.
+  > Nota: o Google descontinuou "buscar em toda a web" para engines **novos** em 20/01/2026;
+  > engines antigos com a opção ligada seguem válidos até 2027. Ambos funcionam aqui.
+- **Heurístico (fallback)**: descobre o site oficial pelo nome (deriva domínios, valida a
+  marca — conservador) e crawleia em busca do ATS.
+
+O `AtsDetector` reconhece Greenhouse, Lever, Gupy, Workday, Ashby, SmartRecruiters,
+Workable, Recruitee, Teamtailor, Breezy, inhire, Abler, Solides, Pandapé, Kenoby, Quickin,
+JobConvo, Taqe, 99jobs, Recrutei, GeekHunter, Coodesh, Programathor — e
+**Greenhouse/Lever/Gupy/SmartRecruiters/Ashby** têm provider de **busca de vagas** (fetch);
+os demais são detectados/linkados até existir um provider.
+
+**Validação real:** 919 instituições importadas; 279 promovidas a empresas; 640 filtradas.
+
+Endpoints:
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| POST | `/api/bacen/pix-participants/import` | Baixa o CSV oficial → `BacenInstitution` (idempotente por CNPJ, fallback ISPB) |
+| POST | `/api/bacen/pix-participants/promote-to-companies` | Promove elegíveis → `Company` (idempotente por nome) |
+| GET  | `/api/bacen/pix-participants` | Lista (filtros: `institutionType`, `authorizedByBacen`, `tag`, `search`) |
+| GET  | `/api/bacen/pix-participants/{id}` | Detalhe |
+
+Como rodar:
+
+```bash
+docker compose up -d postgres
+dotnet run --project src/OpportunityOS.Api          # aplica migrations no startup
+curl -X POST http://localhost:5000/api/bacen/pix-participants/import
+curl -X POST http://localhost:5000/api/bacen/pix-participants/promote-to-companies
+```
+
+Limitações conhecidas: a URL do CSV é um snapshot fixo (não há descoberta automática da
+versão mais recente); a descoberta nome → site/carreiras é responsabilidade de outro módulo
+(`detect-ats` / futuro `CompanyWebsiteDiscoveryService`); cada operação registra um
+`ExecutionRun` (`BacenPixParticipantsImport` / `BacenPixParticipantsPromotion`).
+
+## Dashboard (frontend)
+
+Dashboard mínimo em **React + Vite + TypeScript** (`frontend/`) consumindo a API:
+abas **Overview** (cards: empresas, vagas, oportunidades, follow-ups), **Empresas**,
+**Vagas**, **Oportunidades** e **Digest** (renderiza o HTML do preview).
+
+```bash
+docker compose up -d postgres
+dotnet run --project src/OpportunityOS.Api     # API em http://localhost:5077
+cd frontend && npm install && npm run dev      # http://localhost:5173
+```
+
+O dev server faz proxy de `/api` para a API (sem CORS em dev). Se a API estiver em
+outra porta (ex.: `5000` no docker compose), use
+`VITE_API_TARGET=http://localhost:5000 npm run dev`.
 
 ## Match Engine (heurístico, v1)
 

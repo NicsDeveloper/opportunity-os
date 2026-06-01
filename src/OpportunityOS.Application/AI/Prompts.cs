@@ -37,8 +37,13 @@ public static class Prompts
 
     public static LlmRequest Fit(CandidateProfile profile, JobAnalysisResult analysis) => new(
         SystemPrompt:
-            "Você é um avaliador de compatibilidade entre candidato e vaga. Penalize stacks distantes; " +
-            "valorize pagamentos, PIX, Open Finance, fintech, banking, mensageria, cloud e .NET. " +
+            "Você é um avaliador de compatibilidade entre candidato e vaga. " +
+            "PRIORIDADE: aderência técnica ao núcleo do candidato (.NET, C#, ASP.NET Core, backend, APIs, " +
+            "microsserviços, mensageria, cloud). Uma vaga claramente de backend .NET/C# é um match FORTE " +
+            "(technicalScore >= 80 e overallScore >= 75) mesmo fora de pagamentos — pagamentos/PIX/Open Finance/" +
+            "fintech são BÔNUS, não pré-requisito. NÃO rebaixe vagas .NET por não serem de fintech. " +
+            "Penalize de verdade só quando a stack principal é distante (ex.: vaga Java/PHP/Python pura, " +
+            "frontend puro, ou estágio). " +
             "Trate Pleno e Sênior como igualmente adequados (o candidato busca ambos); não penalize vagas Pleno. " +
             "Escreva 'rationale', 'strengths', 'risks' e 'missingRequirements' dirigindo-se ao candidato em " +
             "SEGUNDA PESSOA ('você', 'seu'); nunca se refira ao candidato pelo nome ou em terceira pessoa. " + NoInvention,

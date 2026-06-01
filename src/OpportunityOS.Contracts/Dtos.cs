@@ -95,6 +95,8 @@ public sealed record JobPostingResponse(
 
 public sealed record DiscoverRequest(Guid? CompanyId);
 
+public sealed record ValidateLinksResponse(int Checked, int Expired);
+
 public sealed record SearchRequest(List<string>? Keywords);
 
 public sealed record AtsDetectionResponse(
@@ -107,6 +109,37 @@ public sealed record AtsDetectionResponse(
 
 public sealed record CsvImportResponse(int Created);
 
+public sealed record OnboardingResponse(
+    Guid ExecutionRunId, string Status, int Processed, int BoardsFound, int Errors);
+
+public sealed record WebsiteDiscoveryResponse(bool Found, string? WebsiteUrl);
+
+public sealed record BackfillResponse(int Processed, int Found);
+
+// ---- Bacen ----
+
+public sealed record BacenImportResponse(
+    int TotalRead, int Created, int Updated, int Skipped, List<string> Warnings);
+
+public sealed record BacenPromotionResponse(
+    int TotalEligible, int CompaniesCreated, int CompaniesUpdated, int Skipped, List<string> Warnings);
+
+public sealed record BacenInstitutionResponse(
+    Guid Id,
+    string Name,
+    string? Ispb,
+    string? Cnpj,
+    string InstitutionType,
+    bool AuthorizedByBacen,
+    string? SpiParticipationType,
+    string? PixParticipationType,
+    string? PixParticipationMode,
+    bool? PaymentInitiation,
+    bool? CashoutServiceFacilitator,
+    List<string> Tags,
+    DateTime ImportedAtUtc,
+    DateTime? UpdatedAtUtc);
+
 public sealed record DiscoveryResultResponse(
     Guid ExecutionRunId,
     string Status,
@@ -115,6 +148,27 @@ public sealed record DiscoveryResultResponse(
     int JobsDiscovered,
     int JobsUpdated,
     int Errors);
+
+// ---- Dashboard ----
+
+public sealed record DashboardSummaryResponse(
+    int JobsDiscovered, int JobsToday,
+    int MatchesAbove75, int MatchesAbove75Today,
+    int MessagesGenerated, int MessagesToday,
+    int EmailsSent, int EmailsToday,
+    int FollowUpsPending, int? NextFollowUpInDays);
+
+public sealed record BestOpportunityResponse(
+    Guid MatchId, Guid JobPostingId, string JobTitle, string CompanyName,
+    List<string> Skills, int OverallScore, string Recommendation, string JobUrl,
+    string? CompanyWebsiteUrl, DateTime PostedAtUtc, string Rationale);
+
+public sealed record ExecutionRunResponse(
+    Guid Id, string RunType, string Status, DateTime StartedAtUtc,
+    int ItemsProcessed, int ItemsSucceeded, int ItemsFailed);
+
+public sealed record GeneratedMessageSummary(
+    Guid Id, Guid JobPostingId, string EmailSubject, string Status, DateTime CreatedAtUtc);
 
 // ---- Opportunities (pipeline) ----
 
@@ -239,3 +293,71 @@ public sealed record MatchResponse(
     List<string> MissingRequirements,
     string Rationale,
     DateTime CreatedAtUtc);
+
+// ---- Firehose (massive discovery) ----
+
+public sealed record CreateCampaignRequest(
+    string Name,
+    string? Description,
+    string? Priority,
+    List<string> BaseKeywords,
+    List<string>? TargetSources,
+    List<string>? ExcludedDomains,
+    int? DailyQueryBudget);
+
+public sealed record SearchCampaignResponse(
+    Guid Id,
+    string Name,
+    string Description,
+    string Status,
+    string Priority,
+    List<string> BaseKeywords,
+    List<string> TargetSources,
+    List<string> ExcludedDomains,
+    int DailyQueryBudget,
+    DateTime CreatedAtUtc,
+    DateTime? LastRunAtUtc);
+
+public sealed record QuickSearchRequest(
+    string Query,
+    int? Take,
+    bool? SaveRawCandidates);
+
+public sealed record AggressiveSearchRequest(
+    Guid? CampaignId,
+    int? MaxQueries,
+    int? MaxResultsPerQuery,
+    bool? SaveRawCandidates,
+    bool? PromoteAutomatically);
+
+public sealed record FirehoseRunResponse(
+    Guid ExecutionRunId,
+    string Status,
+    Guid? CampaignId,
+    int QueriesExecuted,
+    int ResultsCount,
+    int NewCandidates,
+    int Duplicates,
+    int Errors);
+
+public sealed record RawJobCandidateResponse(
+    Guid Id,
+    string Title,
+    string? Snippet,
+    string DiscoveredUrl,
+    string SourceProvider,
+    string SourceName,
+    string SourceType,
+    string? RealCompanyName,
+    string? OriginalJobUrl,
+    string? Location,
+    string? WorkMode,
+    string? Language,
+    DateTime DiscoveredAtUtc,
+    DateTime? PublishedAtUtc,
+    string Status,
+    int SourceConfidenceScore,
+    int? PreliminaryFitScore,
+    bool RequiresManualValidation,
+    Guid? SearchCampaignId,
+    string? Query);

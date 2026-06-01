@@ -19,6 +19,12 @@ public sealed class OpportunityOsDbContext : DbContext
     public DbSet<PromptExecutionLog> PromptExecutionLogs => Set<PromptExecutionLog>();
     public DbSet<Opportunity> Opportunities => Set<Opportunity>();
     public DbSet<RecruiterLead> RecruiterLeads => Set<RecruiterLead>();
+    public DbSet<BacenInstitution> BacenInstitutions => Set<BacenInstitution>();
+    public DbSet<SearchCampaign> SearchCampaigns => Set<SearchCampaign>();
+    public DbSet<SearchQueryTemplate> SearchQueryTemplates => Set<SearchQueryTemplate>();
+    public DbSet<SearchQueryExecution> SearchQueryExecutions => Set<SearchQueryExecution>();
+    public DbSet<RawJobCandidate> RawJobCandidates => Set<RawJobCandidate>();
+    public DbSet<JobPostingSourceOccurrence> JobPostingSourceOccurrences => Set<JobPostingSourceOccurrence>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -84,6 +90,7 @@ public sealed class OpportunityOsDbContext : DbContext
             e.ToTable("job_postings");
             e.HasKey(x => x.Id);
             e.Property(x => x.Status).HasConversion<int>();
+            e.Property(x => x.SourceType).HasConversion<int>();
             e.Property(x => x.ExtractedSkills).HasConversion(stringListConverter).HasColumnType("jsonb")
                 .Metadata.SetValueComparer(stringListComparer);
             e.Property(x => x.ExtractedDomains).HasConversion(stringListConverter).HasColumnType("jsonb")
@@ -155,6 +162,77 @@ public sealed class OpportunityOsDbContext : DbContext
             e.Property(x => x.FullName).IsRequired();
             e.Property(x => x.Source).HasConversion<int>();
             e.HasIndex(x => x.CompanyId);
+        });
+
+        b.Entity<BacenInstitution>(e =>
+        {
+            e.ToTable("bacen_institutions");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).IsRequired();
+            e.Property(x => x.InstitutionType).IsRequired();
+            e.Property(x => x.Tags).HasConversion(stringListConverter).HasColumnType("jsonb")
+                .Metadata.SetValueComparer(stringListComparer);
+            // Preferred unique key on CNPJ when present; alternate on ISPB.
+            e.HasIndex(x => x.Cnpj).IsUnique().HasFilter("\"Cnpj\" IS NOT NULL");
+            e.HasIndex(x => x.Ispb).IsUnique().HasFilter("\"Ispb\" IS NOT NULL");
+            e.HasIndex(x => x.AuthorizedByBacen);
+        });
+
+        b.Entity<SearchCampaign>(e =>
+        {
+            e.ToTable("search_campaigns");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).IsRequired();
+            e.Property(x => x.Status).HasConversion<int>();
+            e.Property(x => x.Priority).HasConversion<int>();
+            foreach (var prop in new[] { nameof(SearchCampaign.BaseKeywords), nameof(SearchCampaign.TargetSources), nameof(SearchCampaign.ExcludedDomains) })
+            {
+                e.Property<List<string>>(prop).HasConversion(stringListConverter).HasColumnType("jsonb")
+                    .Metadata.SetValueComparer(stringListComparer);
+            }
+            e.HasIndex(x => x.Status);
+        });
+
+        b.Entity<SearchQueryTemplate>(e =>
+        {
+            e.ToTable("search_query_templates");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).IsRequired();
+            e.Property(x => x.Template).IsRequired();
+            e.HasIndex(x => x.Category);
+        });
+
+        b.Entity<SearchQueryExecution>(e =>
+        {
+            e.ToTable("search_query_executions");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Status).HasConversion<int>();
+            e.HasIndex(x => x.SearchCampaignId);
+            e.HasIndex(x => x.StartedAtUtc);
+        });
+
+        b.Entity<RawJobCandidate>(e =>
+        {
+            e.ToTable("raw_job_candidates");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Title).IsRequired();
+            e.Property(x => x.DiscoveredUrl).IsRequired();
+            e.Property(x => x.Status).HasConversion<int>();
+            e.Property(x => x.SourceType).HasConversion<int>();
+            e.HasIndex(x => x.DiscoveredUrl);
+            e.HasIndex(x => x.Status);
+            e.HasIndex(x => x.DiscoveredAtUtc);
+            e.HasIndex(x => x.SearchCampaignId);
+            e.HasIndex(x => x.NormalizedFingerprint);
+        });
+
+        b.Entity<JobPostingSourceOccurrence>(e =>
+        {
+            e.ToTable("job_posting_source_occurrences");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SourceType).HasConversion<int>();
+            e.HasIndex(x => x.JobPostingId);
+            e.HasIndex(x => x.Url);
         });
     }
 }

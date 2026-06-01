@@ -1,4 +1,7 @@
 using Microsoft.Extensions.Logging;
+using OpportunityOS.Application.AI;
+using OpportunityOS.Application.Matching;
+using OpportunityOS.Application.Normalization;
 using OpportunityOS.Domain.Entities;
 
 namespace OpportunityOS.Application.Discovery;
@@ -29,20 +32,49 @@ public interface IJobDiscoveryService
 /// </summary>
 public sealed class JobDiscoveryService : IJobDiscoveryService
 {
+    // Thin search snippets get enriched with the real page text before scoring,
+    // capped per run so continuous discovery doesn't hammer sites.
+    private const int ThinDescriptionChars = 300;
+    private const int MaxEnrichmentsPerRun = 8;
+    // Promising fresh jobs (heuristic >= gate) get an authoritative LLM score on discovery
+    // so the displayed score is final "de bate pronto" — capped per run to bound LLM cost.
+    private const int LlmAutoAnalyzeGate = 60;
+    private const int MaxLlmAnalysesPerRun = 6;
+
     private readonly IEnumerable<IJobSourceProvider> _providers;
     private readonly IEnumerable<IJobSearchProvider> _searchProviders;
     private readonly IDiscoveryStore _store;
+    private readonly IJobNormalizer _normalizer;
+    private readonly IMatchEngine _matchEngine;
+    private readonly IJobContentEnricher _enricher;
+    private readonly IJobUnderstandingService _understanding;
+    private readonly ICandidateFitAnalysisService _fit;
+    private readonly ISourceClassifierService _sourceClassifier;
     private readonly ILogger<JobDiscoveryService> _logger;
+    private int _enrichmentsLeft;
+    private int _llmAnalysesLeft;
 
     public JobDiscoveryService(
         IEnumerable<IJobSourceProvider> providers,
         IEnumerable<IJobSearchProvider> searchProviders,
         IDiscoveryStore store,
+        IJobNormalizer normalizer,
+        IMatchEngine matchEngine,
+        IJobContentEnricher enricher,
+        IJobUnderstandingService understanding,
+        ICandidateFitAnalysisService fit,
+        ISourceClassifierService sourceClassifier,
         ILogger<JobDiscoveryService> logger)
     {
         _providers = providers;
         _searchProviders = searchProviders;
         _store = store;
+        _normalizer = normalizer;
+        _matchEngine = matchEngine;
+        _enricher = enricher;
+        _sourceClassifier = sourceClassifier;
+        _understanding = understanding;
+        _fit = fit;
         _logger = logger;
     }
 
@@ -54,6 +86,9 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
         int newJobs = 0, updatedJobs = 0, providersInvoked = 0;
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var companies = new HashSet<Guid>();
+        var profile = await _store.GetActiveProfileAsync(ct);
+        _enrichmentsLeft = MaxEnrichmentsPerRun;
+        _llmAnalysesLeft = MaxLlmAnalysesPerRun;
 
         foreach (var provider in _searchProviders)
         {
@@ -68,7 +103,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
 
                     var company = await _store.FindOrCreateCompanyByNameAsync(dto.CompanyName, ct);
                     companies.Add(company.Id);
-                    if (await UpsertAsync(company.Id, dto, ct)) newJobs++;
+                    if (await UpsertAsync(company.Id, dto, profile, ct)) newJobs++;
                     else updatedJobs++;
                 }
                 await _store.SaveChangesAsync(ct);
@@ -98,6 +133,9 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
 
         int newJobs = 0, updatedJobs = 0, providersInvoked = 0;
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        var profile = await _store.GetActiveProfileAsync(ct);
+        _enrichmentsLeft = MaxEnrichmentsPerRun;
+        _llmAnalysesLeft = MaxLlmAnalysesPerRun;
 
         foreach (var company in companies)
         {
@@ -115,7 +153,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
                         var key = $"{dto.SourceProvider}::{dto.ExternalId}";
                         if (!seen.Add(key)) continue; // ignore intra-run duplicates
 
-                        if (await UpsertAsync(company.Id, dto, ct)) newJobs++;
+                        if (await UpsertAsync(company.Id, dto, profile, ct)) newJobs++;
                         else updatedJobs++;
                     }
                     run.RecordSuccess();
@@ -140,17 +178,31 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
     }
 
     /// <returns>true if a new posting was created; false if an existing one was refreshed.</returns>
-    private async Task<bool> UpsertAsync(Guid companyId, DiscoveredJobDto dto, CancellationToken ct)
+    private async Task<bool> UpsertAsync(Guid companyId, DiscoveredJobDto dto, CandidateProfile? profile, CancellationToken ct)
     {
         var existing = await _store.FindJobAsync(dto.SourceProvider, dto.ExternalId, ct);
         if (existing is null)
         {
+            // Thin snippet (e.g. open-web search) -> fetch the real page text so the
+            // heuristic score is accurate and good roles aren't filtered out.
+            var description = dto.DescriptionText ?? string.Empty;
+            if (description.Length < ThinDescriptionChars && _enrichmentsLeft > 0)
+            {
+                _enrichmentsLeft--;
+                var enriched = await _enricher.FetchTextAsync(dto.AbsoluteUrl, ct);
+                if (!string.IsNullOrWhiteSpace(enriched) && enriched.Length > description.Length)
+                    description = enriched;
+            }
+
             var job = new JobPosting(
                 companyId, dto.ExternalId, dto.SourceProvider, dto.Title, dto.AbsoluteUrl,
-                dto.DescriptionText ?? string.Empty, dto.DescriptionHtml, dto.Department,
+                description, dto.DescriptionHtml, dto.Department,
                 dto.Location, dto.Language, dto.PublishedAtUtc, dto.UpdatedAtUtc);
             await _store.AddJobAsync(job, ct);
+            var cls = _sourceClassifier.Classify(job.AbsoluteUrl, job.Title, description);
+            job.SetSourceQuality(cls.SourceType, cls.SourceName, cls.SourceConfidenceScore, cls.RequiresManualValidation);
             _logger.LogInformation("JobDiscovered {Provider} {ExternalId} {Title}", dto.SourceProvider, dto.ExternalId, dto.Title);
+            await AutoScoreAsync(job, profile, alreadyMatched: false, ct);
             return true;
         }
 
@@ -158,7 +210,64 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
             dto.Title, dto.AbsoluteUrl, dto.DescriptionText ?? string.Empty, dto.DescriptionHtml,
             dto.Department, dto.Location, dto.Language, dto.UpdatedAtUtc);
         _logger.LogInformation("JobUpdated {Provider} {ExternalId}", dto.SourceProvider, dto.ExternalId);
+        // Backfill a score for previously-discovered jobs that were never matched.
+        await AutoScoreAsync(existing, profile, alreadyMatched: null, ct);
         return false;
+    }
+
+    /// <summary>
+    /// Score a job against the active profile with the heuristic engine (no LLM) so it
+    /// surfaces on the living screen. Best-effort: a scoring failure never breaks discovery.
+    /// <paramref name="alreadyMatched"/>: false = known-new (skip the DB check); null = check first.
+    /// </summary>
+    private async Task AutoScoreAsync(JobPosting job, CandidateProfile? profile, bool? alreadyMatched, CancellationToken ct)
+    {
+        if (profile is null) return;
+        try
+        {
+            if (alreadyMatched is null && await _store.JobHasMatchAsync(job.Id, ct)) return;
+
+            var norm = _normalizer.Normalize(job);
+            job.ApplyNormalization(norm.Seniority, norm.WorkMode, norm.Language, norm.Skills, norm.Domains);
+
+            var r = _matchEngine.Evaluate(profile, job);
+            job.MarkAnalyzed();
+
+            // Upgrade promising jobs to an authoritative LLM score on the spot, so the feed
+            // shows the final number without a manual "Analisar" click. Capped per run.
+            if (r.OverallScore >= LlmAutoAnalyzeGate && _llmAnalysesLeft > 0)
+            {
+                _llmAnalysesLeft--;
+                var llmMatch = await TryLlmMatchAsync(profile, job, ct);
+                if (llmMatch is not null) { await _store.AddMatchAsync(llmMatch, ct); return; }
+            }
+
+            var match = new OpportunityMatch(
+                job.Id, profile.Id, r.OverallScore, r.TechnicalScore, r.DomainScore, r.SeniorityScore,
+                r.LocationScore, r.LanguageScore, r.Recommendation, r.Strengths, r.Risks,
+                r.MissingRequirements, r.Rationale);
+            await _store.AddMatchAsync(match, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Auto-score failed for job {JobId}", job.Id);
+        }
+    }
+
+    private async Task<OpportunityMatch?> TryLlmMatchAsync(CandidateProfile profile, JobPosting job, CancellationToken ct)
+    {
+        try
+        {
+            var analysis = await _understanding.AnalyzeAsync(job, ct);
+            job.ApplyNormalization(analysis.Seniority, analysis.WorkMode, analysis.Language,
+                analysis.RequiredSkills.Concat(analysis.NiceToHaveSkills), analysis.Domains);
+            return await _fit.AnalyzeFitAsync(profile, job, analysis, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "LLM auto-analysis failed for job {JobId}; keeping heuristic score", job.Id);
+            return null;
+        }
     }
 
     private async Task<IReadOnlyList<Company>> GetSingleCompany(Guid id, CancellationToken ct)

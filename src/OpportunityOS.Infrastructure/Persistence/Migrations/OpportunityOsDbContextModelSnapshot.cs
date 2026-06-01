@@ -22,6 +22,69 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("OpportunityOS.Domain.Entities.BacenInstitution", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("AuthorizedByBacen")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool?>("CashoutServiceFacilitator")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Cnpj")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("ImportedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("InstitutionType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Ispb")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool?>("PaymentInitiation")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("PixParticipationMode")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PixParticipationType")
+                        .HasColumnType("text");
+
+                    b.Property<string>("SpiParticipationType")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Tags")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorizedByBacen");
+
+                    b.HasIndex("Cnpj")
+                        .IsUnique()
+                        .HasFilter("\"Cnpj\" IS NOT NULL");
+
+                    b.HasIndex("Ispb")
+                        .IsUnique()
+                        .HasFilter("\"Ispb\" IS NOT NULL");
+
+                    b.ToTable("bacen_institutions", (string)null);
+                });
+
             modelBuilder.Entity("OpportunityOS.Domain.Entities.CandidateProfile", b =>
                 {
                     b.Property<Guid>("Id")
@@ -288,15 +351,33 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                     b.Property<string>("Location")
                         .HasColumnType("text");
 
+                    b.Property<string>("OriginalJobUrl")
+                        .HasColumnType("text");
+
                     b.Property<DateTime?>("PublishedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("RealCompanyName")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("RequiresManualValidation")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Seniority")
+                        .HasColumnType("text");
+
+                    b.Property<int>("SourceConfidenceScore")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SourceName")
                         .HasColumnType("text");
 
                     b.Property<string>("SourceProvider")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int>("SourceType")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime?>("SourceUpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -324,6 +405,45 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("job_postings", (string)null);
+                });
+
+            modelBuilder.Entity("OpportunityOS.Domain.Entities.JobPostingSourceOccurrence", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("DiscoveredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("JobPostingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("SourceConfidenceScore")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SourceName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SourceProvider")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("SourceType")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JobPostingId");
+
+                    b.HasIndex("Url");
+
+                    b.ToTable("job_posting_source_occurrences", (string)null);
                 });
 
             modelBuilder.Entity("OpportunityOS.Domain.Entities.Opportunity", b =>
@@ -477,6 +597,94 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                     b.ToTable("prompt_execution_logs", (string)null);
                 });
 
+            modelBuilder.Entity("OpportunityOS.Domain.Entities.RawJobCandidate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("DiscoveredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DiscoveredUrl")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Language")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Location")
+                        .HasColumnType("text");
+
+                    b.Property<string>("NormalizedFingerprint")
+                        .HasColumnType("text");
+
+                    b.Property<string>("OriginalJobUrl")
+                        .HasColumnType("text");
+
+                    b.Property<int?>("PreliminaryFitScore")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("PromotedJobPostingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("PublishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Query")
+                        .HasColumnType("text");
+
+                    b.Property<string>("RealCompanyName")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("RequiresManualValidation")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("SearchCampaignId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Snippet")
+                        .HasColumnType("text");
+
+                    b.Property<int>("SourceConfidenceScore")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SourceName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SourceProvider")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("SourceType")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("WorkMode")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DiscoveredAtUtc");
+
+                    b.HasIndex("DiscoveredUrl");
+
+                    b.HasIndex("NormalizedFingerprint");
+
+                    b.HasIndex("SearchCampaignId");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("raw_job_candidates", (string)null);
+                });
+
             modelBuilder.Entity("OpportunityOS.Domain.Entities.RecruiterLead", b =>
                 {
                     b.Property<Guid>("Id")
@@ -513,6 +721,129 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                     b.HasIndex("CompanyId");
 
                     b.ToTable("recruiter_leads", (string)null);
+                });
+
+            modelBuilder.Entity("OpportunityOS.Domain.Entities.SearchCampaign", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BaseKeywords")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DailyQueryBudget")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExcludedDomains")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTime?>("LastRunAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TargetSources")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("search_campaigns", (string)null);
+                });
+
+            modelBuilder.Entity("OpportunityOS.Domain.Entities.SearchQueryExecution", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("DuplicateCandidatesCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("FinishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("NewCandidatesCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Query")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("ResultsCount")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SearchCampaignId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("StartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SearchCampaignId");
+
+                    b.HasIndex("StartedAtUtc");
+
+                    b.ToTable("search_query_executions", (string)null);
+                });
+
+            modelBuilder.Entity("OpportunityOS.Domain.Entities.SearchQueryTemplate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Template")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Category");
+
+                    b.ToTable("search_query_templates", (string)null);
                 });
 #pragma warning restore 612, 618
         }

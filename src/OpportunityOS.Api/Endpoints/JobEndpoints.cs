@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using OpportunityOS.Application.Discovery;
 using OpportunityOS.Application.Matching;
+using OpportunityOS.Domain.Enums;
 using OpportunityOS.Application.Normalization;
 using OpportunityOS.Application.Pipeline;
 using OpportunityOS.Contracts;
@@ -90,6 +91,14 @@ public static class JobEndpoints
                 .OrderByDescending(m => m.CreatedAtUtc)
                 .FirstOrDefaultAsync(ct);
             return match is null ? Results.NotFound() : Results.Ok(match.ToResponse());
+        });
+
+        // Validate posting links and expire dead ones (404/410), so stale vagas drop off.
+        group.MapPost("/validate-links", async (
+            int? limit, IJobLinkValidator validator, CancellationToken ct) =>
+        {
+            var r = await validator.ValidateAsync(limit ?? 100, ct);
+            return Results.Ok(new ValidateLinksResponse(r.Checked, r.Expired));
         });
 
         group.MapPost("/{id:guid}/archive", async (Guid id, OpportunityOsDbContext db, CancellationToken ct) =>

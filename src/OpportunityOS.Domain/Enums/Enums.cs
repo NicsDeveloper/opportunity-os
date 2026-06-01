@@ -14,7 +14,8 @@ public enum CompanySource
     CsvImport = 2,
     SearchEngine = 3,
     PublicRegistry = 4,
-    AtsDiscovery = 5
+    AtsDiscovery = 5,
+    Bacen = 6
 }
 
 public enum JobPostingStatus
@@ -73,4 +74,51 @@ public enum ExecutionRunStatus
     Succeeded = 2,
     Failed = 3,
     PartiallyFailed = 4
+}
+
+// ---------- Firehose (massive discovery) ----------
+
+public enum SearchCampaignStatus
+{
+    Active = 1,
+    Paused = 2,
+    Archived = 3
+}
+
+public enum SearchCampaignPriority
+{
+    Low = 1,
+    Medium = 2,
+    High = 3,
+    Aggressive = 4
+}
+
+public enum SearchQueryExecutionStatus
+{
+    Running = 1,
+    Succeeded = 2,
+    Failed = 3
+}
+
+/// <summary>Where a candidate was found — drives trust and how it must be handled.</summary>
+public enum SourceType
+{
+    OfficialAts = 1,
+    OfficialCareerPage = 2,
+    JobBoard = 3,
+    Aggregator = 4,
+    SearchResult = 5,
+    SocialIndexed = 6,
+    Unknown = 7
+}
+
+public enum RawJobCandidateStatus
+{
+    Discovered = 1,
+    Classified = 2,
+    Enriched = 3,
+    Duplicate = 4,
+    PromotedToJobPosting = 5,
+    Rejected = 6,
+    Expired = 7
 }
