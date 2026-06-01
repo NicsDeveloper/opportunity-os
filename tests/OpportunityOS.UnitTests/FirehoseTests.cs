@@ -113,7 +113,28 @@ public sealed class FirehoseTests
     }
 
     private static FirehoseService Build(FakeFirehoseStore store, params IRawSearchProvider[] providers) =>
-        new(providers, new QueryExpansionService(), store, NullLogger<FirehoseService>.Instance);
+        BuildWith(store, new FakeBudget(int.MaxValue), new DiscoveryBudgetOptions(), providers);
+
+    private static FirehoseService BuildWith(
+        FakeFirehoseStore store, IQueryBudgetManager budget, DiscoveryBudgetOptions opts, params IRawSearchProvider[] providers) =>
+        new(providers, new QueryExpansionService(), store, budget, opts,
+            new OpportunityOS.Infrastructure.Providers.SourceClassifierService(), NullLogger<FirehoseService>.Instance);
+
+    [Fact]
+    public async Task AggressiveSearch_StopsWithBudgetLimit_WhenBudgetExhausted()
+    {
+        var provider = new FakeRawProvider(new[] { new RawSearchResult("Dev", "https://x/", null) });
+        var store = new FakeFirehoseStore();
+        // Budget = 0 -> provider can never execute -> clean stop, no queries run.
+        var svc = BuildWith(store, new FakeBudget(0), new DiscoveryBudgetOptions(), provider);
+
+        var r = await svc.AggressiveSearchAsync(
+            new AggressiveSearchRequest(null, 100, 10, true, false), CancellationToken.None);
+
+        Assert.Equal("CompletedWithBudgetLimit", r.Status);
+        Assert.Equal(0, r.NewCandidates);
+        Assert.Empty(store.RawCandidates);
+    }
 
     // ---------- fakes ----------
 
@@ -133,6 +154,16 @@ public sealed class FirehoseTests
                     ? r.Url : $"{r.Url}{n}-{i}" }).ToList();
             return Task.FromResult<IReadOnlyList<RawSearchResult>>(mapped);
         }
+    }
+
+    private sealed class FakeBudget : IQueryBudgetManager
+    {
+        private readonly int _limit;
+        private int _used;
+        public FakeBudget(int limit) => _limit = limit;
+        public Task<bool> CanExecuteAsync(string provider, CancellationToken ct) => Task.FromResult(_used < _limit);
+        public Task RecordExecutionAsync(string provider, int cost, CancellationToken ct) { _used += cost; return Task.CompletedTask; }
+        public BudgetSnapshot Snapshot(string provider) => new(provider, _used, _limit);
     }
 
     private sealed class FakeFirehoseStore : IFirehoseStore

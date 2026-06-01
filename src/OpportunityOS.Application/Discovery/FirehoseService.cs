@@ -23,22 +23,25 @@ public interface IFirehoseService
 /// </summary>
 public sealed class FirehoseService : IFirehoseService
 {
-    private const int DefaultQuickTake = 20;
-    private const int DefaultAggressiveMaxQueries = 200;
-    private const int DefaultMaxResultsPerQuery = 20;
-
     private readonly IEnumerable<IRawSearchProvider> _providers;
     private readonly QueryExpansionService _expansion;
     private readonly IFirehoseStore _store;
+    private readonly IQueryBudgetManager _budget;
+    private readonly DiscoveryBudgetOptions _budgetOptions;
+    private readonly ISourceClassifierService _classifier;
     private readonly ILogger<FirehoseService> _logger;
 
     public FirehoseService(
         IEnumerable<IRawSearchProvider> providers, QueryExpansionService expansion,
-        IFirehoseStore store, ILogger<FirehoseService> logger)
+        IFirehoseStore store, IQueryBudgetManager budget, DiscoveryBudgetOptions budgetOptions,
+        ISourceClassifierService classifier, ILogger<FirehoseService> logger)
     {
         _providers = providers;
         _expansion = expansion;
         _store = store;
+        _budget = budget;
+        _budgetOptions = budgetOptions;
+        _classifier = classifier;
         _logger = logger;
     }
 
@@ -64,7 +67,7 @@ public sealed class FirehoseService : IFirehoseService
 
     public async Task<FirehoseRunResponse> QuickSearchAsync(QuickSearchRequest req, CancellationToken ct)
     {
-        var take = req.Take is > 0 ? req.Take!.Value : DefaultQuickTake;
+        var take = Math.Clamp(req.Take is > 0 ? req.Take!.Value : 20, 1, _budgetOptions.SerperMaxResultsPerQuery);
         var save = req.SaveRawCandidates ?? true;
         var run = ExecutionRun.Start("FirehoseQuickSearch");
         await _store.AddExecutionRunAsync(run, ct);
@@ -74,14 +77,16 @@ public sealed class FirehoseService : IFirehoseService
 
         run.Complete();
         await _store.SaveChangesAsync(ct);
-        return new FirehoseRunResponse(run.Id, run.Status.ToString(), null,
+        return new FirehoseRunResponse(run.Id, Status(run, stats), null,
             stats.Queries, stats.Results, stats.New, stats.Duplicates, run.ItemsFailed);
     }
 
     public async Task<FirehoseRunResponse> AggressiveSearchAsync(AggressiveSearchRequest req, CancellationToken ct)
     {
-        var maxQueries = req.MaxQueries is > 0 ? req.MaxQueries!.Value : DefaultAggressiveMaxQueries;
-        var maxResults = req.MaxResultsPerQuery is > 0 ? req.MaxResultsPerQuery!.Value : DefaultMaxResultsPerQuery;
+        var maxQueries = Math.Clamp(req.MaxQueries is > 0 ? req.MaxQueries!.Value : _budgetOptions.AggressiveSearchMaxQueries,
+            1, _budgetOptions.AggressiveSearchMaxQueries);
+        var maxResults = Math.Clamp(req.MaxResultsPerQuery is > 0 ? req.MaxResultsPerQuery!.Value : _budgetOptions.SerperMaxResultsPerQuery,
+            1, _budgetOptions.SerperMaxResultsPerQuery);
         var save = req.SaveRawCandidates ?? true;
 
         SearchCampaign? campaign = null;
@@ -106,16 +111,26 @@ public sealed class FirehoseService : IFirehoseService
         {
             await RunQueryAsync(campaign?.Id ?? Guid.Empty, query, maxResults, save, run, stats, ct);
             await _store.SaveChangesAsync(ct); // persist progress incrementally
+            if (stats.BudgetExhausted) // all providers out of daily budget -> stop cleanly
+            {
+                _logger.LogInformation("FirehoseAggressive stopped early: daily query budget exhausted.");
+                break;
+            }
         }
 
         campaign?.MarkRun();
         run.Complete();
         await _store.SaveChangesAsync(ct);
-        _logger.LogInformation("FirehoseAggressive done: queries={Q} results={R} new={N} dup={D} errors={E}",
-            stats.Queries, stats.Results, stats.New, stats.Duplicates, run.ItemsFailed);
-        return new FirehoseRunResponse(run.Id, run.Status.ToString(), campaign?.Id,
+        _logger.LogInformation("FirehoseAggressive done: queries={Q} results={R} new={N} dup={D} errors={E} budgetHit={B}",
+            stats.Queries, stats.Results, stats.New, stats.Duplicates, run.ItemsFailed, stats.BudgetExhausted);
+        return new FirehoseRunResponse(run.Id, Status(run, stats), campaign?.Id,
             stats.Queries, stats.Results, stats.New, stats.Duplicates, run.ItemsFailed);
     }
+
+    private static string Status(ExecutionRun run, RunStats stats) =>
+        stats.BudgetExhausted && run.Status == Domain.Enums.ExecutionRunStatus.Succeeded
+            ? "CompletedWithBudgetLimit"
+            : run.Status.ToString();
 
     public async Task<IReadOnlyList<RawJobCandidateResponse>> GetRawCandidatesAsync(int take, CancellationToken ct) =>
         (await _store.GetRawCandidatesAsync(Math.Clamp(take, 1, 1000), ct)).Select(ToResponse).ToList();
@@ -123,14 +138,21 @@ public sealed class FirehoseService : IFirehoseService
     private async Task RunQueryAsync(
         Guid campaignId, string query, int maxResults, bool save, ExecutionRun run, RunStats stats, CancellationToken ct)
     {
-        foreach (var provider in _providers.Where(p => p.IsAvailable))
+        var available = _providers.Where(p => p.IsAvailable).ToList();
+        var blocked = 0;
+        foreach (var provider in available)
         {
+            // Budget guard: skip a provider that's out of daily budget (never break silently).
+            if (!await _budget.CanExecuteAsync(provider.ProviderName, ct)) { blocked++; continue; }
+
             stats.Queries++;
             var exec = SearchQueryExecution.Start(campaignId, query, provider.ProviderName);
             await _store.AddQueryExecutionAsync(exec, ct);
             try
             {
                 var results = await provider.SearchAsync(query, maxResults, ct);
+                // Cost ≈ number of search requests (Serper paginates in blocks of 10).
+                await _budget.RecordExecutionAsync(provider.ProviderName, Math.Max(1, (int)Math.Ceiling(maxResults / 10.0)), ct);
                 int newCount = 0, dupCount = 0;
                 foreach (var r in results)
                 {
@@ -140,10 +162,10 @@ public sealed class FirehoseService : IFirehoseService
                     if (!save) continue;
                     if (await _store.RawCandidateExistsByUrlAsync(r.Url, ct)) { dupCount++; stats.Duplicates++; continue; }
 
-                    var cls = ClassifySource(r.Url);
+                    var cls = _classifier.Classify(r.Url, r.Title, r.Snippet);
                     var candidate = new RawJobCandidate(
-                        r.Title, r.Url, provider.ProviderName, cls.SourceName, cls.Type,
-                        cls.Confidence, cls.RequiresManualValidation, r.Snippet,
+                        r.Title, r.Url, provider.ProviderName, cls.SourceName, cls.SourceType,
+                        cls.SourceConfidenceScore, cls.RequiresManualValidation, r.Snippet,
                         publishedAtUtc: r.PublishedAtUtc,
                         searchCampaignId: campaignId == Guid.Empty ? null : campaignId,
                         query: query);
@@ -160,34 +182,9 @@ public sealed class FirehoseService : IFirehoseService
                 _logger.LogWarning(ex, "Firehose query failed [{Provider}] {Query}", provider.ProviderName, query);
             }
         }
-    }
 
-    /// <summary>
-    /// Lightweight host-based source classification. The full ISourceClassifierService
-    /// (Priority 4) will replace this; here we just give every candidate a sane SourceType.
-    /// </summary>
-    private static (SourceType Type, string SourceName, int Confidence, bool RequiresManualValidation) ClassifySource(string url)
-    {
-        var host = TryHost(url);
-        bool Has(params string[] needles) => needles.Any(n => host.Contains(n, StringComparison.OrdinalIgnoreCase));
-
-        if (Has("greenhouse.io", "lever.co", "ashbyhq.com", "smartrecruiters.com", "workdayjobs.com"))
-            return (SourceType.OfficialAts, host, 90, false);
-        if (Has("gupy.io"))
-            return (SourceType.OfficialAts, host, 80, false);
-        if (Has("linkedin."))
-            return (SourceType.SocialIndexed, "linkedin.com", 25, true);
-        if (Has("indeed.", "glassdoor.", "jobgether", "simplyhired", "ziprecruiter", "bebee", "catho.", "reddit."))
-            return (SourceType.Aggregator, host, 35, true);
-        if (Has("programathor", "geekhunter", "coodesh", "remotar", "trampos", "gupy"))
-            return (SourceType.JobBoard, host, 70, false);
-        return (SourceType.SearchResult, host, 50, false);
-    }
-
-    private static string TryHost(string url)
-    {
-        try { return new Uri(url).Host.Replace("www.", "", StringComparison.OrdinalIgnoreCase); }
-        catch { return url; }
+        // Every available provider was out of budget for this query -> signal a clean stop.
+        if (available.Count > 0 && blocked == available.Count) stats.BudgetExhausted = true;
     }
 
     private static SearchCampaignPriority ParsePriority(string? p) =>
@@ -206,6 +203,7 @@ public sealed class FirehoseService : IFirehoseService
     private sealed class RunStats
     {
         public int Queries, Results, New, Duplicates;
+        public bool BudgetExhausted;
         public readonly HashSet<string> SeenUrls = new(StringComparer.OrdinalIgnoreCase);
     }
 }

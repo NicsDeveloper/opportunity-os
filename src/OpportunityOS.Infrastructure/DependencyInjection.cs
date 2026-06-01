@@ -33,6 +33,7 @@ public static class DependencyInjection
 
         services.AddScoped<IJobNormalizer, JobNormalizer>();
         services.AddScoped<IMatchEngine, HeuristicMatchEngine>();
+        services.AddSingleton<ISourceClassifierService, SourceClassifierService>();
 
         // Link validation (HEAD-check -> expire dead postings), used by API + Worker.
         services.AddHttpClient<IJobLinkValidator, JobLinkValidator>(ConfigureClient);
@@ -48,6 +49,10 @@ public static class DependencyInjection
 
         // Firehose (massive discovery): raw search providers, query expansion, store, service.
         services.AddSingleton<QueryExpansionService>();
+        var discoveryBudget = new DiscoveryBudgetOptions();
+        config.GetSection("DiscoveryBudget").Bind(discoveryBudget);
+        services.AddSingleton(discoveryBudget);
+        services.AddSingleton<IQueryBudgetManager, QueryBudgetManager>();
         services.AddScoped<IFirehoseStore, EfFirehoseStore>();
         services.AddScoped<IFirehoseService, FirehoseService>();
 
