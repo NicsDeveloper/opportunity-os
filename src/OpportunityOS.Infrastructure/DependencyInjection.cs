@@ -37,6 +37,9 @@ public static class DependencyInjection
         // Link validation (HEAD-check -> expire dead postings), used by API + Worker.
         services.AddHttpClient<IJobLinkValidator, JobLinkValidator>(ConfigureClient);
 
+        // Enriches thin search snippets with the real job-page text before scoring.
+        services.AddHttpClient<IJobContentEnricher, HtmlJobContentEnricher>(ConfigureClient);
+
         // Headless renderer for JS-heavy career pages (shared browser); HTTP fallback if absent.
         services.AddSingleton<IPageRenderer, PlaywrightPageRenderer>();
 
