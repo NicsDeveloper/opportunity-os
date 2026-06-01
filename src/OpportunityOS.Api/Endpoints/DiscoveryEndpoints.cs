@@ -94,6 +94,48 @@ public static class DiscoveryEndpoints
                 byType.ToDictionary(x => x.Key.ToString(), x => x.Count)));
         });
 
+        // P2 — Bacen Financial Sweep: use promoted financial institutions as target companies.
+        static IQueryable<Domain.Entities.Company> BacenTargets(OpportunityOsDbContext db, CompanyPriority min, bool includeCoops)
+        {
+            var q = db.Companies.Where(c => c.Source == CompanySource.Bacen && (int)c.Priority >= (int)min);
+            if (!includeCoops)
+                q = q.Where(c => !c.Name.ToLower().Contains("cooperativa") && !c.Name.ToLower().Contains("sicoob")
+                    && !c.Name.ToLower().Contains("sicredi") && !c.Name.ToLower().Contains("cooperative"));
+            return q;
+        }
+
+        group.MapGet("/bacen-financial-sweep/preview", async (
+            string? minimumPriority, int? maxCompanies, int? maxQueriesPerCompany, bool? includeCooperatives,
+            OpportunityOsDbContext db, CancellationToken ct) =>
+        {
+            var min = Enum.TryParse<CompanyPriority>(minimumPriority, true, out var p) ? p : CompanyPriority.High;
+            var targets = BacenTargets(db, min, includeCooperatives ?? false);
+            var list = await targets.ToListAsync(ct);
+            var capped = Math.Min(list.Count, maxCompanies ?? 100);
+            var perCompany = Math.Clamp(maxQueriesPerCompany ?? 10, 1, 14);
+            return Results.Ok(new BacenSweepPreviewResponse(
+                capped,
+                list.Count(c => c.Priority == CompanyPriority.Strategic),
+                list.Count(c => c.Priority == CompanyPriority.High),
+                list.Count(c => c.Priority == CompanyPriority.Medium),
+                list.Count(c => c.Priority == CompanyPriority.Low),
+                capped * perCompany, capped * perCompany));
+        });
+
+        group.MapPost("/bacen-financial-sweep", async (
+            BacenSweepRequest? req, OpportunityOsDbContext db, IFirehoseService svc, CancellationToken ct) =>
+        {
+            req ??= new BacenSweepRequest(null, null, null, null, null);
+            var min = Enum.TryParse<CompanyPriority>(req.MinimumPriority, true, out var p) ? p : CompanyPriority.High;
+            var names = await BacenTargets(db, min, req.IncludeCooperatives ?? false)
+                .OrderByDescending(c => c.Priority)
+                .Take(Math.Clamp(req.MaxCompanies ?? 100, 1, 500))
+                .Select(c => c.Name).ToListAsync(ct);
+            var r = await svc.SweepCompaniesAsync("BacenFinancialSweep", names,
+                req.MaxQueriesPerCompany ?? 10, req.SaveRawCandidates ?? true, ct);
+            return Results.Ok(r);
+        });
+
         // P12 — provider quality dashboard.
         group.MapGet("/provider-quality", async (OpportunityOsDbContext db, CancellationToken ct) =>
         {
