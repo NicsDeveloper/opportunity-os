@@ -11,7 +11,8 @@ namespace OpportunityOS.Infrastructure.Providers;
 public sealed class SourceClassifierService : ISourceClassifierService
 {
     private static readonly string[] AtsHosts =
-        { "greenhouse.io", "lever.co", "ashbyhq.com", "smartrecruiters.com", "workdayjobs.com", "myworkdayjobs.com" };
+        { "greenhouse.io", "lever.co", "ashbyhq.com", "smartrecruiters.com", "workdayjobs.com", "myworkdayjobs.com",
+          "teamtailor.com", "recruitee.com", "workable.com", "breezy.hr" };
     private static readonly string[] JobBoards =
         { "programathor", "geekhunter", "coodesh", "remotar", "trampos", "apinfo", "vagas.com" };
     private static readonly string[] Aggregators =
