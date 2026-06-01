@@ -49,6 +49,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
     private readonly IJobContentEnricher _enricher;
     private readonly IJobUnderstandingService _understanding;
     private readonly ICandidateFitAnalysisService _fit;
+    private readonly ISourceClassifierService _sourceClassifier;
     private readonly ILogger<JobDiscoveryService> _logger;
     private int _enrichmentsLeft;
     private int _llmAnalysesLeft;
@@ -62,6 +63,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
         IJobContentEnricher enricher,
         IJobUnderstandingService understanding,
         ICandidateFitAnalysisService fit,
+        ISourceClassifierService sourceClassifier,
         ILogger<JobDiscoveryService> logger)
     {
         _providers = providers;
@@ -70,6 +72,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
         _normalizer = normalizer;
         _matchEngine = matchEngine;
         _enricher = enricher;
+        _sourceClassifier = sourceClassifier;
         _understanding = understanding;
         _fit = fit;
         _logger = logger;
@@ -196,6 +199,8 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
                 description, dto.DescriptionHtml, dto.Department,
                 dto.Location, dto.Language, dto.PublishedAtUtc, dto.UpdatedAtUtc);
             await _store.AddJobAsync(job, ct);
+            var cls = _sourceClassifier.Classify(job.AbsoluteUrl, job.Title, description);
+            job.SetSourceQuality(cls.SourceType, cls.SourceName, cls.SourceConfidenceScore, cls.RequiresManualValidation);
             _logger.LogInformation("JobDiscovered {Provider} {ExternalId} {Title}", dto.SourceProvider, dto.ExternalId, dto.Title);
             await AutoScoreAsync(job, profile, alreadyMatched: false, ct);
             return true;

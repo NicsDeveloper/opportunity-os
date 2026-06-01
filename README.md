@@ -275,6 +275,16 @@ curl "localhost:5077/api/discovery/raw-candidates?take=200"   # ver o volume bru
 > Requer `Search:SerperApiKey` (mesma chave do fluxo qualificado). O fluxo antigo de matches/
 > oportunidades segue intacto — o Firehose é uma camada nova e aditiva.
 
+**Qualidade de fonte (`ISourceClassifierService`)** — toda fonte é classificada (não descartada):
+ATS oficial 90 · Gupy 80 · página de carreira 90 · job board 70 · busca web 50 · agregador 35 ·
+LinkedIn/social 25 (**revisão manual obrigatória**) · snippet sem empresa 15. O mesmo classificador
+roda no fluxo qualificado (`JobPosting` ganhou `SourceType`/`SourceConfidenceScore`/`RequiresManualValidation`/
+`SourceName`/`RealCompanyName`/`OriginalJobUrl`).
+
+**Budget (`IQueryBudgetManager`, seção `DiscoveryBudget`)** — teto diário por provider (Serper
+1000/dia, etc.), reset UTC. Quando esgota, a busca agressiva **para com `CompletedWithBudgetLimit`**
+(nunca quebra em silêncio). Protege a cota antes das varreduras massivas.
+
 ## AI Copilot Layer (Fase 3)
 
 Camada explícita de IA que **interpreta, analisa e redige** — mantendo ações externas
