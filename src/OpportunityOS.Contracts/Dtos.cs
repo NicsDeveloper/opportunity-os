@@ -382,3 +382,33 @@ public sealed record BatchPromotionResponse(
     int Promoted,
     int Duplicates,
     int Skipped);
+
+// ---- Feedback + metrics (P11/P16/P12) ----
+
+public sealed record FeedbackRequest(
+    string Type,
+    Guid? JobPostingId,
+    Guid? RawJobCandidateId,
+    string? Reason);
+
+public sealed record DiscoveryMetricsResponse(
+    int RawCandidatesToday,
+    int RawCandidatesThisWeek,
+    int QueriesToday,
+    int JobsPromotedToday,
+    double DeduplicationRate,
+    int AverageSourceConfidence,
+    int AverageFitScore,
+    int ActionableOpportunities,
+    int WeakSources,
+    int RelevantFeedback,
+    int IrrelevantFeedback,
+    Dictionary<string, int> BySourceType);
+
+public sealed record ProviderQualityResponse(
+    string Provider,
+    int QueriesExecuted,
+    int RawCandidates,
+    int PromotedJobs,
+    double DuplicateRate,
+    int AverageSourceConfidence);

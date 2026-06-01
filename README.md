@@ -305,6 +305,11 @@ existente (melhor fonte como principal); pontua heurístico para já aparecer no
 (Fit·0.50 + SourceConfidence·0.20 + Freshness·0.15 + CompanyPriority·0.10 + Feedback·0.05).
 `GET /api/matches?sort=rank` ordena pelo DiscoveryRank (base do Qualified view).
 
+**Feedback + métricas** — `POST /api/feedback` (`UserFeedback`: relevante/irrelevante/empresa
+errada/duplicada/já apliquei/…) persistido para métricas. `GET /api/discovery/metrics` (volume
+hoje/semana, queries, promovidas, taxa de dedup, confiança/fit médios, acionáveis, por fonte) e
+`GET /api/discovery/provider-quality` (por provider: queries, brutos, promovidos, dup-rate, confiança).
+
 ## AI Copilot Layer (Fase 3)
 
 Camada explícita de IA que **interpreta, analisa e redige** — mantendo ações externas

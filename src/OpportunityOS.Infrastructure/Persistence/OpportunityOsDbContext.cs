@@ -25,6 +25,7 @@ public sealed class OpportunityOsDbContext : DbContext
     public DbSet<SearchQueryExecution> SearchQueryExecutions => Set<SearchQueryExecution>();
     public DbSet<RawJobCandidate> RawJobCandidates => Set<RawJobCandidate>();
     public DbSet<JobPostingSourceOccurrence> JobPostingSourceOccurrences => Set<JobPostingSourceOccurrence>();
+    public DbSet<UserFeedback> UserFeedbacks => Set<UserFeedback>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -234,6 +235,16 @@ public sealed class OpportunityOsDbContext : DbContext
             e.Property(x => x.SourceType).HasConversion<int>();
             e.HasIndex(x => x.JobPostingId);
             e.HasIndex(x => x.Url);
+        });
+
+        b.Entity<UserFeedback>(e =>
+        {
+            e.ToTable("user_feedbacks");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Type).HasConversion<int>();
+            e.HasIndex(x => x.JobPostingId);
+            e.HasIndex(x => x.RawJobCandidateId);
+            e.HasIndex(x => x.Type);
         });
     }
 }
