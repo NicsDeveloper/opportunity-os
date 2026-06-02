@@ -108,6 +108,8 @@ export const api = {
   rawCandidates: (take = 150) => get<RawCandidate[]>(`/discovery/raw-candidates?take=${take}`),
   discoveryMetrics: () => get<DiscoveryMetrics>(`/discovery/metrics`),
   promoteRaw: (id: string) => post<PromotionResult>(`/discovery/raw-candidates/${id}/promote`),
+  resolveOriginal: (id: string) =>
+    post<{ found: boolean; originalUrl?: string | null; companyName?: string | null; atsProvider?: string | null; confidence: number; reason?: string | null }>(`/discovery/raw-candidates/${id}/resolve-original`),
   feedback: (type: string, body: { jobPostingId?: string; rawJobCandidateId?: string; reason?: string }) =>
     post(`/feedback`, { type, ...body }),
   // Descobrir mais (B3): bancos/fintechs, consultorias, buscas salvas.

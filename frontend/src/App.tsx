@@ -346,9 +346,19 @@ function OppCard({ o, notify, onChanged, mode }: {
   const [rec, setRec] = useState(o.recommendation);
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzed, setAnalyzed] = useState(false);
+  const [hidden, setHidden] = useState(false);
 
   // Heuristic rationale reads like "Score 68/100 — Técnico 65…"; the LLM one is prose.
   const isTerse = /^score\s+\d+\/100/i.test(why.trim());
+
+  const hide = async () => {
+    setHidden(true);
+    try { await api.feedback("HideSimilar", { jobPostingId: o.jobPostingId }); } catch { /* ignore */ }
+  };
+  if (hidden) return (
+    <div className="oppcard hidden-row"><span>Ocultada.</span>
+      <button className="why-link" onClick={() => setHidden(false)}>desfazer</button></div>
+  );
 
   const generate = async () => {
     if (msg) { setOpen((v) => !v); return; }
@@ -388,7 +398,8 @@ function OppCard({ o, notify, onChanged, mode }: {
                 {analyzing ? "Analisando…" : "↻ Analisar com IA (por que combina em detalhe)"}
               </button>
             )}
-            <FeedbackBar notify={notify} body={{ jobPostingId: o.jobPostingId }} extra={mode === "action"} />
+            <FeedbackBar notify={notify} body={{ jobPostingId: o.jobPostingId }} extra={mode === "action"}
+              onHide={mode === "qualified" ? hide : undefined} />
           </div>
         </div>
         <div className="company">
@@ -435,8 +446,9 @@ function SourceBadge({ sourceType, confidence, sourceName, realCompany, manual }
 }
 
 /* quick feedback buttons (P11) */
-function FeedbackBar({ notify, body, extra }: {
-  notify: (m: string) => void; body: { jobPostingId?: string; rawJobCandidateId?: string }; extra?: boolean;
+function FeedbackBar({ notify, body, extra, onHide }: {
+  notify: (m: string) => void; body: { jobPostingId?: string; rawJobCandidateId?: string };
+  extra?: boolean; onHide?: () => void;
 }) {
   const [sent, setSent] = useState<string | null>(null);
   const send = async (type: string, label: string) => {
@@ -450,6 +462,7 @@ function FeedbackBar({ notify, body, extra }: {
       <button className="fb" onClick={() => send("Irrelevant", "irrelevante")}>👎 Irrelevante</button>
       <button className="fb" onClick={() => send("BadCompanyDetection", "empresa errada")}>🏢 Empresa errada</button>
       {extra && <button className="fb" onClick={() => send("Applied", "já apliquei")}>✅ Já apliquei</button>}
+      {onHide && <button className="fb" onClick={onHide}>🙈 Ocultar</button>}
     </div>
   );
 }
@@ -460,16 +473,36 @@ function RawCandidateCard({ c, notify, onChanged }: {
 }) {
   const [busy, setBusy] = useState(false);
   const [promoted, setPromoted] = useState<string | null>(null);
+  const [original, setOriginal] = useState<string | null>(null);
+  const [finding, setFinding] = useState(false);
+  const [hidden, setHidden] = useState(false);
   const promote = async () => {
-    setBusy(true); notify("Promovendo…");
+    setBusy(true); notify("Salvando…");
     try {
       const r = await api.promoteRaw(c.id);
       setPromoted(r.promoted ? (r.wasDuplicate ? "já estava salva" : "salva") : null);
       notify(r.promoted ? (r.wasDuplicate ? "Essa vaga já estava salva." : "Vaga salva!") : "Não deu pra salvar (confirme a empresa).");
       if (r.promoted) onChanged();
-    } catch { notify("Falha ao promover."); }
+    } catch { notify("Falha ao salvar."); }
     finally { setBusy(false); }
   };
+  const findOriginal = async () => {
+    setFinding(true); notify("Procurando a vaga original…");
+    try {
+      const r = await api.resolveOriginal(c.id);
+      if (r.found && r.originalUrl) { setOriginal(r.originalUrl); notify(r.atsProvider ? `Original no ${r.atsProvider}!` : "Vaga original encontrada!"); }
+      else notify("Não achei a original — segue como agregador.");
+    } catch { notify("Não foi possível procurar a original."); }
+    finally { setFinding(false); }
+  };
+  const hide = async () => {
+    setHidden(true);
+    try { await api.feedback("HideSimilar", { rawJobCandidateId: c.id }); } catch { /* ignore */ }
+  };
+  if (hidden) return (
+    <div className="rawcard hidden-row"><span>Ocultada.</span>
+      <button className="why-link" onClick={() => setHidden(false)}>desfazer</button></div>
+  );
   return (
     <div className="rawcard">
       <div className="raw-main">
@@ -477,14 +510,19 @@ function RawCandidateCard({ c, notify, onChanged }: {
         <SourceBadge sourceType={c.sourceType} confidence={c.sourceConfidenceScore}
           sourceName={c.sourceName} realCompany={c.realCompanyName} manual={c.requiresManualValidation} />
         {c.snippet && <div className="raw-snippet">{c.snippet}</div>}
+        {original && <div className="raw-original">✓ vaga original: <a href={original} target="_blank" rel="noreferrer">abrir oficial</a></div>}
         <FeedbackBar notify={notify} body={{ rawJobCandidateId: c.id }} />
+        <div className="fbbar">
+          <button className="fb" disabled={finding || original != null} onClick={findOriginal}>{finding ? "procurando…" : "🔗 Achar original"}</button>
+          <button className="fb" onClick={hide}>🙈 Ocultar</button>
+        </div>
       </div>
       <div className="raw-meta">
         <span className="posted">{ago(c.discoveredAtUtc)}</span>
         <span className={"pill raw-status"}>{candidateStatusLabel(c.status)}</span>
       </div>
       <div className="opp-actions">
-        <a className="btn" href={c.discoveredUrl} target="_blank" rel="noreferrer">Abrir vaga</a>
+        <a className="btn" href={original ?? c.discoveredUrl} target="_blank" rel="noreferrer">Abrir vaga</a>
         {promoted
           ? <span className="fb-done">✓ {promoted}</span>
           : <button className="btn primary" disabled={busy || !c.realCompanyName}
