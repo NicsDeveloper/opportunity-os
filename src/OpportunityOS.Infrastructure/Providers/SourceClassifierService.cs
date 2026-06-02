@@ -16,7 +16,9 @@ public sealed class SourceClassifierService : ISourceClassifierService
     private static readonly string[] JobBoards =
         { "programathor", "geekhunter", "coodesh", "remotar", "trampos", "apinfo", "vagas.com" };
     private static readonly string[] Aggregators =
-        { "indeed.", "glassdoor.", "jobgether", "simplyhired", "ziprecruiter", "bebee", "catho.", "reddit.", "remotejobs", "remoteok", "jooble", "neuvoo" };
+        { "indeed.", "glassdoor.", "jobgether", "simplyhired", "ziprecruiter", "bebee", "catho.", "reddit.",
+          "remotejobs", "remoteok", "remoterocketship", "jooble", "neuvoo", "recrutei", "apibr", "bne.com",
+          "talent.com", "empregare", "vagas.com" };
 
     public SourceClassificationResult Classify(string url, string? title, string? snippet)
     {
@@ -38,8 +40,11 @@ public sealed class SourceClassifierService : ISourceClassifierService
         if (Has(JobBoards))
             return new(SourceType.JobBoard, host, 70, false, "Job board confiável");
 
+        // A career-like URL alone doesn't prove it's the company's OFFICIAL page (many
+        // aggregators use /jobs, /vagas). Treat it as a medium-confidence web result, not
+        // a high-trust official source — avoids unknown hosts dominating the top.
         if (LooksLikeCareerPage(url))
-            return new(SourceType.OfficialCareerPage, host, 90, false, "Página oficial de carreira da empresa");
+            return new(SourceType.SearchResult, host, 55, false, "Parece página de vagas (a confirmar)");
 
         // Generic web result: possibly the company's own domain. Lower if no company hint.
         var hasCompanyHint = !string.IsNullOrWhiteSpace(title) || !string.IsNullOrWhiteSpace(snippet);
