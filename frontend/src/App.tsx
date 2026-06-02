@@ -326,14 +326,9 @@ function Stat({ icon, label, n, delta, mutedDelta }: {
 function Logo({ name, website }: { name: string; website?: string | null }) {
   const [i, setI] = useState(0);
   const host = hostOf(website);
-  const slug = companySlug(name);
-  // Try the real website first; then guess the company's domain from its name
-  // (FCamara -> fcamara.com.br); finally the favicon, then initials. All graceful.
-  const sources = [
-    ...(host ? [`https://logo.clearbit.com/${host}`] : []),
-    ...(slug ? [`https://logo.clearbit.com/${slug}.com.br`, `https://logo.clearbit.com/${slug}.com`] : []),
-    ...(host ? [`https://www.google.com/s2/favicons?sz=64&domain=${host}`] : []),
-  ];
+  // Real favicon of the company's own domain (reliable). A favicon GUESS for an unknown
+  // domain returns a generic globe (worse than initials), so we only use a known website.
+  const sources = host ? [`https://www.google.com/s2/favicons?sz=64&domain=${host}`] : [];
   if (i < sources.length)
     return <img className="logo img" alt={name} src={sources[i]} onError={() => setI(i + 1)} />;
   return <span className="logo" style={{ background: logoColor(name) }}>{initials(name)}</span>;
@@ -607,12 +602,6 @@ function greeting() { const h = new Date().getHours(); return h < 12 ? "Bom dia"
 function initials(name: string) {
   const p = name.trim().split(/\s+/);
   return ((p[0]?.[0] ?? "") + (p[1]?.[0] ?? "")).toUpperCase() || "?";
-}
-// Company name -> domain slug guess ("CI&T" -> "cit", "NTT Data" -> "nttdata").
-function companySlug(name: string) {
-  const s = (name ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9]/g, "");
-  return s.length >= 2 && s.length <= 30 ? s : "";
 }
 function logoColor(name: string) {
   let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
