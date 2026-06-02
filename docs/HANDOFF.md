@@ -65,17 +65,24 @@ Todas com `Id` Guid e setters privados (encapsulamento). Tabelas snake_case; lis
 | `PromptExecutionLog` | prompt_execution_logs | Service, PromptVersion, ModelName, Success, UsedFallback, RawResponse, JobPostingId? | auditoria de cada chamada LLM |
 | `RecruiterLead` | recruiter_leads | CompanyId, FullName, Source, … | CRUD |
 | `BacenInstitution` | bacen_institutions | Name, Ispb, Cnpj, InstitutionType, AuthorizedByBacen, Pix/Spi fields, Tags | `UpdateFrom` (staging do radar Bacen) |
+| `RawJobCandidate` | raw_job_candidates | Title, Snippet, DiscoveredUrl, SourceProvider/Name, **SourceType**, RealCompanyName, OriginalJobUrl, Location/WorkMode/Language, **Status** (RawJobCandidateStatus), SourceConfidenceScore, PreliminaryFitScore, **NormalizedFingerprint**, RequiresManualValidation, **VerificationStatus**, SearchCampaignId, Query, PromotedJobPostingId | `Classify`, `Enrich`, `SetVerification`, `MarkDuplicate`, `PromoteTo`, `Reject` — **núcleo do Firehose** (§4.1) |
+| `SearchCampaign` | search_campaigns | Name, Description, **Status**/**Priority**, BaseKeywords, DailyQueryBudget, LastRunAtUtc | conjuntos de busca salvos (rodáveis) |
+| `SearchQueryExecution` | search_query_executions | SearchCampaignId, Query, **Status**, ResultsCount, StartedAt | auditoria de cada query do Firehose |
+| `JobPostingSourceOccurrence` | job_posting_source_occurrences | JobPostingId, SourceProvider/Name, Url, SeenAtUtc | cada vez que a MESMA vaga aparece em outra fonte (dedup por fingerprint) |
+| `UserFeedback` | user_feedbacks | **Type** (UserFeedbackType), JobPostingId?, RawJobCandidateId?, Reason | feedback do usuário (relevante/ocultar/aplicada/…) — alimenta DiscoveryRank e o mural de aplicações |
+| `ConsultingCompanyCandidate` | consulting_company_candidates | Name, WebsiteUrl, Country, Source, Signals, **ConsultingConfidenceScore**, **Status** | candidatas do radar de consultorias (antes de virar `Company`) |
 
-`JobPosting` tem propriedades calculadas (não-mapeadas): **`EffectiveDateUtc` = PublishedAtUtc ?? CreatedAtUtc** e **`IsTalentPool`** (título com "banco de talentos"/"talent pool"/"cadastro de currículo").
+`JobPosting` tem propriedades calculadas (não-mapeadas): **`EffectiveDateUtc` = PublishedAtUtc ?? CreatedAtUtc** e **`IsTalentPool`** (título com "banco de talentos"/"talent pool"/"cadastro de currículo"). Além do núcleo, carrega **qualidade de fonte** (do Firehose): `SourceType`, `SourceName`, `SourceConfidenceScore`, `RequiresManualValidation`, `RealCompanyName`, `OriginalJobUrl`, `NormalizedFingerprint` (`SetSourceQuality`/`RefreshFromSource`).
 
 ### Enums e máquinas de estado
 - `CompanyPriority`: Low(1) → Medium → High → Strategic(4)
-- `CompanySource`: Manual, CsvImport, SearchEngine, PublicRegistry, AtsDiscovery, Bacen
+- `CompanySource`: Manual, CsvImport, SearchEngine, PublicRegistry, AtsDiscovery, Bacen, **SearchDiscovery** (usado pelo seed manual `ObservedCompaniesSeed`)
 - `JobPostingStatus`: Discovered → Normalized → Analyzed → Shortlisted/Rejected/Archived/Expired
 - `MatchRecommendation`: Ignore → SaveForLater → Apply → Prioritize → Strategic
 - `OpportunityStatus`: Discovered → Analyzed → MessageGenerated → **ReadyForHumanReview** (teto do sistema) → SentManually → AppliedManually → WaitingResponse → InterviewScheduled → Rejected/Archived
 - `GeneratedMessageStatus`: Draft → Reviewed → Used → Discarded
 - `ExecutionRunStatus`: Running → Succeeded/Failed/PartiallyFailed
+- **Firehose (§4.1):** `SourceType` (OfficialAts/OfficialCareerPage/JobBoard/Aggregator/SearchResult/SocialIndexed/Unknown) · `RawJobCandidateStatus` (Discovered→Classified→Enriched→Duplicate/PromotedToJobPosting/Rejected/Expired) · `JobVerificationStatus` (Unverified→AggregatorOnly→LikelyOriginal→VerifiedOriginal/OfficialAts/Expired) · `SearchCampaignStatus`/`SearchCampaignPriority` · `ConsultingCompanyCandidateStatus` (Candidate→PromotedToCompany/Rejected/Duplicate) · `UserFeedbackType` (Relevant/Irrelevant/HideSimilar/BadCompanyDetection/BadScore/Duplicate/Expired/InterestingCompany/Applied/ContactedRecruiter)
 
 ---
 
@@ -117,6 +124,29 @@ Cada resultado vira uma oportunidade; empresa derivada do host; cria empresa se 
   - Se heurístico **≥60** e há orçamento (**teto 6 análises LLM/run**), faz **upgrade para score LLM** (understanding + fit) na hora — número autoritativo "de bate pronto".
   - Jobs antigos sem match são pontuados quando reencontrados (backfill).
   - Falha de score/LLM nunca interrompe a descoberta (fallback heurístico).
+
+### 4.1 Firehose (descoberta massiva via busca, com triagem)
+
+Pipeline paralelo ao §4 que captura **muito** da web aberta como `RawJobCandidate` (zona de
+triagem), só promovendo a `JobPosting` o que passa pelos filtros. Alimenta a aba **"Explorar tudo"**.
+
+- **`IFirehoseService`** — roda `SearchCampaign`s (buscas salvas), `quick-search` e `aggressive-search`.
+  Cada resultado vira um `RawJobCandidate` (não um JobPosting ainda). Registra `SearchQueryExecution`.
+- **`SourceClassifierService`** — classifica a fonte (`SourceType`) e a confiança (0–100) pela URL/título:
+  ATS oficial > página de carreira > job board > agregador > resultado de busca > social. Hosts de ATS
+  conhecidos (Greenhouse/Lever/Gupy/Ashby/Quickin/Solides/Kenoby/JobConvo/99jobs/Abler/Pandapé/inhire/…)
+  ganham confiança alta; agregadores ganham `RequiresManualValidation`.
+- **`CompanyNameResolver`** — tenta extrair a **empresa real** do título/host (com denylist de rótulos
+  genéricos e hosts path-slug como quickin.io). Sem empresa confiável, fica "a confirmar".
+- **`JobFingerprintService`** — fingerprint normalizado (empresa+cargo+local) para **dedup**: a mesma vaga
+  vista em várias fontes vira `JobPostingSourceOccurrence`, não duplicata.
+- **`RawCandidatePromotionService`** — promove candidato → `JobPosting` + `OpportunityMatch` quando há
+  empresa resolvida e qualidade mínima; `resolve-original` tenta achar a vaga no ATS oficial antes.
+- **`QueryBudgetManager`** — tetos diários por centro de custo (queries Serper/CSE e análises LLM).
+- **`DiscoveryRankService`** — rank do feed = **FitScore×0.50 + SourceConfidence×0.20 + Freshness×0.15
+  + CompanyPriority×0.10 + FeedbackBoost×0.05** (puro/stateless). É o `sort=rank` da aba "Boas opções".
+- **`IConsultingRadarService`** — radar de consultorias .NET: descobre candidatas (`ConsultingCompanyCandidate`),
+  pontua confiança e promove a `Company` (manual ou em lote) — não cria vaga.
 
 ---
 
@@ -216,7 +246,7 @@ observadas manualmente (LinkedIn etc.) no radar `Company` para o fluxo atual alc
 
 **Dashboard** (consumidos pela tela): 
 - `GET /api/dashboard/summary` — cards (vagas, fortes 75+, mensagens, follow-ups) já com filtro de frescor/ativo.
-- `GET /api/matches?minScore=&take=&freshDays=&maxAgeDays=` — **o feed**. Último match por job; só ativos/frescos; ordenado por **score + bônus de frescor**; descarta publicadas há > `maxAgeDays` (default 120). Defaults: minScore 60, freshDays 45.
+- `GET /api/matches?minScore=&take=&freshDays=&maxAgeDays=&sort=&region=&contract=` — **o feed**. Último match por job; só ativos/frescos; oculta Irrelevant/HideSimilar **e** Applied/ContactedRecruiter (estes vão pro mural de aplicações). `sort=rank` usa o DiscoveryRank (§4.1); senão **score + bônus de frescor**. `region` = national/international, `contract` = clt/pj (heurística). Descarta publicadas há > `maxAgeDays` (default 120). Defaults: minScore 60, freshDays 45.
 - `GET /api/applications` — **mural de aplicações**: oportunidades já marcadas como "já me cadastrei"/apliquei
   ou contatei recrutador (feedback `Applied`/`ContactedRecruiter`). Ordenado pela data da marcação. Essas vagas
   **saem do `/api/matches`** (mural principal) para o usuário ir "matando" o que já tratou.
@@ -226,6 +256,10 @@ observadas manualmente (LinkedIn etc.) no radar `Company` para o fluxo atual alc
 
 **Feedback** `/api/feedback`: `POST /` (tipos: Relevant/Irrelevant/HideSimilar/BadCompanyDetection/Applied/ContactedRecruiter/…) · `GET /`.
 Irrelevant/HideSimilar **ocultam** do mural; Applied/ContactedRecruiter **movem** para o mural de aplicações.
+
+**Discovery (Firehose)** `/api/discovery`: `POST /campaigns` · `GET /campaigns` · `GET /campaigns/{id}` · `POST /campaigns/{id}/run` · `POST /quick-search` · `POST /aggressive-search` · `GET /raw-candidates` · `POST /raw-candidates/{id}/promote` · `POST /promote-batch` · `POST /raw-candidates/{id}/resolve-original` · `GET /metrics` · `GET /bacen-financial-sweep/preview` · `POST /bacen-financial-sweep` · `GET /provider-quality`
+
+**Consulting Radar** `/api/consulting-radar`: `POST /discover` · `GET /candidates` · `GET /candidates/{id}` · `POST /candidates/{id}/promote-to-company` · `POST /promote-batch`
 
 ---
 
@@ -237,6 +271,10 @@ Irrelevant/HideSimilar **ocultam** do mural; Applied/ContactedRecruiter **movem*
 | `continuous-discovery` (DiscoverJobsJob) | `Jobs:ContinuousDiscoveryCron` | `*/15 * * * *` | mantém o radar fresco enquanto roda |
 | `search-jobs` (SearchJobsJob) | `Jobs:SearchCron` | `0 */3 * * *` | busca por palavra-chave (Gupy + Serper); espalha cota |
 | `validate-links` (ValidateLinksJob) | `Jobs:ValidateLinksCron` | `30 */6 * * *` | expira links 404/410 |
+| `firehose-sweep` (FirehoseSweepJob) | `Jobs:FirehoseCron` | `0 */4 * * *` | varredura Firehose (§4.1): captura RawJobCandidates |
+| `promote-candidates` (PromoteCandidatesJob) | `Jobs:PromotionCron` | `30 */4 * * *` | promove RawJobCandidates → JobPosting (com triagem/dedup) |
+| `bacen-financial-sweep` (BacenFinancialSweepJob) | `Jobs:BacenSweepCron` | `0 6 * * 1` | busca vagas nos bancos/fintechs do radar (condicional por flag) |
+| `consulting-radar` (ConsultingRadarJob) | `Jobs:ConsultingRadarCron` | `0 7 * * 2` | descobre consultorias .NET (condicional por flag) |
 | `send-daily-digest` (SendDailyDigestJob) | `Jobs:DailyDigestCron` | `0 9 * * *` | envia digest |
 
 `SearchJobsJob` usa keywords: desenvolvedor .net, desenvolvedor backend c#, engenheiro de software .net, programador c# pleno, vaga .net remoto, desenvolvedor .net fintech, arquiteto .net, desenvolvedor c# sênior.
