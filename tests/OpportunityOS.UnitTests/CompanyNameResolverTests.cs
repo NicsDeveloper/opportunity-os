@@ -47,6 +47,15 @@ public sealed class CompanyNameResolverTests
     }
 
     [Fact]
+    public void GenericHostLabel_IsNotTreatedAsCompany()
+    {
+        // "services.com" / "jobs.com" must NOT become the company (B8).
+        var r = _svc.Resolve("Backend Developer", "https://services.com/123",
+            "services.com", SourceType.SearchResult);
+        Assert.Null(r.RealCompanyName);
+    }
+
+    [Fact]
     public void GupySubdomain_DerivesCompany()
     {
         var r = _svc.Resolve("Desenvolvedor .NET", "https://fcamara.gupy.io/jobs/123",

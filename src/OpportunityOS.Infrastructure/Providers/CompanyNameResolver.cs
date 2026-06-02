@@ -118,15 +118,26 @@ public sealed partial class CompanyNameResolver : ICompanyNameResolver
             return string.IsNullOrWhiteSpace(sub) || sub is "jobs" or "boards" ? null : Clean(sub);
         }
 
-        // Generic: second-level domain (acme.com -> Acme). Skip obvious non-companies.
+        // Generic: second-level domain (acme.com -> Acme). Skip obvious non-companies and
+        // generic words (B8): never label "Services"/"Jobs"/"Careers" as the company.
         var parts = host.Split('.', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length >= 2)
         {
             var label = parts[^2];
-            if (label.Length >= 3 && !IsSourceWord(label)) return Clean(label);
+            if (label.Length >= 3 && !IsSourceWord(label) && !IsGenericLabel(label)) return Clean(label);
         }
         return null;
     }
+
+    private static readonly string[] GenericLabels =
+    {
+        "services", "service", "jobs", "job", "careers", "career", "vagas", "vaga", "api", "remote",
+        "remotejobs", "talent", "talents", "work", "works", "hire", "hiring", "app", "apps", "portal",
+        "recruit", "recruiting", "emprego", "empregos", "trampos", "site", "home", "cloud", "web", "tech",
+    };
+
+    private static bool IsGenericLabel(string s) =>
+        GenericLabels.Any(g => string.Equals(g, s, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsSourceWord(string s) =>
         SourceWords.Any(w => s.Contains(w, StringComparison.OrdinalIgnoreCase));

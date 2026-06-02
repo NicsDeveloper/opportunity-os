@@ -103,6 +103,14 @@ public sealed class RawCandidatePromotionService : IRawCandidatePromotionService
         }
 
         var company = await _discovery.FindOrCreateCompanyByNameAsync(companyName, ct);
+        // If the source is the company's own site/career page, store its domain so the
+        // frontend can fetch the real logo (Clearbit/favicon).
+        if (string.IsNullOrWhiteSpace(company.WebsiteUrl)
+            && candidate.SourceType is SourceType.OfficialCareerPage or SourceType.SearchResult)
+        {
+            var domain = DomainOf(candidate.DiscoveredUrl);
+            if (domain is not null) company.SetWebsiteUrl($"https://{domain}");
+        }
         var url = candidate.OriginalJobUrl ?? candidate.DiscoveredUrl;
         var job = new JobPosting(
             company.Id, externalId: fingerprint, sourceProvider: candidate.SourceProvider,
@@ -133,6 +141,18 @@ public sealed class RawCandidatePromotionService : IRawCandidatePromotionService
 
         candidate.MarkPromoted(job.Id);
         return new PromotionResultResponse(true, job.Id, false, "Promovido para vaga");
+    }
+
+    private static string? DomainOf(string url)
+    {
+        try
+        {
+            var host = new Uri(url).Host.Replace("www.", "", StringComparison.OrdinalIgnoreCase);
+            // Skip multi-tenant platforms (their host isn't the company's own domain).
+            string[] platforms = { "gupy.io", "greenhouse.io", "lever.co", "ashbyhq.com", "smartrecruiters.com", "workdayjobs.com", "linkedin.", "indeed.", "glassdoor." };
+            return platforms.Any(p => host.Contains(p, StringComparison.OrdinalIgnoreCase)) ? null : host;
+        }
+        catch { return null; }
     }
 
     private Task AddOccurrenceAsync(JobPosting job, RawJobCandidate candidate, CancellationToken ct) =>
