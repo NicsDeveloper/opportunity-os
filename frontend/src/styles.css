@@ -109,8 +109,26 @@ button { font-family: inherit; }
 
 /* ---------------- opportunity cards ---------------- */
 .opplist { display: flex; flex-direction: column; gap: 9px; margin-top: 16px; }
-.card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 13px 18px; box-shadow: var(--shadow); transition: box-shadow .16s, transform .16s; }
-.card:hover { box-shadow: var(--shadow-hover); }
+.card { position: relative; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px 22px; box-shadow: var(--shadow); transition: box-shadow .16s, transform .16s; }
+.card.oppcard:hover { box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+
+/* X — remove card (top-left, fades in on hover) */
+.card-x { position: absolute; top: 10px; left: 10px; z-index: 4; width: 25px; height: 25px; border-radius: 50%;
+  border: 1px solid var(--border-strong); background: #fff; color: var(--muted); display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; opacity: 0; transform: scale(.7); box-shadow: var(--shadow);
+  transition: opacity .15s ease, transform .15s ease, background .15s, color .15s, border-color .15s; }
+.oppcard:hover .card-x { opacity: 1; transform: scale(1); }
+.card-x:hover { background: #fee2e2; color: #dc2626; border-color: #fecaca; }
+
+/* main actions hidden until hover */
+.oppcard .c-actions { opacity: 0; transform: translateX(8px); pointer-events: none; transition: opacity .18s ease, transform .18s ease; }
+.oppcard:hover .c-actions { opacity: 1; transform: none; pointer-events: auto; }
+
+/* leave / enter animations */
+.card.leaving { overflow: hidden; animation: cardOut .28s ease forwards; }
+@keyframes cardOut { to { opacity: 0; transform: translateX(-18px) scale(.97); } }
+.card.done.in { animation: rowIn .24s ease; }
+@keyframes rowIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .card.weak { opacity: .92; }
 .card.skel { height: 116px; background: linear-gradient(100deg, #fff 30%, #f3f3f8 50%, #fff 70%); background-size: 200% 100%; animation: shimmer 1.3s infinite; border-style: dashed; }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
@@ -118,7 +136,7 @@ button { font-family: inherit; }
 .card.done.applied { background: var(--good-soft); border-color: #bbf0cd; color: #15803d; }
 .card.done.hidden { background: #f4f4f8; color: var(--muted); }
 
-.card-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.9fr) 92px 150px 30px; gap: 14px; align-items: center; min-height: 66px; }
+.card-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.9fr) 92px 150px 38px; gap: 14px; align-items: center; min-height: 92px; }
 
 .c-id { display: flex; gap: 12px; align-items: center; min-width: 0; }
 .logo { width: 40px; height: 40px; border-radius: 10px; color: #fff; font-weight: 700; font-size: 14px;
@@ -166,9 +184,10 @@ button { font-family: inherit; }
 .btn.ok { color: var(--good); border-color: #bfe9cd; background: var(--good-soft); }
 .btn.ok:hover { background: #d8f1e1; }
 .c-more { display: flex; align-items: center; justify-content: center; }
-.kebab { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: none;
-  background: none; color: #b9bbc9; cursor: pointer; border-radius: 8px; }
-.kebab:hover { background: #f4f4f8; color: var(--ink-2); }
+.kebab { width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-strong); background: #fff; color: var(--ink-2); cursor: pointer; border-radius: 10px;
+  transition: background .14s, color .14s, border-color .14s, transform .14s; }
+.kebab:hover { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent); transform: scale(1.06); }
 
 .pager { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 20px 0 4px; }
 .pager-info { font-size: 13px; color: var(--muted); }
@@ -248,7 +267,7 @@ button { font-family: inherit; }
 
 /* responsive */
 @media (max-width: 1080px) {
-  .card-row { grid-template-columns: minmax(0,1.4fr) 92px 150px 30px; }
+  .card-row { grid-template-columns: minmax(0,1.4fr) 92px 150px 38px; }
   .c-reason { display: none; }
 }
 @media (max-width: 760px) {

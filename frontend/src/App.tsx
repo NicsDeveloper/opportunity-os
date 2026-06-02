@@ -218,6 +218,7 @@ function OppCard({ o, notify, onChanged }: {
   const [msg, setMsg] = useState<GeneratedMessage | null>(null);
   const [menu, setMenu] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const [done, setDone] = useState<{ kind: "applied" | "hidden"; label: string } | null>(null);
   const [why, setWhy] = useState(o.rationale);
   const [score, setScore] = useState(o.overallScore);
@@ -227,14 +228,20 @@ function OppCard({ o, notify, onChanged }: {
   const adh = adherence(score);
   const isTerse = /^score\s+\d+\/100/i.test((why ?? "").trim());
 
-  const act = async (type: string, kind: "applied" | "hidden", label: string) => {
-    setMenu(false); setDone({ kind, label });
-    try { await api.feedback(type, { jobPostingId: o.jobPostingId }); if (kind === "applied") notify("Movida pra Aplicações ✅"); onChanged(); }
-    catch { setDone(null); notify("Não foi possível agora."); }
+  // Fire the feedback, play the leave animation, then show the slim undo row.
+  const act = (type: string, kind: "applied" | "hidden", label: string) => {
+    setMenu(false);
+    setLeaving(true);
+    api.feedback(type, { jobPostingId: o.jobPostingId })
+      .then(() => { if (kind === "applied") notify("Movida pra Aplicações ✅"); })
+      .catch(() => notify("Não foi possível agora."));
+    window.setTimeout(() => setDone({ kind, label }), 280);
   };
   const undo = async () => {
-    const wasApplied = done?.kind === "applied"; setDone(null);
-    if (wasApplied) { try { await api.unapply(o.jobPostingId); } catch { /* ignore */ } onChanged(); }
+    const wasApplied = done?.kind === "applied";
+    setDone(null); setLeaving(false);
+    try { await api.unapply(o.jobPostingId); } catch { /* ignore */ }
+    if (wasApplied) onChanged();
   };
 
   const openDraft = async () => {
@@ -252,14 +259,17 @@ function OppCard({ o, notify, onChanged }: {
   };
 
   if (done) return (
-    <div className={"card done " + done.kind}>
-      <span>{done.kind === "applied" ? "✅ Movida pra Aplicações" : "🙈 Ocultada"} — {o.jobTitle}</span>
+    <div className={"card done in " + done.kind}>
+      <span>{done.kind === "applied" ? "✅ Movida pra Aplicações" : "🙈 Removida do mural"} — {o.jobTitle}</span>
       <button className="link-btn" onClick={undo}>desfazer</button>
     </div>
   );
 
   return (
-    <div className={"card" + (src.weak ? " weak" : "")}>
+    <div className={"card oppcard" + (src.weak ? " weak" : "") + (leaving ? " leaving" : "")}>
+      <button className="card-x" title="Remover do mural" onClick={() => act("HideSimilar", "hidden", "removida")}>
+        <Icon name="close" size={13} />
+      </button>
       <div className="card-row">
         {/* col 1 — identity */}
         <div className="c-id">
@@ -301,7 +311,7 @@ function OppCard({ o, notify, onChanged }: {
 
         {/* col 5 — secondary actions */}
         <div className="c-more menuwrap">
-          <button className="kebab" title="Mais ações" onClick={() => setMenu((v) => !v)}><Icon name="more" size={16} /></button>
+          <button className="kebab" title="Mais ações" onClick={() => setMenu((v) => !v)}><Icon name="more" size={18} /></button>
           {menu && (
             <>
               <div className="menu-scrim" onClick={() => setMenu(false)} />

@@ -26,6 +26,7 @@ const P: Record<string, string> = {
   copy: "M9 9h11v11H9zM5 15H4V4h11v1",
   refresh: "M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6",
   bookmark: "M6 3h12v18l-6-4-6 4z",
+  close: "M6 6l12 12M18 6L6 18",
 };
 
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {
