@@ -165,6 +165,12 @@ public sealed record BestOpportunityResponse(
     int DiscoveryRank, string SourceType, int SourceConfidenceScore,
     bool RequiresManualValidation, string? RealCompanyName, string? SourceName);
 
+// One opportunity the user already acted on (applications board).
+public sealed record ApplicationResponse(
+    Guid JobPostingId, string JobTitle, string CompanyName, string JobUrl,
+    string? CompanyWebsiteUrl, int OverallScore, string Action,
+    DateTime AppliedAtUtc, DateTime PostedAtUtc);
+
 public sealed record ExecutionRunResponse(
     Guid Id, string RunType, string Status, DateTime StartedAtUtc,
     int ItemsProcessed, int ItemsSucceeded, int ItemsFailed);

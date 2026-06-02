@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Icon } from "./icons";
 import {
-  api, type BestOpportunity, type GeneratedMessage, type RawCandidate, type Run,
+  api, type Application, type BestOpportunity, type GeneratedMessage, type RawCandidate, type Run,
 } from "./api";
 
 export function App() {
@@ -88,7 +88,7 @@ const SEARCH_KEYWORDS = [
   "programador c# pleno", "vaga .net remoto", "desenvolvedor .net fintech",
 ];
 
-type FeedView = "action" | "qualified" | "firehose" | "discover";
+type FeedView = "action" | "qualified" | "firehose" | "discover" | "applied";
 
 function Feed({ reload, notify, onChanged }: {
   reload: number; notify: (m: string) => void; onChanged: () => void;
@@ -135,6 +135,9 @@ function Feed({ reload, notify, onChanged }: {
             <button className={"tab" + (view === "firehose" ? " active" : "")} onClick={() => setView("firehose")}>
               🔎 Explorar tudo
             </button>
+            <button className={"tab" + (view === "applied" ? " active" : "")} onClick={() => setView("applied")}>
+              ✅ Já me cadastrei
+            </button>
             <button className={"tab" + (view === "discover" ? " active" : "")} onClick={() => setView("discover")}>
               🏢 Descobrir mais
             </button>
@@ -156,6 +159,7 @@ function Feed({ reload, notify, onChanged }: {
         {view === "action" && <ActionView reload={reload} region={region} contract={contract} notify={notify} onChanged={onChanged} />}
         {view === "qualified" && <QualifiedView reload={reload} region={region} contract={contract} notify={notify} onChanged={onChanged} />}
         {view === "firehose" && <FirehoseView reload={reload} notify={notify} onChanged={onChanged} />}
+        {view === "applied" && <ApplicationsView reload={reload} notify={notify} onChanged={onChanged} />}
         {view === "discover" && <DiscoverMoreView reload={reload} notify={notify} onChanged={onChanged} />}
       </div>
     </>
@@ -247,6 +251,48 @@ function FirehoseView({ reload, notify, onChanged }: { reload: number; notify: (
           <span className="pager-info">Página {current + 1} de {pageCount} · {all.length} vagas</span>
           <button className="btn" disabled={current >= pageCount - 1} onClick={() => setPage(current + 1)}>Próxima ›</button>
         </div>
+      )}
+    </>
+  );
+}
+
+/* ---------- Já me cadastrei: oportunidades que você já aplicou/contatou ---------- */
+function ApplicationsView({ reload, notify, onChanged }: { reload: number; notify: (m: string) => void; onChanged: () => void }) {
+  const apps = useAsync(api.applications, [reload]);
+  const all = apps.data ?? [];
+  const undo = async (a: Application) => {
+    try { await api.unapply(a.jobPostingId); notify(`Voltou pro mural: ${a.jobTitle}`); onChanged(); }
+    catch { notify("Não foi possível desfazer."); }
+  };
+  return (
+    <>
+      <p className="sub" style={{ marginTop: 0 }}>
+        Vagas que você já marcou como <strong>cadastrada/aplicada</strong>. Elas saem do mural principal pra você
+        focar no que falta. Pode trazer de volta a qualquer momento.
+      </p>
+      {apps.error && <p className="err">{apps.error}</p>}
+      {all.map((a) => (
+        <div className="appcard" key={a.jobPostingId}>
+          <Logo name={a.companyName} website={a.companyWebsiteUrl} />
+          <div className="appcard-main">
+            <div className="title">{a.jobTitle}</div>
+            <div className="appcard-meta">
+              <span className="app-co">{a.companyName}</span>
+              <span className="app-tag">{actionLabel(a.action)}</span>
+              <span className="posted">marcada {ago(a.appliedAtUtc)}</span>
+            </div>
+          </div>
+          {a.overallScore > 0 && <div className="ring sm" style={{ borderColor: ringColor(a.overallScore) }}>{a.overallScore}</div>}
+          <div className="opp-actions">
+            <a className="btn" href={a.jobUrl} target="_blank" rel="noreferrer">Ver vaga</a>
+            <button className="btn" onClick={() => undo(a)} title="Trazer de volta ao mural principal">↩ Reabrir</button>
+          </div>
+        </div>
+      ))}
+      {all.length === 0 && (
+        <p className="placeholder">
+          Nada por aqui ainda. Quando marcar uma vaga como <strong>“✓ Já me cadastrei”</strong> no mural, ela aparece aqui.
+        </p>
       )}
     </>
   );
@@ -371,6 +417,7 @@ function OppCard({ o, notify, onChanged, mode }: {
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzed, setAnalyzed] = useState(false);
   const [hidden, setHidden] = useState(false);
+  const [applied, setApplied] = useState(false);
 
   // Heuristic rationale reads like "Score 68/100 — Técnico 65…"; the LLM one is prose.
   const isTerse = /^score\s+\d+\/100/i.test(why.trim());
@@ -379,6 +426,20 @@ function OppCard({ o, notify, onChanged, mode }: {
     setHidden(true);
     try { await api.feedback("HideSimilar", { jobPostingId: o.jobPostingId }); } catch { /* ignore */ }
   };
+  // Mark as applied: leaves the main board and moves to "Já me cadastrei".
+  const apply = async () => {
+    setApplied(true);
+    try { await api.feedback("Applied", { jobPostingId: o.jobPostingId }); notify("Movida pra “Já me cadastrei” ✅"); onChanged(); }
+    catch { setApplied(false); notify("Não foi possível marcar agora."); }
+  };
+  const undoApply = async () => {
+    setApplied(false);
+    try { await api.unapply(o.jobPostingId); } catch { /* ignore */ }
+  };
+  if (applied) return (
+    <div className="oppcard applied-row"><span>✅ Marcada como cadastrada — está em <strong>“Já me cadastrei”</strong>.</span>
+      <button className="why-link" onClick={undoApply}>desfazer</button></div>
+  );
   if (hidden) return (
     <div className="oppcard hidden-row"><span>Ocultada.</span>
       <button className="why-link" onClick={() => setHidden(false)}>desfazer</button></div>
@@ -422,7 +483,7 @@ function OppCard({ o, notify, onChanged, mode }: {
                 {analyzing ? "Analisando…" : "↻ Analisar com IA (por que combina em detalhe)"}
               </button>
             )}
-            <FeedbackBar notify={notify} body={{ jobPostingId: o.jobPostingId }} extra={mode === "action"}
+            <FeedbackBar notify={notify} body={{ jobPostingId: o.jobPostingId }}
               onHide={mode === "qualified" ? hide : undefined} />
           </div>
         </div>
@@ -436,6 +497,9 @@ function OppCard({ o, notify, onChanged, mode }: {
           <a className="btn" href={o.jobUrl} target="_blank" rel="noreferrer">Ver vaga</a>
           <button className="btn primary" disabled={busy} onClick={generate}>
             {busy ? "Gerando…" : msg ? (open ? "Ocultar mensagem" : "Ver mensagem") : "Gerar mensagem"}
+          </button>
+          <button className="btn ok" onClick={apply} title="Já me cadastrei nesta vaga — tirar do mural">
+            ✓ Já me cadastrei
           </button>
         </div>
       </div>
@@ -470,9 +534,9 @@ function SourceBadge({ sourceType, confidence, sourceName, realCompany, manual }
 }
 
 /* quick feedback buttons (P11) */
-function FeedbackBar({ notify, body, extra, onHide }: {
+function FeedbackBar({ notify, body, onHide }: {
   notify: (m: string) => void; body: { jobPostingId?: string; rawJobCandidateId?: string };
-  extra?: boolean; onHide?: () => void;
+  onHide?: () => void;
 }) {
   const [sent, setSent] = useState<string | null>(null);
   const send = async (type: string, label: string) => {
@@ -485,10 +549,14 @@ function FeedbackBar({ notify, body, extra, onHide }: {
       <button className="fb" onClick={() => send("Relevant", "relevante")}>👍 Relevante</button>
       <button className="fb" onClick={() => send("Irrelevant", "irrelevante")}>👎 Irrelevante</button>
       <button className="fb" onClick={() => send("BadCompanyDetection", "empresa errada")}>🏢 Empresa errada</button>
-      {extra && <button className="fb" onClick={() => send("Applied", "já apliquei")}>✅ Já apliquei</button>}
       {onHide && <button className="fb" onClick={onHide}>🙈 Ocultar</button>}
     </div>
   );
+}
+
+function actionLabel(action: string) {
+  if (action === "ContactedRecruiter") return "✉ contatei recrutador";
+  return "✓ cadastrei/apliquei";
 }
 
 /* one raw firehose candidate */

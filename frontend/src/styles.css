@@ -228,3 +228,34 @@ tr:last-child td { border-bottom: none; }
 .raw-status { background: #f3f4f6; color: #374151; }
 .raw-original { font-size: 12px; color: #15803d; margin-top: 6px; }
 .hidden-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; color: var(--muted); font-size: 13px; }
+
+/* "Já me cadastrei" inline confirmation row */
+.applied-row { display: flex; align-items: center; gap: 10px; padding: 12px 14px; font-size: 13px;
+  color: #15803d; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px; margin: 6px 0; }
+
+/* Success / "kill this opportunity" button */
+.btn.ok { color: #15803d; border-color: #bbf7d0; background: #f0fdf4; font-weight: 600; }
+.btn.ok:hover { background: #dcfce7; }
+
+/* Applications board cards */
+.appcard { display: grid; grid-template-columns: 38px 1fr 56px 130px; gap: 14px; align-items: center;
+  padding: 14px; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 10px;
+  background: var(--card); transition: box-shadow .15s ease, transform .15s ease; }
+.appcard:hover { box-shadow: 0 6px 20px rgba(16,16,29,.07); transform: translateY(-1px); }
+.appcard .title { font-size: 14px; font-weight: 600; }
+.appcard-meta { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 4px; font-size: 12px; }
+.app-co { font-weight: 600; color: #374151; }
+.app-tag { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; padding: 1px 8px; border-radius: 999px; font-weight: 600; }
+.ring.sm { width: 38px; height: 38px; border-width: 2px; font-size: 13px; }
+
+/* ---- visual polish ---- */
+.stat, .panel { box-shadow: 0 1px 2px rgba(16,16,29,.04); }
+.stat { transition: box-shadow .15s ease, transform .15s ease; }
+.stat:hover { box-shadow: 0 8px 24px rgba(16,16,29,.07); transform: translateY(-2px); }
+.brand .mark { background: linear-gradient(135deg, #6366f1, #4f46e5); box-shadow: 0 2px 8px rgba(79,70,229,.35); }
+.tab { transition: background .15s ease, color .15s ease, border-color .15s ease; }
+.oppcard { transition: background .15s ease; }
+.oppcard:hover { background: #fcfcff; }
+.btn { transition: background .15s ease, border-color .15s ease; }
+.toast { box-shadow: 0 10px 30px rgba(16,16,29,.25); animation: toast-in .2s ease; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }

@@ -131,8 +131,12 @@ public static class DashboardEndpoints
                 .ToListAsync(ct);
             var fbByJob = feedback.GroupBy(f => f.JobPostingId!.Value)
                 .ToDictionary(g => g.Key, g => g.Select(f => f.Type).ToList());
+            // Hidden from the main board: irrelevant/hide-similar AND "já me cadastrei/apliquei"
+            // (Applied/ContactedRecruiter) — those move to the Applications board so the user can
+            // keep killing opportunities they've already acted on.
             var hidden = fbByJob
-                .Where(kv => kv.Value.Any(t => t == UserFeedbackType.Irrelevant || t == UserFeedbackType.HideSimilar))
+                .Where(kv => kv.Value.Any(t => t is UserFeedbackType.Irrelevant or UserFeedbackType.HideSimilar
+                    or UserFeedbackType.Applied or UserFeedbackType.ContactedRecruiter))
                 .Select(kv => kv.Key).ToHashSet();
             filtered = filtered.Where(m => !hidden.Contains(m.JobPostingId)).ToList();
 
@@ -188,6 +192,59 @@ public static class DashboardEndpoints
                     job.RequiresManualValidation, job.RealCompanyName, job.SourceName);
             });
             return Results.Ok(result);
+        }).WithTags("Matches");
+
+        // Applications board: opportunities the user already acted on ("já me cadastrei"/apliquei
+        // or contatei recrutador). These leave the main board (above) and live here so the user
+        // can track what's already been handled. Ordered by when it was marked (most recent first).
+        app.MapGet("/api/applications", async (OpportunityOsDbContext db, CancellationToken ct) =>
+        {
+            var appliedTypes = new[] { UserFeedbackType.Applied, UserFeedbackType.ContactedRecruiter };
+            var fb = await db.UserFeedbacks
+                .Where(f => f.JobPostingId != null && appliedTypes.Contains(f.Type))
+                .ToListAsync(ct);
+            if (fb.Count == 0) return Results.Ok(Array.Empty<ApplicationResponse>());
+
+            // Most recent action per job (and its type, for the label).
+            var byJob = fb.GroupBy(f => f.JobPostingId!.Value)
+                .Select(g => g.OrderByDescending(f => f.CreatedAtUtc).First())
+                .ToList();
+            var jobIds = byJob.Select(f => f.JobPostingId!.Value).ToList();
+
+            var jobs = await db.JobPostings.Where(j => jobIds.Contains(j.Id)).ToDictionaryAsync(j => j.Id, ct);
+            var companyIds = jobs.Values.Select(j => j.CompanyId).Distinct().ToList();
+            var companies = await db.Companies.Where(c => companyIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
+            var matches = await db.OpportunityMatches.Where(m => jobIds.Contains(m.JobPostingId)).ToListAsync(ct);
+            var scoreByJob = matches.GroupBy(m => m.JobPostingId)
+                .ToDictionary(g => g.Key, g => g.Max(m => m.OverallScore));
+
+            var result = byJob
+                .Where(f => jobs.ContainsKey(f.JobPostingId!.Value))
+                .OrderByDescending(f => f.CreatedAtUtc)
+                .Select(f =>
+                {
+                    var job = jobs[f.JobPostingId!.Value];
+                    companies.TryGetValue(job.CompanyId, out var c);
+                    return new ApplicationResponse(
+                        job.Id, job.Title, c?.Name ?? job.RealCompanyName ?? "(empresa)", job.AbsoluteUrl,
+                        c?.WebsiteUrl, scoreByJob.GetValueOrDefault(job.Id), f.Type.ToString(),
+                        f.CreatedAtUtc, job.EffectiveDateUtc);
+                })
+                .ToList();
+            return Results.Ok(result);
+        }).WithTags("Matches");
+
+        // Undo: move an application back to the main board by removing its Applied/ContactedRecruiter feedback.
+        app.MapDelete("/api/applications/{jobId:guid}", async (Guid jobId, OpportunityOsDbContext db, CancellationToken ct) =>
+        {
+            var appliedTypes = new[] { UserFeedbackType.Applied, UserFeedbackType.ContactedRecruiter };
+            var toRemove = await db.UserFeedbacks
+                .Where(f => f.JobPostingId == jobId && appliedTypes.Contains(f.Type))
+                .ToListAsync(ct);
+            if (toRemove.Count == 0) return Results.NotFound();
+            db.UserFeedbacks.RemoveRange(toRemove);
+            await db.SaveChangesAsync(ct);
+            return Results.NoContent();
         }).WithTags("Matches");
 
         // Recent execution runs (audit feed).
