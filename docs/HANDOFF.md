@@ -40,7 +40,7 @@ Sistema pessoal de **inteligência de oportunidades de emprego** para um candida
 
 **Tech:** .NET 10 · EF Core 10 + **PostgreSQL 18** (Docker) · Minimal API + OpenAPI ·
 Hangfire (storage PostgreSQL) · Microsoft.Playwright 1.49 (Chromium headless) ·
-React + Vite + TypeScript (frontend) · xUnit (88 testes).
+React + Vite + TypeScript (frontend) · xUnit (136 testes).
 
 **Portas/processos:** API em `http://localhost:5077` · Worker é processo separado ·
 frontend Vite em `:5173` com **proxy `/api` → `:5077`** (não há CORS no servidor).
@@ -56,7 +56,7 @@ Todas com `Id` Guid e setters privados (encapsulamento). Tabelas snake_case; lis
 | Entidade | Tabela | Núcleo | Métodos de domínio |
 |---|---|---|---|
 | `CandidateProfile` | candidate_profiles | FullName, Headline, Summary, Location, Seniority, PreferredLanguage, CoreSkills, SecondarySkills, Domains, PreferredRoles/ContractTypes/Locations, Experiences (jsonb) | `Update(...)` |
-| `Company` | companies | Name, WebsiteUrl, CareersUrl, LinkedInUrl, Industry, Country, Priority, Source, Tags | `Update`, `MarkScanned`, `SetCareersUrl`, `SetWebsiteUrl`, `AddTag` |
+| `Company` | companies | Name, WebsiteUrl, CareersUrl, LinkedInUrl, Industry, Country, Priority, Source, Tags | `Update`, `MarkScanned`, `SetCareersUrl`, `SetWebsiteUrl`, `AddTag`, `RaisePriorityTo` (sobe sem rebaixar), `MarkSourceOnly` (rebaixa denylist a Low + source-only/noisy-source/do-not-promote) |
 | `JobPosting` | job_postings | CompanyId, ExternalId, **SourceProvider**, Title, Location, WorkMode, Seniority, Language, AbsoluteUrl, DescriptionText/Html, ExtractedSkills/Domains, **Status**, PublishedAtUtc, CreatedAtUtc, UpdatedAtUtc | `RefreshFromSource`, `ApplyNormalization`, `MarkAnalyzed`, `Archive`, `MarkExpired` |
 | `OpportunityMatch` | opportunity_matches | JobPostingId, CandidateProfileId, OverallScore + 5 subscores, Recommendation, Strengths/Risks/MissingRequirements, **Rationale** | (imutável após criação) |
 | `Opportunity` | opportunities | JobPostingId (único), RecruiterLeadId?, **Status**, NextFollowUpAtUtc, Notes | `AdvanceTo`, `SetStatusManually`, `SetNotes`, `SetFollowUp`, `LinkRecruiter`, `Create` |
@@ -176,6 +176,22 @@ Gate: **outreach exige score ≥60** (`MinScoreForOutreach`).
 1. **Import** → grava em `BacenInstitution` (staging cru).
 2. **Promote** → cria/atualiza `Company` só para instituições elegíveis (autorizadas, tipo IP/Banco/SCD/SCFI), com prioridade calculada e tags. **Não busca vagas** — só monta o radar.
 
+### 9.1 Seed manual de empresas observadas (`ObservedCompaniesSeed`)
+
+Seed **interno** (não é feature/tela/entidade nova; em `Infrastructure/Persistence`) que injeta empresas
+observadas manualmente (LinkedIn etc.) no radar `Company` para o fluxo atual alcançá-las. Disparo:
+`POST /api/companies/seed-observed`. Características:
+- **Classificado**: financeiro (Strategic/High), consultoria/staffing (High/Medium), produto (High/Medium),
+  marketplace (Medium, `noisy-source`), low/validar (`needs-validation`). Tags globais `manual-radar-seed`/`observed-linkedin`.
+- **Idempotente**: dedup por nome normalizado (ignora Inc./Ltd/LTDA/S.A./Oficial/Brasil), **não duplica**,
+  **não sobrescreve** WebsiteUrl/CareersUrl, só mescla tags e **eleva** prioridade (`RaisePriorityTo`).
+- Marca `needs-website-discovery`/`needs-ats-detection` quando faltam; registra `ExecutionRun`.
+- **Denylist**: job boards/agregadores (Indeed, Glassdoor, SimplyHired, Remotejobs, Jobbol, LinkedIn Jobs,
+  Code Vagas, JobJá, Dev Life, Netvagas, Vagas PJ) e perfis pessoais **nunca** viram Company; se já existirem,
+  são rebaixados via `MarkSourceOnly()`. **Sem LinkedIn**: não acessa/raspa/loga, não importa vagas.
+- Cadeia recomendada depois do seed: `backfill-websites`/`{id}/discover-website` → `{id}/detect-ats`/`onboard`
+  → `POST /api/jobs/discover` (o `GenericCareersCrawler` roda em qualquer empresa **com site**, achando a página de carreiras).
+
 ---
 
 ## 10. Endpoints da API (todos)
@@ -184,7 +200,7 @@ Gate: **outreach exige score ≥60** (`MinScoreForOutreach`).
 
 **CandidateProfile** `/api/candidate-profile`: `GET /` · `GET /{id}` · `POST /` · `PUT /{id}`
 
-**Companies** `/api/companies`: `GET /` · `GET /{id}` · `POST /` · `PUT /{id}` · `DELETE /{id}` · `POST /{id}/detect-ats` · `POST /onboard` · `POST /backfill-websites` · `POST /{id}/discover-website` · `POST /import-csv`
+**Companies** `/api/companies`: `GET /` · `GET /{id}` · `POST /` · `PUT /{id}` · `DELETE /{id}` · `POST /{id}/detect-ats` · `POST /onboard` · `POST /backfill-websites` · `POST /{id}/discover-website` · `POST /import-csv` · `POST /seed-observed` (seed manual interno, ver §9.1)
 
 **Jobs** `/api/jobs`: `GET /` · `GET /{id}` · `POST /discover` · `POST /search` · `POST /{id}/match` · `GET /{id}/match` · `POST /validate-links` · `POST /{id}/archive`
 
@@ -201,8 +217,15 @@ Gate: **outreach exige score ≥60** (`MinScoreForOutreach`).
 **Dashboard** (consumidos pela tela): 
 - `GET /api/dashboard/summary` — cards (vagas, fortes 75+, mensagens, follow-ups) já com filtro de frescor/ativo.
 - `GET /api/matches?minScore=&take=&freshDays=&maxAgeDays=` — **o feed**. Último match por job; só ativos/frescos; ordenado por **score + bônus de frescor**; descarta publicadas há > `maxAgeDays` (default 120). Defaults: minScore 60, freshDays 45.
+- `GET /api/applications` — **mural de aplicações**: oportunidades já marcadas como "já me cadastrei"/apliquei
+  ou contatei recrutador (feedback `Applied`/`ContactedRecruiter`). Ordenado pela data da marcação. Essas vagas
+  **saem do `/api/matches`** (mural principal) para o usuário ir "matando" o que já tratou.
+- `DELETE /api/applications/{jobId}` — **desfazer**: remove o feedback Applied/ContactedRecruiter e a vaga volta ao mural principal.
 - `GET /api/runs?take=` — feed de atividade (ExecutionRuns).
 - `GET /api/messages` — rascunhos gerados.
+
+**Feedback** `/api/feedback`: `POST /` (tipos: Relevant/Irrelevant/HideSimilar/BadCompanyDetection/Applied/ContactedRecruiter/…) · `GET /`.
+Irrelevant/HideSimilar **ocultam** do mural; Applied/ContactedRecruiter **movem** para o mural de aplicações.
 
 ---
 
@@ -222,11 +245,12 @@ Gate: **outreach exige score ≥60** (`MinScoreForOutreach`).
 
 ## 12. Frontend (uma tela viva)
 
-React + Vite + TS em `frontend/`. **Uma única tela** (sem abas-vaidade). Componentes em `App.tsx`:
+React + Vite + TS em `frontend/`. Tela viva com **abas de destino** (não abas-vaidade). Componentes em `App.tsx`:
 - **StatusRail** (esquerda) — marca, indicador "Descoberta contínua" (pulse + última atividade), **atividade do sistema** (ExecutionRuns ao vivo), card do usuário.
 - **Topbar** — saudação.
-- **Feed** — 4 cards de stat; botão **"Buscar agora"** (dispara `/api/jobs/search`); lista de **OppCard**; **paginação de 6 por página** (Anterior/Próxima); auto-refresh a cada **20s**.
-- **OppCard** — logo (Clearbit→favicon→iniciais), título, skills, **"Por que combina"** (rationale), data (`ago()`), score ring, recomendação, **"Ver vaga"**, **"Gerar mensagem"** (expande painel com LinkedIn/assunto/corpo/follow-up + botão **Copiar** em cada), e **"Analisar com IA"** (só quando o rationale é o heurístico seco → chama `/ai/analyze` e troca por prosa + score refinado).
+- **Feed** — 4 cards de stat; **5 abas**: ✨ Pra você hoje (`action`, fit ≥75), 📋 Boas opções (`qualified`, ranqueado), 🔎 Explorar tudo (`firehose`, raw candidates), **✅ Já me cadastrei** (`applied`, mural de aplicações), 🏢 Descobrir mais (`discover`); filtros região/contrato; botão **"Procurar vagas"**; auto-refresh a cada **20s**.
+- **OppCard** — logo (favicon→iniciais), título, skills, **"Por que combina"** (rationale), data, score ring, recomendação, **"Ver vaga"**, **"Gerar mensagem"** (painel inline copiável), **"Analisar com IA"**, feedback rápido (👍/👎/empresa errada/ocultar) e o botão verde **"✓ Já me cadastrei"** — que registra feedback `Applied`, **remove o card do mural** (otimista) e o joga em "Já me cadastrei".
+- **ApplicationsView** (`applied`) — lista as vagas já tratadas (de `GET /api/applications`): empresa, título, rótulo da ação, quando foi marcada, score, **"Ver vaga"** e **"↩ Reabrir"** (chama `DELETE /api/applications/{jobId}` e volta pro mural).
 
 Cliente HTTP em `api.ts` (todas as chamadas via proxy `/api`). Sem estado global além de `reload`.
 
@@ -296,6 +320,8 @@ Cliente HTTP em `api.ts` (todas as chamadas via proxy `/api`). Sem estado global
 │        → painel inline com LinkedIn/e-mail/follow-up, copiável            │
 │        → Opportunity avança até ReadyForHumanReview (teto do sistema)     │
 │   • "Ver vaga"         → abre AbsoluteUrl                                  │
+│   • "✓ Já me cadastrei"→ POST /api/feedback (Applied) → sai do mural e vai │
+│        para "Já me cadastrei" (GET /api/applications). "↩ Reabrir" desfaz. │
 │   • Pipeline/follow-up → PUT /api/opportunities/{id}/status|notes|follow-up│
 │   • Digest             → GET /preview · POST /send (ou Worker diário)      │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -321,7 +347,7 @@ dotnet user-secrets set "Anthropic:ApiKey" "<...>" --project src/OpportunityOS.W
 
 # build + testes
 dotnet build OpportunityOS.slnx -c Debug
-dotnet test tests/OpportunityOS.UnitTests/OpportunityOS.UnitTests.csproj   # 88 testes
+dotnet test tests/OpportunityOS.UnitTests/OpportunityOS.UnitTests.csproj   # 136 testes
 
 # Playwright (uma vez, para crawler SPA)
 pwsh src/OpportunityOS.Worker/bin/Debug/net10.0/playwright.ps1 install chromium

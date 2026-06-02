@@ -14,6 +14,11 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return (res.status === 204 ? (undefined as T) : (res.json() as Promise<T>));
 }
+async function del<T>(path: string): Promise<T> {
+  const res = await fetch(`/api${path}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return (res.status === 204 ? (undefined as T) : (res.json() as Promise<T>));
+}
 
 export interface Company {
   id: string; name: string; priority: string; source: string;
@@ -95,6 +100,11 @@ export interface FirehoseRun {
   executionRunId: string; status: string; queriesExecuted: number; resultsCount: number;
   newCandidates: number; duplicates: number; errors: number;
 }
+export interface Application {
+  jobPostingId: string; jobTitle: string; companyName: string; jobUrl: string;
+  companyWebsiteUrl?: string | null; overallScore: number; action: string;
+  appliedAtUtc: string; postedAtUtc: string;
+}
 export interface Profile { fullName: string; headline: string; }
 
 export const api = {
@@ -114,6 +124,9 @@ export const api = {
     post<{ found: boolean; originalUrl?: string | null; companyName?: string | null; atsProvider?: string | null; confidence: number; reason?: string | null }>(`/discovery/raw-candidates/${id}/resolve-original`),
   feedback: (type: string, body: { jobPostingId?: string; rawJobCandidateId?: string; reason?: string }) =>
     post(`/feedback`, { type, ...body }),
+  // Applications board: opportunities already acted on ("já me cadastrei").
+  applications: () => get<Application[]>("/applications"),
+  unapply: (jobId: string) => del<void>(`/applications/${jobId}`),
   // Descobrir mais (B3): bancos/fintechs, consultorias, buscas salvas.
   bacenPreview: (minimumPriority = "High") =>
     get<BacenPreview>(`/discovery/bacen-financial-sweep/preview?minimumPriority=${minimumPriority}&maxCompanies=100&maxQueriesPerCompany=8`),
