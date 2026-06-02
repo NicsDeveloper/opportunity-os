@@ -266,7 +266,7 @@ function OppCard({ o, notify, onChanged }: {
   );
 
   return (
-    <div className={"card oppcard" + (src.weak ? " weak" : "") + (leaving ? " leaving" : "")}>
+    <div className={"card oppcard" + (src.weak ? " weak" : "") + (leaving ? " leaving" : "") + (menu ? " menu-open" : "")}>
       <button className="card-x" title="Remover do mural" onClick={() => act("HideSimilar", "hidden", "removida")}>
         <Icon name="close" size={13} />
       </button>
@@ -293,20 +293,20 @@ function OppCard({ o, notify, onChanged }: {
           <p className="reason">{friendlyReason(o, score)}</p>
         </div>
 
-        {/* col 3 — score */}
-        <div className="c-score">
-          <div className={"ring " + ringTone(score)}>{score}</div>
-          <div className="score-word">{scoreWord(score)}</div>
-          <div className="conf">{confidenceText(o.sourceConfidenceScore, src.weak)}</div>
-        </div>
-
-        {/* col 4 — actions */}
+        {/* col 3 — actions (revealed on hover, in the score's old spot) */}
         <div className="c-actions">
           <a className="btn primary xs" href={o.jobUrl} target="_blank" rel="noreferrer">Ver vaga</a>
           <div className="act2">
             <button className="btn xs" disabled={busy} onClick={openDraft}>{busy ? "…" : draft ? "Ocultar" : "Rascunho"}</button>
             <button className="btn xs ok" onClick={() => act("Applied", "applied", "feito")}>Feito</button>
           </div>
+        </div>
+
+        {/* col 4 — score (right) */}
+        <div className="c-score">
+          <div className={"ring " + ringTone(score)}>{score}</div>
+          <div className="score-word">{scoreWord(score)}</div>
+          <div className="conf">{confidenceText(o.sourceConfidenceScore, src.weak)}</div>
         </div>
 
         {/* col 5 — secondary actions */}
