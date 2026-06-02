@@ -46,6 +46,8 @@ const NAV: { key: Section; label: string; icon: string }[] = [
   { key: "oportunidades", label: "Oportunidades", icon: "shield" },
   { key: "empresas", label: "Empresas", icon: "building" },
   { key: "aplicacoes", label: "Aplicações", icon: "check" },
+];
+const SYS_NAV: { key: Section; label: string; icon: string }[] = [
   { key: "descobertas", label: "Descobertas", icon: "search" },
   { key: "relatorios", label: "Relatórios", icon: "chart" },
 ];
@@ -53,10 +55,9 @@ const NAV: { key: Section; label: string; icon: string }[] = [
 function Sidebar({ section, setSection, reload, name, headline }: {
   section: Section; setSection: (s: Section) => void; reload: number; name?: string; headline?: string;
 }) {
-  const runs = useAsync(() => api.runs(10), [reload]);
+  const runs = useAsync(() => api.runs(3), [reload]);
   const summary = useAsync(api.summary, [reload]);
   const last = runs.data?.[0];
-  const points = (runs.data ?? []).map((r) => r.itemsProcessed).reverse();
 
   return (
     <aside className="sidebar">
@@ -76,9 +77,17 @@ function Sidebar({ section, setSection, reload, name, headline }: {
           <span className="radar-t">Radar ativo</span>
         </div>
         <div className="radar-s">Última atualização: {last ? ago(last.startedAtUtc) : "agora"}</div>
-        <div className="radar-n"><b>{summary.data?.jobsToday ?? "—"}</b> novas vagas hoje</div>
-        <Sparkline points={points} />
+        <div className="radar-n"><b>{summary.data?.jobsToday ?? "—"}</b> vagas analisadas hoje</div>
       </div>
+
+      <nav className="nav sys">
+        <div className="nav-label">Sistema</div>
+        {SYS_NAV.map((n) => (
+          <button key={n.key} className={"nav-item small" + (section === n.key ? " active" : "")} onClick={() => setSection(n.key)}>
+            <Icon name={n.icon} size={16} /> {n.label}
+          </button>
+        ))}
+      </nav>
 
       <div className="usercard">
         <span className="avatar lg">{initials(name ?? "NS")}</span>
@@ -89,21 +98,6 @@ function Sidebar({ section, setSection, reload, name, headline }: {
         </div>
       </div>
     </aside>
-  );
-}
-
-function Sparkline({ points }: { points: number[] }) {
-  if (points.length < 2) return <div className="spark empty" />;
-  const max = Math.max(...points, 1);
-  const min = Math.min(...points, 0);
-  const span = Math.max(max - min, 1);
-  const w = 200, h = 44;
-  const step = w / (points.length - 1);
-  const d = points.map((p, i) => `${i === 0 ? "M" : "L"} ${(i * step).toFixed(1)} ${(h - ((p - min) / span) * (h - 8) - 4).toFixed(1)}`).join(" ");
-  return (
-    <svg className="spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
-      <path d={d} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
   );
 }
 
@@ -128,8 +122,10 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
   const opps = useAsync(fetcher, [reload, view, region, contract]);
 
   const last = useAsync(() => api.runs(1), [reload]);
-  const all = (opps.data ?? []).filter((o) =>
-    !query.trim() || `${o.jobTitle} ${o.companyName}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const all = (opps.data ?? [])
+    // "Para você hoje" = só vagas prontas pra ação: sem agregadores/fontes fracas.
+    .filter((o) => view !== "action" || !isWeakSource(o))
+    .filter((o) => !query.trim() || `${o.jobTitle} ${o.companyName}`.toLowerCase().includes(query.trim().toLowerCase()));
   const activeFilters = (region !== "all" ? 1 : 0) + (contract !== "all" ? 1 : 0);
 
   const runSearch = async () => {
@@ -188,7 +184,7 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
         <Seg value={view} onChange={(v) => setView(v as OppView)} options={[
           ["action", "Para você hoje"], ["qualified", "Boas opções"], ["all", "Todas"]]} />
         <button className="btn primary sm" disabled={busy} onClick={runSearch}>
-          {busy ? "Procurando…" : "Procurar vagas"}
+          {busy ? "Buscando…" : "Buscar agora"}
         </button>
       </div>
 
@@ -280,14 +276,14 @@ function OppCard({ o, notify, onChanged }: {
               <span className="dotsep">·</span>
               <span className="time">{ago(o.postedAtUtc)}</span>
             </div>
-            <div className="tags">{o.skills.slice(0, 5).map((s) => <span className="tag" key={s}>{s}</span>)}</div>
+            <div className="tags">{o.skills.slice(0, 4).map((s) => <span className="tag" key={s}>{s}</span>)}</div>
           </div>
         </div>
 
         {/* col 2 — fit reason */}
         <div className="c-reason">
           <div className={"adh " + adh.tone}><span className="adh-dot" /> {adh.label}</div>
-          <p className="reason">{friendlyReason(o, why, isTerse)}</p>
+          <p className="reason">{friendlyReason(o, score)}</p>
         </div>
 
         {/* col 3 — score */}
@@ -299,28 +295,24 @@ function OppCard({ o, notify, onChanged }: {
 
         {/* col 4 — actions */}
         <div className="c-actions">
-          <a className="btn primary" href={o.jobUrl} target="_blank" rel="noreferrer">Ver vaga <Icon name="external" size={14} /></a>
-          <button className="btn" disabled={busy} onClick={openDraft}>
-            <Icon name="edit" size={14} /> {busy ? "Gerando…" : msg ? (draft ? "Ocultar rascunho" : "Ver rascunho") : "Ver rascunho"}
-          </button>
-          <div className="row-mini">
-            <button className="iconbtn sm" title="Detalhes" onClick={() => setOpen((v) => !v)}>
-              <span className={"chev" + (open ? " up" : "")}><Icon name="chevron" size={16} /></span>
-            </button>
-            <div className="menuwrap">
-              <button className="iconbtn sm" title="Mais ações" onClick={() => setMenu((v) => !v)}><Icon name="more" size={16} /></button>
-              {menu && (
-                <>
-                  <div className="menu-scrim" onClick={() => setMenu(false)} />
-                  <div className="menu">
-                    <button onClick={() => act("Applied", "applied", "já me cadastrei")}>✓ Já me cadastrei</button>
-                    <button onClick={() => act("HideSimilar", "hidden", "ocultada")}>🙈 Ocultar</button>
-                    <button onClick={() => act("Irrelevant", "hidden", "irrelevante")}>👎 Marcar irrelevante</button>
-                    <button onClick={() => act("BadCompanyDetection", "hidden", "empresa errada")}>🏢 Empresa errada</button>
-                  </div>
-                </>
-              )}
-            </div>
+          <a className="btn primary xs" href={o.jobUrl} target="_blank" rel="noreferrer">Ver vaga</a>
+          <div className="act2">
+            <button className="btn xs" disabled={busy} onClick={openDraft}>{busy ? "…" : draft ? "Ocultar" : "Rascunho"}</button>
+            <button className="btn xs ok" onClick={() => act("Applied", "applied", "feito")}>Feito</button>
+          </div>
+          <div className="menuwrap">
+            <button className="kebab" title="Mais ações" onClick={() => setMenu((v) => !v)}><Icon name="more" size={15} /></button>
+            {menu && (
+              <>
+                <div className="menu-scrim" onClick={() => setMenu(false)} />
+                <div className="menu">
+                  <button onClick={() => { setMenu(false); setOpen((v) => !v); }}>ℹ️ Ver detalhes</button>
+                  <button onClick={() => act("HideSimilar", "hidden", "ocultada")}>🙈 Ocultar</button>
+                  <button onClick={() => act("Irrelevant", "hidden", "irrelevante")}>👎 Irrelevante</button>
+                  <button onClick={() => act("BadCompanyDetection", "hidden", "empresa errada")}>🏢 Empresa errada</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -607,26 +599,29 @@ function adherence(s: number) {
   return { label: "Vale atenção", tone: "warn" };
 }
 function confidenceText(conf?: number, weak?: boolean) {
-  if (weak) return "Fonte externa";
+  if (weak) return "Encontrada na web";
   if ((conf ?? 0) >= 70) return "Confiança alta";
   if ((conf ?? 0) >= 40) return "Confiança média";
-  return "Fonte externa";
+  return "Encontrada na web";
 }
 function sourceLabel(t?: string): { text: string; cls: string; good?: boolean; weak?: boolean } {
   switch (t) {
     case "OfficialAts":
     case "OfficialCareerPage": return { text: "Site oficial", cls: "good", good: true };
     case "SocialIndexed": return { text: "LinkedIn", cls: "ext" };
-    case "JobBoard": return { text: "Fonte externa", cls: "ext" };
-    case "Aggregator": return { text: "Agregador", cls: "weak", weak: true };
-    default: return { text: "Fonte externa", cls: "ext" };
+    case "JobBoard": return { text: "Encontrada na web", cls: "ext" };
+    case "Aggregator": return { text: "Fonte menos confiável", cls: "weak", weak: true };
+    default: return { text: "Encontrada na web", cls: "ext" };
   }
 }
-function friendlyReason(o: BestOpportunity, why: string, terse: boolean) {
-  if (why && !terse) return why.length > 160 ? why.slice(0, 157) + "…" : why;
-  const sk = o.skills.filter((s) => /\.net|c#|backend|azure|aws|fintech|pagament/i.test(s)).slice(0, 2);
-  const base = sk.length ? sk.join(" e ") : ".NET/C#";
-  return `Forte match com seu perfil em ${base} e backend.`;
+function isWeakSource(o: BestOpportunity) {
+  return o.sourceType === "Aggregator" || (o.sourceConfidenceScore ?? 0) < 40;
+}
+function friendlyReason(o: BestOpportunity, score: number) {
+  const fin = o.skills.some((s) => /fintech|pagament|banc|financ|payments|pix|cr[ée]dito/i.test(s))
+    || /fintech|pagament|financ|banc|cr[ée]dito/i.test(o.jobTitle);
+  const lead = score >= 70 ? "Forte match" : "Boa opção";
+  return `${lead} com .NET/C# e ${fin ? "backend financeiro" : "backend"}.`;
 }
 function actionLabel(a: string) { return a === "ContactedRecruiter" ? "contatei recrutador" : "cadastrei/apliquei"; }
 function priorityLabel(p: string) {
