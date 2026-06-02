@@ -118,7 +118,7 @@ button { font-family: inherit; }
 .card.done.applied { background: var(--good-soft); border-color: #bbf0cd; color: #15803d; }
 .card.done.hidden { background: #f4f4f8; color: var(--muted); }
 
-.card-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.95fr) 76px 150px 30px; gap: 16px; align-items: center; }
+.card-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.95fr) 76px 150px 30px; gap: 16px; align-items: center; min-height: 66px; }
 
 .c-id { display: flex; gap: 12px; align-items: center; min-width: 0; }
 .logo { width: 40px; height: 40px; border-radius: 10px; color: #fff; font-weight: 700; font-size: 14px;
