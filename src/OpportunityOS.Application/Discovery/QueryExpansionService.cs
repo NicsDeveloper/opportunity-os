@@ -48,6 +48,9 @@ public sealed class QueryExpansionService
         // P13 platforms reached via the Firehose (dedicated fetch providers deferred per spec):
         "site:teamtailor.com", "site:recruitee.com", "site:jobs.workable.com",
         "site:breezy.hr", "site:apinfo.com",
+        // ATS brasileiros muito usados por consultorias/fintechs (cauda longa real):
+        "site:quickin.io", "site:solides.com.br", "site:kenoby.com", "site:jobconvo.com",
+        "site:99jobs.com", "site:abler.com.br", "site:pandape.com", "site:inhire.app",
     };
 
     /// <summary>
