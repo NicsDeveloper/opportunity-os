@@ -39,6 +39,24 @@ public sealed class DiscoveryRankTests
     }
 
     [Fact]
+    public void FeedbackBoost_RewardsPositive_PenalizesNegative()
+    {
+        Assert.Equal(50, _svc.FeedbackBoost(System.Array.Empty<UserFeedbackType>())); // neutral
+        Assert.True(_svc.FeedbackBoost(new[] { UserFeedbackType.Relevant, UserFeedbackType.Applied }) > 50);
+        Assert.True(_svc.FeedbackBoost(new[] { UserFeedbackType.Irrelevant }) < 50);
+        Assert.InRange(_svc.FeedbackBoost(new[] { UserFeedbackType.Applied, UserFeedbackType.Relevant, UserFeedbackType.InterestingCompany }), 0, 100);
+    }
+
+    [Fact]
+    public void Feedback_ChangesDiscoveryRank()
+    {
+        var when = DateTime.UtcNow.AddDays(-1);
+        var liked = _svc.ComputeDiscoveryRank(new DiscoveryRankInput(70, 70, when, CompanyPriority.Medium, _svc.FeedbackBoost(new[] { UserFeedbackType.Relevant, UserFeedbackType.Applied })));
+        var disliked = _svc.ComputeDiscoveryRank(new DiscoveryRankInput(70, 70, when, CompanyPriority.Medium, _svc.FeedbackBoost(new[] { UserFeedbackType.Irrelevant })));
+        Assert.True(liked > disliked);
+    }
+
+    [Fact]
     public void FreshRecentRole_CanOutrankOlderHigherFit()
     {
         // Older, slightly higher fit, weak source vs fresh, official source.
