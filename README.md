@@ -372,6 +372,9 @@ Career Page → ATS Detection → Job Discovery).
   agregadores (Indeed/Glassdoor/SimplyHired/Jobgether/…) **não** entram como empresa estratégica;
   a descoberta de site é heurística (acerta a maioria das marcas conhecidas, erra domínios
   atípicos); ATS costuma estar em `/careers`, então quem fecha o ciclo é o crawler no job discovery.
+- **Denylist:** job boards/agregadores (Indeed, Glassdoor, SimplyHired, Remotejobs, Jobbol, LinkedIn Jobs,
+  Code Vagas, JobJá, Dev Life, Netvagas, Vagas PJ) e perfis pessoais/recrutadores **nunca** viram Company
+  contratante. Se já existirem no banco, são rebaixados para `Low` com `source-only`/`noisy-source`/`do-not-promote`.
 - **Regra inviolável:** o sistema **nunca** acessa/raspa/loga no LinkedIn, nem aplica para vagas.
 
 ## AI Copilot Layer (Fase 3)
