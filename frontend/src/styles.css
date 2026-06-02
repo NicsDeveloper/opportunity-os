@@ -196,6 +196,18 @@ tr:last-child td { border-bottom: none; }
   background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; color: var(--muted); }
 .fire-metrics b { color: var(--ink); font-size: 15px; }
 
+/* Descobrir mais */
+.discover-card { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; background: #fcfcfe; }
+.dc-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.dc-head h4 { margin: 0; font-size: 15px; }
+.dc-sub { margin: 3px 0 0; font-size: 13px; color: var(--muted); }
+.dc-list { margin-top: 10px; }
+.dc-item { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 9px 0; border-bottom: 1px solid var(--border); }
+.dc-item:last-child { border-bottom: none; }
+.dc-name { font-size: 14px; font-weight: 600; margin-right: 8px; }
+.dc-signals { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
 /* Raw candidate card */
 .rawcard { display: grid; grid-template-columns: 1fr 120px 130px; gap: 12px; align-items: start;
   padding: 12px 0; border-bottom: 1px solid var(--border); }

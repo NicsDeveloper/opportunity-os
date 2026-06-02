@@ -88,7 +88,7 @@ const SEARCH_KEYWORDS = [
   "programador c# pleno", "vaga .net remoto", "desenvolvedor .net fintech",
 ];
 
-type FeedView = "action" | "qualified" | "firehose";
+type FeedView = "action" | "qualified" | "firehose" | "discover";
 
 function Feed({ reload, notify, onChanged }: {
   reload: number; notify: (m: string) => void; onChanged: () => void;
@@ -133,6 +133,9 @@ function Feed({ reload, notify, onChanged }: {
             <button className={"tab" + (view === "firehose" ? " active" : "")} onClick={() => setView("firehose")}>
               🔎 Explorar tudo
             </button>
+            <button className={"tab" + (view === "discover" ? " active" : "")} onClick={() => setView("discover")}>
+              🏢 Descobrir mais
+            </button>
           </div>
           <button className="btn primary" disabled={busy} onClick={runSearch}>
             <Icon name="search" /> {busy ? "Procurando…" : "Procurar vagas"}
@@ -142,6 +145,7 @@ function Feed({ reload, notify, onChanged }: {
         {view === "action" && <ActionView reload={reload} notify={notify} onChanged={onChanged} />}
         {view === "qualified" && <QualifiedView reload={reload} notify={notify} onChanged={onChanged} />}
         {view === "firehose" && <FirehoseView reload={reload} notify={notify} onChanged={onChanged} />}
+        {view === "discover" && <DiscoverMoreView reload={reload} notify={notify} onChanged={onChanged} />}
       </div>
     </>
   );
@@ -220,6 +224,88 @@ function FirehoseView({ reload, notify, onChanged }: { reload: number; notify: (
           <button className="btn" disabled={current >= pageCount - 1} onClick={() => setPage(current + 1)}>Próxima ›</button>
         </div>
       )}
+    </>
+  );
+}
+
+/* ---------- Descobrir mais: bancos/fintechs, consultorias, buscas salvas ---------- */
+function DiscoverMoreView({ reload, notify, onChanged }: { reload: number; notify: (m: string) => void; onChanged: () => void }) {
+  const preview = useAsync(() => api.bacenPreview("High"), [reload]);
+  const candidates = useAsync(() => api.consultingCandidates(40), [reload]);
+  const campaigns = useAsync(api.campaigns, [reload]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const p = preview.data;
+
+  const run = async (key: string, label: string, fn: () => Promise<unknown>) => {
+    setBusy(key); notify(`${label}…`);
+    try { await fn(); notify(`${label}: pronto! Os resultados aparecem em “Explorar tudo”.`); onChanged(); }
+    catch { notify(`Não foi possível: ${label}.`); }
+    finally { setBusy(null); }
+  };
+
+  const promote = async (id: string, name: string) => {
+    try { const r = await api.promoteConsulting(id); notify(r.promoted ? `Empresa salva: ${name}` : "Confiança baixa pra salvar ainda."); onChanged(); }
+    catch { notify("Não foi possível salvar a empresa."); }
+  };
+
+  return (
+    <>
+      <p className="sub" style={{ marginTop: 0 }}>Amplie a busca em fontes que combinam com você. Os resultados caem em “Explorar tudo”.</p>
+
+      <div className="discover-card">
+        <div className="dc-head">
+          <div><h4>🏦 Bancos e fintechs</h4>
+            <p className="dc-sub">{p ? `${p.companies} instituições financeiras no radar (${p.strategic} estratégicas, ${p.high} prioritárias).` : "Carregando…"}</p>
+          </div>
+          <button className="btn primary" disabled={busy !== null} onClick={() => run("bacen", "Procurando em bancos e fintechs", api.runBacenSweep)}>
+            {busy === "bacen" ? "Procurando…" : "Procurar vagas nelas"}
+          </button>
+        </div>
+      </div>
+
+      <div className="discover-card">
+        <div className="dc-head">
+          <div><h4>🧩 Consultorias de tecnologia</h4>
+            <p className="dc-sub">Empresas que vivem de contratar dev .NET/C#. Procure novas e salve as que interessarem.</p>
+          </div>
+          <button className="btn primary" disabled={busy !== null} onClick={() => run("consulting", "Procurando consultorias", api.runConsultingDiscover)}>
+            {busy === "consulting" ? "Procurando…" : "Procurar consultorias"}
+          </button>
+        </div>
+        <div className="dc-list">
+          {(candidates.data ?? []).slice(0, 8).map((c) => (
+            <div className="dc-item" key={c.id}>
+              <div>
+                <span className="dc-name">{c.name}</span>
+                {c.consultingConfidenceScore >= 70 && <span className="src-pill src-official">✓ boa aposta</span>}
+                <div className="dc-signals">{c.signals.slice(0, 3).join(" · ")}</div>
+              </div>
+              {c.status === "PromotedToCompany"
+                ? <span className="fb-done">✓ salva</span>
+                : <button className="btn" disabled={c.consultingConfidenceScore < 70}
+                    title={c.consultingConfidenceScore >= 70 ? "Adicionar às empresas" : "Confiança ainda baixa"}
+                    onClick={() => promote(c.id, c.name)}>Salvar empresa</button>}
+            </div>
+          ))}
+          {candidates.data?.length === 0 && <p className="placeholder small">Nenhuma consultoria ainda. Toque em “Procurar consultorias”.</p>}
+        </div>
+      </div>
+
+      <div className="discover-card">
+        <div className="dc-head"><div><h4>🔁 Buscas salvas</h4>
+          <p className="dc-sub">Conjuntos de busca prontos. Rode quando quiser ampliar.</p></div></div>
+        <div className="dc-list">
+          {(campaigns.data ?? []).map((c) => (
+            <div className="dc-item" key={c.id}>
+              <div><span className="dc-name">{c.name}</span><div className="dc-signals">{c.description}</div></div>
+              <button className="btn" disabled={busy !== null} onClick={() => run("camp-" + c.id, `Rodando “${c.name}”`, () => api.runCampaign(c.id))}>
+                {busy === "camp-" + c.id ? "Rodando…" : "Rodar"}
+              </button>
+            </div>
+          ))}
+          {campaigns.data?.length === 0 && <p className="placeholder small">Sem buscas salvas.</p>}
+        </div>
+      </div>
     </>
   );
 }
