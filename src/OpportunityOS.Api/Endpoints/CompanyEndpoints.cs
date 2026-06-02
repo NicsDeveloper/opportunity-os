@@ -14,6 +14,11 @@ public static class CompanyEndpoints
     {
         var group = app.MapGroup("/api/companies").WithTags("Companies");
 
+        // Internal dev command: seed companies observed manually on LinkedIn into the radar
+        // (no new feature/entity; reuses Company + the existing discovery flow). Idempotent.
+        group.MapPost("/seed-observed", async (OpportunityOsDbContext db, CancellationToken ct) =>
+            Results.Ok(await ObservedCompaniesSeed.RunAsync(db, ct)));
+
         // Strategic companies first (the spec wants them scanned first).
         group.MapGet("/", async (OpportunityOsDbContext db, CancellationToken ct) =>
         {

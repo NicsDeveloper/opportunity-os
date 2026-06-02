@@ -350,6 +350,30 @@ O Worker mantém o Firehose se enchendo sozinho (B1), tudo budget-guarded:
 
 Quando o budget diário esgota, a varredura para com `CompletedWithBudgetLimit` — nunca estoura a cota.
 
+## Empresas observadas no LinkedIn (seed interno do radar)
+
+**Objetivo:** aumentar a cobertura do radar com empresas que o usuário **observou manualmente**
+no LinkedIn (consultorias, fintechs, marketplaces remotos, software houses). **Não é integração
+com LinkedIn, não é feature de usuário, não é lista de candidaturas** — é só um seed interno que
+alimenta a entidade `Company` existente para o fluxo atual alcançar (Company → Website Discovery →
+Career Page → ATS Detection → Job Discovery).
+
+- **`ObservedCompaniesSeed`** (Infrastructure) — lista classificada (financeira/consultoria/
+  marketplace/produto) com prioridade e tags. Idempotente: **não duplica** (dedup por nome
+  normalizado, ignorando sufixos Inc./Ltd/LTDA/S.A./Oficial/Brasil), **não sobrescreve**
+  WebsiteUrl/CareersUrl já preenchidos, só **mescla tags** e **eleva** prioridade (nunca rebaixa).
+  Marca `needs-website-discovery`/`needs-ats-detection` quando faltam. Tags globais:
+  `observed-linkedin`, `manual-radar-seed`. Registra `ExecutionRun` (`ObservedCompaniesSeed`).
+- **Como rodar:** `POST /api/companies/seed-observed` (comando dev interno; retorna o resumo).
+  Depois, o fluxo existente descobre site/ATS: `POST /api/companies/backfill-websites`,
+  `POST /api/companies/{id}/discover-website`, `POST /api/companies/{id}/detect-ats`,
+  `POST /api/companies/onboard`, e então o Job Discovery busca vagas nessas empresas.
+- **Limitações honestas:** o seed só prepara o radar — não busca vagas na mesma transação;
+  agregadores (Indeed/Glassdoor/SimplyHired/Jobgether/…) **não** entram como empresa estratégica;
+  a descoberta de site é heurística (acerta a maioria das marcas conhecidas, erra domínios
+  atípicos); ATS costuma estar em `/careers`, então quem fecha o ciclo é o crawler no job discovery.
+- **Regra inviolável:** o sistema **nunca** acessa/raspa/loga no LinkedIn, nem aplica para vagas.
+
 ## AI Copilot Layer (Fase 3)
 
 Camada explícita de IA que **interpreta, analisa e redige** — mantendo ações externas
