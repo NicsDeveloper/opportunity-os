@@ -103,7 +103,7 @@ function Sidebar({ section, setSection, reload, name, headline }: {
 
 /* ====================== Oportunidades (main) ====================== */
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 6;
 
 function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
   reload: number; notify: (m: string) => void; onChanged: () => void; firstName: string;
@@ -294,21 +294,23 @@ function OppCard({ o, notify, onChanged }: {
           <div className="act2">
             <button className="btn xs" disabled={busy} onClick={openDraft}>{busy ? "…" : draft ? "Ocultar" : "Rascunho"}</button>
             <button className="btn xs ok" onClick={() => act("Applied", "applied", "feito")}>Feito</button>
-            <div className="menuwrap">
-              <button className="kebab" title="Mais ações" onClick={() => setMenu((v) => !v)}><Icon name="more" size={16} /></button>
-              {menu && (
-                <>
-                  <div className="menu-scrim" onClick={() => setMenu(false)} />
-                  <div className="menu">
-                    <button onClick={() => { setMenu(false); setOpen((v) => !v); }}>ℹ️ Ver detalhes</button>
-                    <button onClick={() => act("HideSimilar", "hidden", "ocultada")}>🙈 Ocultar</button>
-                    <button onClick={() => act("Irrelevant", "hidden", "irrelevante")}>👎 Irrelevante</button>
-                    <button onClick={() => act("BadCompanyDetection", "hidden", "empresa errada")}>🏢 Empresa errada</button>
-                  </div>
-                </>
-              )}
-            </div>
           </div>
+        </div>
+
+        {/* col 5 — secondary actions */}
+        <div className="c-more menuwrap">
+          <button className="kebab" title="Mais ações" onClick={() => setMenu((v) => !v)}><Icon name="more" size={16} /></button>
+          {menu && (
+            <>
+              <div className="menu-scrim" onClick={() => setMenu(false)} />
+              <div className="menu">
+                <button onClick={() => { setMenu(false); setOpen((v) => !v); }}>ℹ️ Ver detalhes</button>
+                <button onClick={() => act("HideSimilar", "hidden", "ocultada")}>🙈 Ocultar</button>
+                <button onClick={() => act("Irrelevant", "hidden", "irrelevante")}>👎 Irrelevante</button>
+                <button onClick={() => act("BadCompanyDetection", "hidden", "empresa errada")}>🏢 Empresa errada</button>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
