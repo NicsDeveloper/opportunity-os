@@ -117,6 +117,8 @@ export const api = {
     get<BestOpportunity[]>(`/matches?take=10&minScore=75&region=${region}&contract=${contract}`),
   qualified: (take = 120, region = "all", contract = "all") =>
     get<BestOpportunity[]>(`/matches?take=${take}&minScore=60&sort=rank&region=${region}&contract=${contract}`),
+  allOpportunities: (take = 80, region = "all", contract = "all") =>
+    get<BestOpportunity[]>(`/matches?take=${take}&minScore=45&sort=rank&region=${region}&contract=${contract}`),
   rawCandidates: (take = 150) => get<RawCandidate[]>(`/discovery/raw-candidates?take=${take}`),
   discoveryMetrics: () => get<DiscoveryMetrics>(`/discovery/metrics`),
   promoteRaw: (id: string) => post<PromotionResult>(`/discovery/raw-candidates/${id}/promote`),

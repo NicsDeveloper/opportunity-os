@@ -1,31 +1,38 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "./icons";
 import {
-  api, type Application, type BestOpportunity, type GeneratedMessage, type RawCandidate, type Run,
+  api, type Application, type BestOpportunity, type Company,
+  type GeneratedMessage, type Summary,
 } from "./api";
+
+type Section = "oportunidades" | "empresas" | "aplicacoes" | "descobertas" | "relatorios";
 
 export function App() {
   const [reload, setReload] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
+  const [section, setSection] = useState<Section>("oportunidades");
   const profile = useAsync(api.profile, []);
-  const firstName = (profile.data?.fullName ?? "").trim().split(" ")[0] || "candidato";
 
   const notify = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3500); };
   const refresh = () => setReload((r) => r + 1);
 
-  // Keep the screen fresh while the system discovers in the background ("ao vivo").
+  // Keep the screen fresh while the system works in the background.
   useEffect(() => {
-    const id = setInterval(() => setReload((r) => r + 1), 20000);
+    const id = setInterval(() => setReload((r) => r + 1), 25000);
     return () => clearInterval(id);
   }, []);
 
   return (
     <div className="layout">
-      <StatusRail reload={reload} name={profile.data?.fullName} headline={profile.data?.headline} />
+      <Sidebar section={section} setSection={setSection} reload={reload}
+        name={profile.data?.fullName} headline={profile.data?.headline} />
       <main className="main">
         <div className="main-inner">
-          <Topbar firstName={firstName} />
-          <Feed reload={reload} notify={notify} onChanged={refresh} />
+          {section === "oportunidades" && <OpportunitiesScreen reload={reload} notify={notify} onChanged={refresh} firstName={firstNameOf(profile.data?.fullName)} />}
+          {section === "empresas" && <CompaniesScreen reload={reload} notify={notify} onChanged={refresh} />}
+          {section === "aplicacoes" && <ApplicationsScreen reload={reload} notify={notify} onChanged={refresh} />}
+          {section === "descobertas" && <DiscoverScreen reload={reload} notify={notify} onChanged={refresh} />}
+          {section === "relatorios" && <ReportsScreen reload={reload} />}
         </div>
       </main>
       {toast && <div className="toast">{toast}</div>}
@@ -33,231 +40,376 @@ export function App() {
   );
 }
 
-/* ---------- left status rail (system "ao vivo") ---------- */
+/* ============================ sidebar ============================ */
 
-function StatusRail({ reload, name, headline }: { reload: number; name?: string; headline?: string }) {
-  const runs = useAsync(() => api.runs(6), [reload]);
+const NAV: { key: Section; label: string; icon: string }[] = [
+  { key: "oportunidades", label: "Oportunidades", icon: "shield" },
+  { key: "empresas", label: "Empresas", icon: "building" },
+  { key: "aplicacoes", label: "Aplicações", icon: "check" },
+  { key: "descobertas", label: "Descobertas", icon: "search" },
+  { key: "relatorios", label: "Relatórios", icon: "chart" },
+];
+
+function Sidebar({ section, setSection, reload, name, headline }: {
+  section: Section; setSection: (s: Section) => void; reload: number; name?: string; headline?: string;
+}) {
+  const runs = useAsync(() => api.runs(10), [reload]);
+  const summary = useAsync(api.summary, [reload]);
   const last = runs.data?.[0];
+  const points = (runs.data ?? []).map((r) => r.itemsProcessed).reverse();
+
   return (
     <aside className="sidebar">
       <div className="brand"><span className="mark">◎</span> Opportunity OS</div>
 
-      <div className="live">
-        <span className="pulse" />
-        <div>
-          <div className="live-t">Buscando vagas pra você</div>
-          <div className="live-s">
-            {last ? `Atualizado ${ago(last.startedAtUtc)}` : "Começando a procurar…"}
-          </div>
-        </div>
-      </div>
+      <nav className="nav">
+        {NAV.map((n) => (
+          <button key={n.key} className={"nav-item" + (section === n.key ? " active" : "")} onClick={() => setSection(n.key)}>
+            <Icon name={n.icon} size={18} /> {n.label}
+          </button>
+        ))}
+      </nav>
 
-      <div className="nav-label">O que rolou por aqui</div>
-      <div className="rail-runs">
-        {(runs.data ?? []).map((r) => <RunRow key={r.id} r={r} />)}
-        {runs.data?.length === 0 && <p className="placeholder small">Ainda nada por aqui.</p>}
+      <div className="radar">
+        <div className="radar-top">
+          <span className="pulse" />
+          <span className="radar-t">Radar ativo</span>
+        </div>
+        <div className="radar-s">Última atualização: {last ? ago(last.startedAtUtc) : "agora"}</div>
+        <div className="radar-n"><b>{summary.data?.jobsToday ?? "—"}</b> novas vagas hoje</div>
+        <Sparkline points={points} />
       </div>
 
       <div className="usercard">
-        <span className="avatar">{initials(name ?? "NS")}</span>
-        <div><div className="nm">{name ?? "—"}</div><div className="rl">{headline ?? ""}</div></div>
+        <span className="avatar lg">{initials(name ?? "NS")}</span>
+        <div className="uc-body">
+          <div className="nm">{name ?? "—"}</div>
+          <div className="rl">{headline ?? "Backend Engineer .NET"}</div>
+          <button className="link-btn">Editar perfil ›</button>
+        </div>
       </div>
     </aside>
   );
 }
 
-function Topbar({ firstName }: { firstName: string }) {
+function Sparkline({ points }: { points: number[] }) {
+  if (points.length < 2) return <div className="spark empty" />;
+  const max = Math.max(...points, 1);
+  const min = Math.min(...points, 0);
+  const span = Math.max(max - min, 1);
+  const w = 200, h = 44;
+  const step = w / (points.length - 1);
+  const d = points.map((p, i) => `${i === 0 ? "M" : "L"} ${(i * step).toFixed(1)} ${(h - ((p - min) / span) * (h - 8) - 4).toFixed(1)}`).join(" ");
   return (
-    <div className="topbar">
-      <div className="greeting">
-        <h2>{greeting()}, {firstName}! 👋</h2>
-        <p>Suas oportunidades .NET mais relevantes e recentes, atualizadas ao vivo.</p>
+    <svg className="spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+      <path d={d} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/* ====================== Oportunidades (main) ====================== */
+
+type OppView = "action" | "qualified" | "all";
+
+function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
+  reload: number; notify: (m: string) => void; onChanged: () => void; firstName: string;
+}) {
+  const [view, setView] = useState<OppView>("action");
+  const [region, setRegion] = useState("all");
+  const [contract, setContract] = useState("all");
+  const [showFilters, setShowFilters] = useState(false);
+  const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const fetcher =
+    view === "action" ? () => api.actionToday(region, contract)
+    : view === "qualified" ? () => api.qualified(60, region, contract)
+    : () => api.allOpportunities(80, region, contract);
+  const opps = useAsync(fetcher, [reload, view, region, contract]);
+
+  const last = useAsync(() => api.runs(1), [reload]);
+  const all = (opps.data ?? []).filter((o) =>
+    !query.trim() || `${o.jobTitle} ${o.companyName}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const activeFilters = (region !== "all" ? 1 : 0) + (contract !== "all" ? 1 : 0);
+
+  const runSearch = async () => {
+    setBusy(true); notify("Procurando novas vagas .NET…");
+    try { await api.search([
+      "desenvolvedor .net", "desenvolvedor backend c#", "engenheiro de software .net",
+      "vaga .net remoto", "desenvolvedor .net fintech",
+    ]); notify("Busca disparada — os resultados chegam aqui em instantes."); onChanged(); }
+    catch { notify("Não foi possível buscar agora."); }
+    finally { setBusy(false); }
+  };
+
+  const heading = view === "action" ? "Para você hoje" : view === "qualified" ? "Boas opções" : "Todas as oportunidades";
+  const subtext = view === "action"
+    ? "As melhores oportunidades com alta aderência ao seu perfil."
+    : view === "qualified" ? "Vagas selecionadas que valem a pena conferir."
+    : "Tudo que encontramos recentemente, ordenado pela relevância pra você.";
+
+  return (
+    <>
+      <header className="hdr">
+        <div>
+          <h1>{greeting()}, {firstName}! <span className="wave">👋</span></h1>
+          <p className="hdr-sub">
+            {opps.data
+              ? `Encontrei ${all.length} ${all.length === 1 ? "oportunidade excelente" : "oportunidades excelentes"} para você hoje.`
+              : "Procurando as melhores oportunidades pra você…"}
+          </p>
+        </div>
+        <div className="hdr-right">
+          <span className="updated"><Icon name="refresh" size={15} /> Atualizado {last.data?.[0] ? ago(last.data[0].startedAtUtc) : "agora"}</span>
+          <button className="iconbtn" title="Notificações"><Icon name="bell" size={18} /></button>
+          <span className="avatar">{initials(firstName)}</span>
+        </div>
+      </header>
+
+      <div className="section-bar">
+        <div className="sb-left">
+          <span className="sb-mark"><Icon name="target" size={18} /></span>
+          <h2>{heading}</h2>
+          <span className="badge">{all.length} {all.length === 1 ? "oportunidade" : "oportunidades"}</span>
+        </div>
+        <div className="sb-right">
+          <div className="searchbox">
+            <Icon name="search" size={16} />
+            <input placeholder="Buscar vagas…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          </div>
+          <button className={"btn ghost" + (activeFilters ? " on" : "")} onClick={() => setShowFilters((v) => !v)}>
+            <Icon name="filter" size={16} /> Filtros {activeFilters > 0 && <span className="dot-badge">{activeFilters}</span>}
+          </button>
+        </div>
       </div>
-      <div className="topbar-right">
-        <span className="avatar">{initials(firstName)}</span>
+      <p className="sb-sub">{subtext}</p>
+
+      <div className="modebar">
+        <Seg value={view} onChange={(v) => setView(v as OppView)} options={[
+          ["action", "Para você hoje"], ["qualified", "Boas opções"], ["all", "Todas"]]} />
+        <button className="btn primary sm" disabled={busy} onClick={runSearch}>
+          {busy ? "Procurando…" : "Procurar vagas"}
+        </button>
       </div>
+
+      {showFilters && (
+        <div className="filterpanel">
+          <span className="flabel">Onde</span>
+          <Chips value={region} onChange={setRegion} options={[["all", "Todas"], ["national", "🇧🇷 Brasil"], ["international", "🌎 Exterior"]]} />
+          <span className="flabel">Contrato</span>
+          <Chips value={contract} onChange={setContract} options={[["all", "Ambos"], ["clt", "CLT"], ["pj", "PJ"]]} />
+        </div>
+      )}
+
+      <div className="opplist">
+        {opps.error && <p className="err">{opps.error}</p>}
+        {all.map((o) => <OppCard key={o.matchId} o={o} notify={notify} onChanged={onChanged} />)}
+        {opps.data && all.length === 0 && (
+          <div className="empty">
+            <p>Nada por aqui agora.</p>
+            <p className="empty-s">Tente <b>Boas opções</b>, ajuste os filtros, ou toque em <b>Procurar vagas</b>.</p>
+          </div>
+        )}
+        {!opps.data && !opps.error && <CardSkeletons />}
+      </div>
+    </>
+  );
+}
+
+/* one opportunity — clean 4-column card */
+function OppCard({ o, notify, onChanged }: {
+  o: BestOpportunity; notify: (m: string) => void; onChanged: () => void;
+}) {
+  const [open, setOpen] = useState(false);        // details (chevron)
+  const [draft, setDraft] = useState(false);      // draft panel
+  const [msg, setMsg] = useState<GeneratedMessage | null>(null);
+  const [menu, setMenu] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<{ kind: "applied" | "hidden"; label: string } | null>(null);
+  const [why, setWhy] = useState(o.rationale);
+  const [score, setScore] = useState(o.overallScore);
+  const [analyzing, setAnalyzing] = useState(false);
+
+  const src = sourceLabel(o.sourceType);
+  const adh = adherence(score);
+  const isTerse = /^score\s+\d+\/100/i.test((why ?? "").trim());
+
+  const act = async (type: string, kind: "applied" | "hidden", label: string) => {
+    setMenu(false); setDone({ kind, label });
+    try { await api.feedback(type, { jobPostingId: o.jobPostingId }); if (kind === "applied") notify("Movida pra Aplicações ✅"); onChanged(); }
+    catch { setDone(null); notify("Não foi possível agora."); }
+  };
+  const undo = async () => {
+    const wasApplied = done?.kind === "applied"; setDone(null);
+    if (wasApplied) { try { await api.unapply(o.jobPostingId); } catch { /* ignore */ } onChanged(); }
+  };
+
+  const openDraft = async () => {
+    if (msg) { setDraft((v) => !v); return; }
+    setBusy(true); notify("Gerando rascunho…");
+    try { const m = await api.generateOutreach(o.jobPostingId); setMsg(m); setDraft(true); notify("Rascunho pronto — revise e copie."); onChanged(); }
+    catch { notify("Não foi possível gerar o rascunho (score abaixo do mínimo?)."); }
+    finally { setBusy(false); }
+  };
+  const analyze = async () => {
+    setAnalyzing(true); notify("Analisando aderência…");
+    try { const r = await api.analyze(o.jobPostingId); setWhy(r.match.rationale); setScore(r.match.overallScore); notify("Análise concluída."); onChanged(); }
+    catch { notify("Não foi possível analisar agora."); }
+    finally { setAnalyzing(false); }
+  };
+
+  if (done) return (
+    <div className={"card done " + done.kind}>
+      <span>{done.kind === "applied" ? "✅ Movida pra Aplicações" : "🙈 Ocultada"} — {o.jobTitle}</span>
+      <button className="link-btn" onClick={undo}>desfazer</button>
+    </div>
+  );
+
+  return (
+    <div className={"card" + (src.weak ? " weak" : "")}>
+      <div className="card-row">
+        {/* col 1 — identity */}
+        <div className="c-id">
+          <Logo name={o.companyName} website={o.companyWebsiteUrl} />
+          <div className="id-body">
+            <div className="job-title">{o.jobTitle}</div>
+            <div className="co-line">
+              <span className="co-name">{o.companyName}</span>
+              {src.good && <span className="ok-check"><Icon name="check" size={12} /></span>}
+              <span className={"src " + src.cls}>{src.text}</span>
+              <span className="dotsep">·</span>
+              <span className="time">{ago(o.postedAtUtc)}</span>
+            </div>
+            <div className="tags">{o.skills.slice(0, 5).map((s) => <span className="tag" key={s}>{s}</span>)}</div>
+          </div>
+        </div>
+
+        {/* col 2 — fit reason */}
+        <div className="c-reason">
+          <div className={"adh " + adh.tone}><span className="adh-dot" /> {adh.label}</div>
+          <p className="reason">{friendlyReason(o, why, isTerse)}</p>
+        </div>
+
+        {/* col 3 — score */}
+        <div className="c-score">
+          <div className={"ring " + ringTone(score)}>{score}</div>
+          <div className="score-word">{scoreWord(score)}</div>
+          <div className="conf">{confidenceText(o.sourceConfidenceScore, src.weak)}</div>
+        </div>
+
+        {/* col 4 — actions */}
+        <div className="c-actions">
+          <a className="btn primary" href={o.jobUrl} target="_blank" rel="noreferrer">Ver vaga <Icon name="external" size={14} /></a>
+          <button className="btn" disabled={busy} onClick={openDraft}>
+            <Icon name="edit" size={14} /> {busy ? "Gerando…" : msg ? (draft ? "Ocultar rascunho" : "Ver rascunho") : "Ver rascunho"}
+          </button>
+          <div className="row-mini">
+            <button className="iconbtn sm" title="Detalhes" onClick={() => setOpen((v) => !v)}>
+              <span className={"chev" + (open ? " up" : "")}><Icon name="chevron" size={16} /></span>
+            </button>
+            <div className="menuwrap">
+              <button className="iconbtn sm" title="Mais ações" onClick={() => setMenu((v) => !v)}><Icon name="more" size={16} /></button>
+              {menu && (
+                <>
+                  <div className="menu-scrim" onClick={() => setMenu(false)} />
+                  <div className="menu">
+                    <button onClick={() => act("Applied", "applied", "já me cadastrei")}>✓ Já me cadastrei</button>
+                    <button onClick={() => act("HideSimilar", "hidden", "ocultada")}>🙈 Ocultar</button>
+                    <button onClick={() => act("Irrelevant", "hidden", "irrelevante")}>👎 Marcar irrelevante</button>
+                    <button onClick={() => act("BadCompanyDetection", "hidden", "empresa errada")}>🏢 Empresa errada</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {open && (
+        <div className="card-details">
+          <div className="cd-why"><strong>Por que combina:</strong> {why || "Sem detalhes ainda."}</div>
+          {isTerse && <button className="link-btn" disabled={analyzing} onClick={analyze}>{analyzing ? "Analisando…" : "↻ Analisar aderência em detalhe"}</button>}
+        </div>
+      )}
+
+      {msg && draft && <DraftPanel msg={msg} notify={notify} />}
     </div>
   );
 }
 
-/* ---------- the one living screen ---------- */
+function DraftPanel({ msg, notify }: { msg: GeneratedMessage; notify: (m: string) => void }) {
+  return (
+    <div className="draft">
+      <p className="draft-note"><Icon name="user" size={14} /> Rascunho para revisão — nada é enviado automaticamente.</p>
+      <Copy label="Mensagem (LinkedIn / direta)" text={msg.linkedInMessage} notify={notify} />
+      <Copy label="Assunto do e-mail" text={msg.emailSubject} notify={notify} single />
+      <Copy label="Corpo do e-mail" text={msg.emailBody} notify={notify} />
+      {msg.followUpMessage && <Copy label="Follow-up (depois)" text={msg.followUpMessage} notify={notify} />}
+    </div>
+  );
+}
+function Copy({ label, text, notify, single }: { label: string; text: string; notify: (m: string) => void; single?: boolean }) {
+  const copy = async () => { try { await navigator.clipboard.writeText(text); notify(`Copiado: ${label}`); } catch { notify("Não foi possível copiar."); } };
+  return (
+    <div className="copy">
+      <div className="copy-head"><span>{label}</span><button className="btn xs" onClick={copy}><Icon name="copy" size={13} /> Copiar</button></div>
+      {single ? <div className="copy-single">{text}</div> : <pre className="copy-text">{text}</pre>}
+    </div>
+  );
+}
 
-const PAGE_SIZE = 6;
-const SEARCH_KEYWORDS = [
-  "desenvolvedor .net", "desenvolvedor backend c#", "engenheiro de software .net",
-  "programador c# pleno", "vaga .net remoto", "desenvolvedor .net fintech",
-];
+/* ============================ Empresas ============================ */
 
-type FeedView = "action" | "qualified" | "firehose" | "discover" | "applied";
+function CompaniesScreen({ reload, notify, onChanged }: { reload: number; notify: (m: string) => void; onChanged: () => void }) {
+  const companies = useAsync(api.companies, [reload]);
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const list = (companies.data ?? [])
+    .filter((c) => !c.tags?.includes("do-not-promote"))
+    .filter((c) => !q.trim() || c.name.toLowerCase().includes(q.trim().toLowerCase()))
+    .slice(0, 60);
 
-function Feed({ reload, notify, onChanged }: {
-  reload: number; notify: (m: string) => void; onChanged: () => void;
-}) {
-  const summary = useAsync(api.summary, [reload]);
-  const [view, setView] = useState<FeedView>("action");
-  const [busy, setBusy] = useState(false);
-  const [region, setRegion] = useState("all");
-  const [contract, setContract] = useState("all");
-  const s = summary.data;
-
-  const runSearch = async () => {
-    setBusy(true); notify("Buscando vagas .NET…");
-    try {
-      await api.search(SEARCH_KEYWORDS);
-      notify("Busca disparada. Os resultados aparecem aqui em instantes.");
-      onChanged();
-    } catch { notify("Falha na busca."); }
-    finally { setBusy(false); }
+  const refreshCompany = async (c: Company) => {
+    setBusy(c.id); notify(`Atualizando busca em ${c.name}…`);
+    try { await api.discover(c.id); notify(`Busca atualizada para ${c.name}.`); onChanged(); }
+    catch { notify("Não foi possível atualizar agora."); }
+    finally { setBusy(null); }
   };
 
   return (
     <>
-      <div className="statgrid">
-        <Stat icon="target" label="Boas vagas pra você" n={s?.matchesAbove75}
-          delta={s ? `+${s.matchesAbove75Today} hoje` : ""} />
-        <Stat icon="briefcase" label="Vagas encontradas" n={s?.jobsDiscovered}
-          delta={s ? `+${s.jobsToday} hoje` : ""} />
-        <Stat icon="chat" label="Mensagens prontas" n={s?.messagesGenerated}
-          delta={s ? `+${s.messagesToday} hoje` : ""} />
-        <Stat icon="calendar" label="Lembretes" n={s?.followUpsPending}
-          delta={s?.nextFollowUpInDays != null ? `Próximo: ${s.nextFollowUpInDays} dia(s)` : "—"} mutedDelta />
+      <SimpleHeader title="Empresas" sub="Busque uma empresa e atualize a procura de vagas dela." />
+      <div className="searchbox big">
+        <Icon name="search" size={18} />
+        <input placeholder="Buscar empresa… (ex.: Stone, BRQ, BTG, Dock)" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
-
-      <div className="panel">
-        <div className="panel-head">
-          <div className="tabs">
-            <button className={"tab" + (view === "action" ? " active" : "")} onClick={() => setView("action")}>
-              ✨ Pra você hoje
-            </button>
-            <button className={"tab" + (view === "qualified" ? " active" : "")} onClick={() => setView("qualified")}>
-              📋 Boas opções
-            </button>
-            <button className={"tab" + (view === "firehose" ? " active" : "")} onClick={() => setView("firehose")}>
-              🔎 Explorar tudo
-            </button>
-            <button className={"tab" + (view === "applied" ? " active" : "")} onClick={() => setView("applied")}>
-              ✅ Já me cadastrei
-            </button>
-            <button className={"tab" + (view === "discover" ? " active" : "")} onClick={() => setView("discover")}>
-              🏢 Descobrir mais
+      <div className="complist">
+        {list.map((c) => (
+          <div className="comp" key={c.id}>
+            <Logo name={c.name} website={c.websiteUrl} />
+            <div className="comp-body">
+              <div className="comp-name">{c.name}</div>
+              <div className="comp-meta">
+                <span className={"prio " + c.priority.toLowerCase()}>{priorityLabel(c.priority)}</span>
+                <span className="dotsep">·</span>
+                <span className="comp-mapped">{c.websiteUrl ? "site mapeado" : "site a mapear"}{c.careersUrl ? " · carreiras ok" : ""}</span>
+              </div>
+            </div>
+            <button className="btn" disabled={busy !== null} onClick={() => refreshCompany(c)}>
+              {busy === c.id ? "Atualizando…" : "Atualizar busca"}
             </button>
           </div>
-          <button className="btn primary" disabled={busy} onClick={runSearch}>
-            <Icon name="search" /> {busy ? "Procurando…" : "Procurar vagas"}
-          </button>
-        </div>
-
-        {(view === "action" || view === "qualified") && (
-          <div className="filterbar">
-            <span className="flabel">Onde:</span>
-            <ChipGroup value={region} onChange={setRegion} options={[["all", "Todas"], ["national", "🇧🇷 Brasil"], ["international", "🌎 Exterior"]]} />
-            <span className="flabel">Contrato:</span>
-            <ChipGroup value={contract} onChange={setContract} options={[["all", "Ambos"], ["clt", "CLT"], ["pj", "PJ"]]} />
-          </div>
-        )}
-
-        {view === "action" && <ActionView reload={reload} region={region} contract={contract} notify={notify} onChanged={onChanged} />}
-        {view === "qualified" && <QualifiedView reload={reload} region={region} contract={contract} notify={notify} onChanged={onChanged} />}
-        {view === "firehose" && <FirehoseView reload={reload} notify={notify} onChanged={onChanged} />}
-        {view === "applied" && <ApplicationsView reload={reload} notify={notify} onChanged={onChanged} />}
-        {view === "discover" && <DiscoverMoreView reload={reload} notify={notify} onChanged={onChanged} />}
+        ))}
+        {companies.data && list.length === 0 && <div className="empty"><p>Nenhuma empresa encontrada.</p></div>}
+        {!companies.data && <CardSkeletons rows={4} />}
       </div>
     </>
   );
 }
 
-/* filter chips (região / contrato) */
-function ChipGroup({ value, onChange, options }: {
-  value: string; onChange: (v: string) => void; options: [string, string][];
-}) {
-  return (
-    <span className="chipgroup">
-      {options.map(([v, label]) => (
-        <button key={v} className={"chiptab" + (value === v ? " active" : "")} onClick={() => onChange(v)}>{label}</button>
-      ))}
-    </span>
-  );
-}
+/* ============================ Aplicações ============================ */
 
-/* ---------- Action Today: poucas, acionáveis (Fit >= 75) ---------- */
-function ActionView({ reload, region, contract, notify, onChanged }: { reload: number; region: string; contract: string; notify: (m: string) => void; onChanged: () => void }) {
-  const opps = useAsync(() => api.actionToday(region, contract), [reload, region, contract]);
-  const all = opps.data ?? [];
-  return (
-    <>
-      <p className="sub" style={{ marginTop: 0 }}>As vagas mais a ver com o seu perfil pra você olhar agora — recentes e de fonte confiável.</p>
-      {opps.error && <p className="err">{opps.error}</p>}
-      {all.map((o) => <OppCard key={o.matchId} o={o} notify={notify} onChanged={onChanged} mode="action" />)}
-      {all.length === 0 && <p className="placeholder">Nada por aqui agora. Veja <strong>Boas opções</strong> ou toque em <strong>Procurar vagas</strong>.</p>}
-    </>
-  );
-}
-
-/* ---------- Qualified: triado, ordenado por DiscoveryRank, paginado ---------- */
-function QualifiedView({ reload, region, contract, notify, onChanged }: { reload: number; region: string; contract: string; notify: (m: string) => void; onChanged: () => void }) {
-  const opps = useAsync(() => api.qualified(120, region, contract), [reload, region, contract]);
-  const [page, setPage] = useState(0);
-  const all = opps.data ?? [];
-  const pageCount = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
-  const current = Math.min(page, pageCount - 1);
-  useEffect(() => { setPage(0); }, [opps.data?.length]);
-  return (
-    <>
-      <p className="sub" style={{ marginTop: 0 }}>Vagas selecionadas que valem a pena conferir — ordenadas pelas mais promissoras pra você.</p>
-      {opps.error && <p className="err">{opps.error}</p>}
-      {all.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE).map((o) =>
-        <OppCard key={o.matchId} o={o} notify={notify} onChanged={onChanged} mode="qualified" />)}
-      {all.length === 0 && <p className="placeholder">Ainda sem boas opções. Toque em <strong>Procurar vagas</strong>.</p>}
-      {all.length > PAGE_SIZE && (
-        <div className="pager">
-          <button className="btn" disabled={current === 0} onClick={() => setPage(current - 1)}>‹ Anterior</button>
-          <span className="pager-info">Página {current + 1} de {pageCount} · {all.length} vagas</span>
-          <button className="btn" disabled={current >= pageCount - 1} onClick={() => setPage(current + 1)}>Próxima ›</button>
-        </div>
-      )}
-    </>
-  );
-}
-
-/* ---------- Firehose: tudo que foi encontrado (RawJobCandidate) ---------- */
-function FirehoseView({ reload, notify, onChanged }: { reload: number; notify: (m: string) => void; onChanged: () => void }) {
-  const raw = useAsync(() => api.rawCandidates(200), [reload]);
-  const metrics = useAsync(api.discoveryMetrics, [reload]);
-  const [page, setPage] = useState(0);
-  const all = raw.data ?? [];
-  const FIRE_PAGE = 12;
-  const pageCount = Math.max(1, Math.ceil(all.length / FIRE_PAGE));
-  const current = Math.min(page, pageCount - 1);
-  const m = metrics.data;
-  useEffect(() => { setPage(0); }, [raw.data?.length]);
-  return (
-    <>
-      <p className="sub" style={{ marginTop: 0 }}>Tudo que encontramos pela internet — inclusive vagas que ainda precisam de uma olhada. Salve as que te interessarem.</p>
-      {m && (
-        <div className="fire-metrics">
-          <span><b>{m.rawCandidatesThisWeek}</b> encontradas esta semana</span>
-          <span><b>{m.jobsPromotedToday}</b> salvas hoje</span>
-          <span><b>{m.weakSources}</b> pra revisar</span>
-          <span><b>{(m.deduplicationRate * 100).toFixed(0)}%</b> repetidas</span>
-        </div>
-      )}
-      {raw.error && <p className="err">{raw.error}</p>}
-      {all.slice(current * FIRE_PAGE, current * FIRE_PAGE + FIRE_PAGE).map((c) =>
-        <RawCandidateCard key={c.id} c={c} notify={notify} onChanged={onChanged} />)}
-      {all.length === 0 && <p className="placeholder">Nada encontrado ainda. Toque em <strong>Procurar vagas</strong>.</p>}
-      {all.length > FIRE_PAGE && (
-        <div className="pager">
-          <button className="btn" disabled={current === 0} onClick={() => setPage(current - 1)}>‹ Anterior</button>
-          <span className="pager-info">Página {current + 1} de {pageCount} · {all.length} vagas</span>
-          <button className="btn" disabled={current >= pageCount - 1} onClick={() => setPage(current + 1)}>Próxima ›</button>
-        </div>
-      )}
-    </>
-  );
-}
-
-/* ---------- Já me cadastrei: oportunidades que você já aplicou/contatou ---------- */
-function ApplicationsView({ reload, notify, onChanged }: { reload: number; notify: (m: string) => void; onChanged: () => void }) {
+function ApplicationsScreen({ reload, notify, onChanged }: { reload: number; notify: (m: string) => void; onChanged: () => void }) {
   const apps = useAsync(api.applications, [reload]);
   const all = apps.data ?? [];
   const undo = async (a: Application) => {
@@ -266,40 +418,44 @@ function ApplicationsView({ reload, notify, onChanged }: { reload: number; notif
   };
   return (
     <>
-      <p className="sub" style={{ marginTop: 0 }}>
-        Vagas que você já marcou como <strong>cadastrada/aplicada</strong>. Elas saem do mural principal pra você
-        focar no que falta. Pode trazer de volta a qualquer momento.
-      </p>
-      {apps.error && <p className="err">{apps.error}</p>}
-      {all.map((a) => (
-        <div className="appcard" key={a.jobPostingId}>
-          <Logo name={a.companyName} website={a.companyWebsiteUrl} />
-          <div className="appcard-main">
-            <div className="title">{a.jobTitle}</div>
-            <div className="appcard-meta">
-              <span className="app-co">{a.companyName}</span>
-              <span className="app-tag">{actionLabel(a.action)}</span>
-              <span className="posted">marcada {ago(a.appliedAtUtc)}</span>
+      <SimpleHeader title="Aplicações" sub="O que você já tratou. Some do mural principal pra você focar no que falta." />
+      <div className="opplist">
+        {apps.error && <p className="err">{apps.error}</p>}
+        {all.map((a) => (
+          <div className="card appitem" key={a.jobPostingId}>
+            <div className="c-id">
+              <Logo name={a.companyName} website={a.companyWebsiteUrl} />
+              <div className="id-body">
+                <div className="job-title">{a.jobTitle}</div>
+                <div className="co-line">
+                  <span className="co-name">{a.companyName}</span>
+                  <span className="dotsep">·</span>
+                  <span className="app-tag">{actionLabel(a.action)}</span>
+                  <span className="dotsep">·</span>
+                  <span className="time">marcada {ago(a.appliedAtUtc)}</span>
+                </div>
+              </div>
+            </div>
+            {a.overallScore > 0 && <div className={"ring sm " + ringTone(a.overallScore)}>{a.overallScore}</div>}
+            <div className="c-actions">
+              <a className="btn primary" href={a.jobUrl} target="_blank" rel="noreferrer">Ver vaga <Icon name="external" size={14} /></a>
+              <button className="btn" onClick={() => undo(a)}>↩ Reabrir</button>
             </div>
           </div>
-          {a.overallScore > 0 && <div className="ring sm" style={{ borderColor: ringColor(a.overallScore) }}>{a.overallScore}</div>}
-          <div className="opp-actions">
-            <a className="btn" href={a.jobUrl} target="_blank" rel="noreferrer">Ver vaga</a>
-            <button className="btn" onClick={() => undo(a)} title="Trazer de volta ao mural principal">↩ Reabrir</button>
-          </div>
-        </div>
-      ))}
-      {all.length === 0 && (
-        <p className="placeholder">
-          Nada por aqui ainda. Quando marcar uma vaga como <strong>“✓ Já me cadastrei”</strong> no mural, ela aparece aqui.
-        </p>
-      )}
+        ))}
+        {apps.data && all.length === 0 && (
+          <div className="empty"><p>Nada por aqui ainda.</p>
+            <p className="empty-s">Marque uma vaga como <b>“Já me cadastrei”</b> no mural e ela aparece aqui.</p></div>
+        )}
+        {!apps.data && <CardSkeletons rows={3} />}
+      </div>
     </>
   );
 }
 
-/* ---------- Descobrir mais: bancos/fintechs, consultorias, buscas salvas ---------- */
-function DiscoverMoreView({ reload, notify, onChanged }: { reload: number; notify: (m: string) => void; onChanged: () => void }) {
+/* ============================ Descobertas ============================ */
+
+function DiscoverScreen({ reload, notify, onChanged }: { reload: number; notify: (m: string) => void; onChanged: () => void }) {
   const preview = useAsync(() => api.bacenPreview("High"), [reload]);
   const candidates = useAsync(() => api.consultingCandidates(40), [reload]);
   const campaigns = useAsync(api.campaigns, [reload]);
@@ -308,445 +464,183 @@ function DiscoverMoreView({ reload, notify, onChanged }: { reload: number; notif
 
   const run = async (key: string, label: string, fn: () => Promise<unknown>) => {
     setBusy(key); notify(`${label}…`);
-    try { await fn(); notify(`${label}: pronto! Os resultados aparecem em “Explorar tudo”.`); onChanged(); }
+    try { await fn(); notify(`${label}: pronto! Os resultados entram nas oportunidades.`); onChanged(); }
     catch { notify(`Não foi possível: ${label}.`); }
     finally { setBusy(null); }
   };
-
   const promote = async (id: string, name: string) => {
-    try { const r = await api.promoteConsulting(id); notify(r.promoted ? `Empresa salva: ${name}` : "Confiança baixa pra salvar ainda."); onChanged(); }
+    try { const r = await api.promoteConsulting(id); notify(r.promoted ? `Empresa salva: ${name}` : "Ainda sem confiança pra salvar."); onChanged(); }
     catch { notify("Não foi possível salvar a empresa."); }
   };
 
   return (
     <>
-      <p className="sub" style={{ marginTop: 0 }}>Amplie a busca em fontes que combinam com você. Os resultados caem em “Explorar tudo”.</p>
+      <SimpleHeader title="Descobertas" sub="Amplie a busca em fontes que combinam com você." />
 
-      <div className="discover-card">
-        <div className="dc-head">
-          <div><h4>🏦 Bancos e fintechs</h4>
-            <p className="dc-sub">{p ? `${p.companies} instituições financeiras no radar (${p.strategic} estratégicas, ${p.high} prioritárias).` : "Carregando…"}</p>
-          </div>
+      <div className="disc">
+        <div className="disc-head">
+          <div><h3>🏦 Bancos e fintechs</h3>
+            <p>{p ? `${p.companies} instituições no radar (${p.strategic} estratégicas, ${p.high} prioritárias).` : "Carregando…"}</p></div>
           <button className="btn primary" disabled={busy !== null} onClick={() => run("bacen", "Procurando em bancos e fintechs", api.runBacenSweep)}>
-            {busy === "bacen" ? "Procurando…" : "Procurar vagas nelas"}
+            {busy === "bacen" ? "Procurando…" : "Procurar vagas"}
           </button>
         </div>
       </div>
 
-      <div className="discover-card">
-        <div className="dc-head">
-          <div><h4>🧩 Consultorias de tecnologia</h4>
-            <p className="dc-sub">Empresas que vivem de contratar dev .NET/C#. Procure novas e salve as que interessarem.</p>
-          </div>
+      <div className="disc">
+        <div className="disc-head">
+          <div><h3>🧩 Consultorias de tecnologia</h3>
+            <p>Empresas que vivem de contratar dev .NET/C#.</p></div>
           <button className="btn primary" disabled={busy !== null} onClick={() => run("consulting", "Procurando consultorias", api.runConsultingDiscover)}>
             {busy === "consulting" ? "Procurando…" : "Procurar consultorias"}
           </button>
         </div>
-        <div className="dc-list">
+        <div className="disc-list">
           {(candidates.data ?? []).slice(0, 8).map((c) => (
-            <div className="dc-item" key={c.id}>
-              <div>
-                <span className="dc-name">{c.name}</span>
-                {c.consultingConfidenceScore >= 70 && <span className="src-pill src-official">✓ boa aposta</span>}
-                <div className="dc-signals">{c.signals.slice(0, 3).join(" · ")}</div>
-              </div>
+            <div className="disc-item" key={c.id}>
+              <div><span className="di-name">{c.name}</span>
+                {c.consultingConfidenceScore >= 70 && <span className="ok-pill">boa aposta</span>}
+                <div className="di-sub">{c.signals.slice(0, 3).join(" · ")}</div></div>
               {c.status === "PromotedToCompany"
-                ? <span className="fb-done">✓ salva</span>
-                : <button className="btn" disabled={c.consultingConfidenceScore < 70}
-                    title={c.consultingConfidenceScore >= 70 ? "Adicionar às empresas" : "Confiança ainda baixa"}
-                    onClick={() => promote(c.id, c.name)}>Salvar empresa</button>}
+                ? <span className="ok-pill">salva</span>
+                : <button className="btn" disabled={c.consultingConfidenceScore < 70} onClick={() => promote(c.id, c.name)}>Salvar empresa</button>}
             </div>
           ))}
-          {candidates.data?.length === 0 && <p className="placeholder small">Nenhuma consultoria ainda. Toque em “Procurar consultorias”.</p>}
+          {candidates.data?.length === 0 && <p className="muted-line">Nenhuma ainda. Toque em “Procurar consultorias”.</p>}
         </div>
       </div>
 
-      <div className="discover-card">
-        <div className="dc-head"><div><h4>🔁 Buscas salvas</h4>
-          <p className="dc-sub">Conjuntos de busca prontos. Rode quando quiser ampliar.</p></div></div>
-        <div className="dc-list">
+      <div className="disc">
+        <div className="disc-head"><div><h3>🔁 Buscas salvas</h3><p>Conjuntos prontos pra ampliar quando quiser.</p></div></div>
+        <div className="disc-list">
           {(campaigns.data ?? []).map((c) => (
-            <div className="dc-item" key={c.id}>
-              <div><span className="dc-name">{c.name}</span><div className="dc-signals">{c.description}</div></div>
+            <div className="disc-item" key={c.id}>
+              <div><span className="di-name">{c.name}</span><div className="di-sub">{c.description}</div></div>
               <button className="btn" disabled={busy !== null} onClick={() => run("camp-" + c.id, `Rodando “${c.name}”`, () => api.runCampaign(c.id))}>
-                {busy === "camp-" + c.id ? "Rodando…" : "Rodar"}
-              </button>
+                {busy === "camp-" + c.id ? "Rodando…" : "Rodar"}</button>
             </div>
           ))}
-          {campaigns.data?.length === 0 && <p className="placeholder small">Sem buscas salvas.</p>}
+          {campaigns.data?.length === 0 && <p className="muted-line">Sem buscas salvas.</p>}
         </div>
       </div>
     </>
   );
 }
 
-function Stat({ icon, label, n, delta, mutedDelta }: {
-  icon: string; label: string; n?: number; delta: string; mutedDelta?: boolean;
-}) {
+/* ============================ Relatórios ============================ */
+
+function ReportsScreen({ reload }: { reload: number }) {
+  const s = useAsync(api.summary, [reload]) as { data: Summary | null };
+  const companies = useAsync(api.companies, [reload]);
+  const apps = useAsync(api.applications, [reload]);
+  const d = s.data;
   return (
-    <div className="stat">
-      <div className="ic"><Icon name={icon} /></div>
-      <div className="l">{label}</div>
-      <div className="n">{n ?? "…"}</div>
-      <div className={"d" + (mutedDelta ? " muted" : "")}>{delta}</div>
+    <>
+      <SimpleHeader title="Relatórios" sub="Um panorama rápido do que o seu radar produziu." />
+      <div className="report-grid">
+        <ReportStat label="Boas vagas pra você" n={d?.matchesAbove75} sub={d ? `+${d.matchesAbove75Today} hoje` : ""} />
+        <ReportStat label="Vagas encontradas" n={d?.jobsDiscovered} sub={d ? `+${d.jobsToday} hoje` : ""} />
+        <ReportStat label="Empresas no radar" n={companies.data?.length} sub="monitoradas" />
+        <ReportStat label="Aplicações" n={apps.data?.length} sub="que você já tratou" />
+        <ReportStat label="Rascunhos prontos" n={d?.messagesGenerated} sub={d ? `+${d.messagesToday} hoje` : ""} />
+        <ReportStat label="Lembretes" n={d?.followUpsPending} sub={d?.nextFollowUpInDays != null ? `próximo em ${d.nextFollowUpInDays} dia(s)` : "—"} />
+      </div>
+    </>
+  );
+}
+function ReportStat({ label, n, sub }: { label: string; n?: number; sub: string }) {
+  return <div className="rstat"><div className="rs-n">{n ?? "…"}</div><div className="rs-l">{label}</div><div className="rs-s">{sub}</div></div>;
+}
+
+/* ============================ shared bits ============================ */
+
+function SimpleHeader({ title, sub }: { title: string; sub: string }) {
+  return <header className="hdr"><div><h1>{title}</h1><p className="hdr-sub">{sub}</p></div></header>;
+}
+
+function Seg({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: [string, string][] }) {
+  return (
+    <div className="seg">
+      {options.map(([v, l]) => <button key={v} className={value === v ? "active" : ""} onClick={() => onChange(v)}>{l}</button>)}
     </div>
   );
+}
+function Chips({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: [string, string][] }) {
+  return <span className="chips-g">{options.map(([v, l]) => <button key={v} className={"chip-b" + (value === v ? " active" : "")} onClick={() => onChange(v)}>{l}</button>)}</span>;
+}
+function CardSkeletons({ rows = 4 }: { rows?: number }) {
+  return <>{Array.from({ length: rows }).map((_, i) => <div className="card skel" key={i} />)}</>;
 }
 
 function Logo({ name, website }: { name: string; website?: string | null }) {
   const [i, setI] = useState(0);
   const host = hostOf(website);
-  // Real favicon of the company's own domain (reliable). A favicon GUESS for an unknown
-  // domain returns a generic globe (worse than initials), so we only use a known website.
   const sources = host ? [`https://www.google.com/s2/favicons?sz=64&domain=${host}`] : [];
-  if (i < sources.length)
-    return <img className="logo img" alt={name} src={sources[i]} onError={() => setI(i + 1)} />;
+  if (i < sources.length) return <img className="logo img" alt={name} src={sources[i]} onError={() => setI(i + 1)} />;
   return <span className="logo" style={{ background: logoColor(name) }}>{initials(name)}</span>;
 }
 
-/* one opportunity, with inline expandable generated message */
-function OppCard({ o, notify, onChanged, mode }: {
-  o: BestOpportunity; notify: (m: string) => void; onChanged: () => void; mode?: "action" | "qualified";
-}) {
-  const [msg, setMsg] = useState<GeneratedMessage | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [why, setWhy] = useState(o.rationale);
-  const [score, setScore] = useState(o.overallScore);
-  const [rec, setRec] = useState(o.recommendation);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analyzed, setAnalyzed] = useState(false);
-  const [hidden, setHidden] = useState(false);
-  const [applied, setApplied] = useState(false);
-
-  // Heuristic rationale reads like "Score 68/100 — Técnico 65…"; the LLM one is prose.
-  const isTerse = /^score\s+\d+\/100/i.test(why.trim());
-
-  const hide = async () => {
-    setHidden(true);
-    try { await api.feedback("HideSimilar", { jobPostingId: o.jobPostingId }); } catch { /* ignore */ }
-  };
-  // Mark as applied: leaves the main board and moves to "Já me cadastrei".
-  const apply = async () => {
-    setApplied(true);
-    try { await api.feedback("Applied", { jobPostingId: o.jobPostingId }); notify("Movida pra “Já me cadastrei” ✅"); onChanged(); }
-    catch { setApplied(false); notify("Não foi possível marcar agora."); }
-  };
-  const undoApply = async () => {
-    setApplied(false);
-    try { await api.unapply(o.jobPostingId); } catch { /* ignore */ }
-  };
-  if (applied) return (
-    <div className="oppcard applied-row"><span>✅ Marcada como cadastrada — está em <strong>“Já me cadastrei”</strong>.</span>
-      <button className="why-link" onClick={undoApply}>desfazer</button></div>
-  );
-  if (hidden) return (
-    <div className="oppcard hidden-row"><span>Ocultada.</span>
-      <button className="why-link" onClick={() => setHidden(false)}>desfazer</button></div>
-  );
-
-  const generate = async () => {
-    if (msg) { setOpen((v) => !v); return; }
-    setBusy(true); notify("Gerando mensagem…");
-    try {
-      const m = await api.generateOutreach(o.jobPostingId);
-      setMsg(m); setOpen(true); notify("Mensagem gerada — revise e copie.");
-      onChanged();
-    } catch { notify("Não foi possível gerar (score abaixo do mínimo?)."); }
-    finally { setBusy(false); }
-  };
-
-  const analyze = async () => {
-    setAnalyzing(true); notify("Analisando com IA…");
-    try {
-      const r = await api.analyze(o.jobPostingId);
-      setWhy(r.match.rationale); setScore(r.match.overallScore); setRec(r.match.recommendation);
-      setAnalyzed(true); notify("Análise concluída.");
-      onChanged();
-    } catch { notify("Não foi possível analisar agora."); }
-    finally { setAnalyzing(false); }
-  };
-
-  return (
-    <div className="oppcard">
-      <div className="opp">
-        <div className="who">
-          <Logo name={o.companyName} website={o.companyWebsiteUrl} />
-          <div>
-            <div className="title">{o.jobTitle}</div>
-            <div className="chips">{o.skills.slice(0, 6).map((sk) => <span className="chip" key={sk}>{sk}</span>)}</div>
-            <SourceBadge sourceType={o.sourceType} confidence={o.sourceConfidenceScore}
-              sourceName={o.sourceName} realCompany={o.realCompanyName} manual={o.requiresManualValidation} />
-            {why && <div className="why"><strong>Por que combina:</strong> {why}</div>}
-            {(isTerse && !analyzed) && (
-              <button className="why-link" disabled={analyzing} onClick={analyze}>
-                {analyzing ? "Analisando…" : "↻ Analisar com IA (por que combina em detalhe)"}
-              </button>
-            )}
-            <FeedbackBar notify={notify} body={{ jobPostingId: o.jobPostingId }}
-              onHide={mode === "qualified" ? hide : undefined} />
-          </div>
-        </div>
-        <div className="company">
-          {o.companyName}
-          <div className={"posted" + (isStale(o.postedAtUtc) ? " stale" : "")}>{ago(o.postedAtUtc)}</div>
-        </div>
-        <div className="ring" style={{ borderColor: ringColor(score) }}>{score}</div>
-        <div className={"rec " + recClass(rec)}>{recLabel(rec)}</div>
-        <div className="opp-actions">
-          <a className="btn" href={o.jobUrl} target="_blank" rel="noreferrer">Ver vaga</a>
-          <button className="btn primary" disabled={busy} onClick={generate}>
-            {busy ? "Gerando…" : msg ? (open ? "Ocultar mensagem" : "Ver mensagem") : "Gerar mensagem"}
-          </button>
-          <button className="btn ok" onClick={apply} title="Já me cadastrei nesta vaga — tirar do mural">
-            ✓ Já me cadastrei
-          </button>
-        </div>
-      </div>
-
-      {msg && open && <MessagePanel msg={msg} notify={notify} />}
-    </div>
-  );
-}
-
-/* source provenance badge: "Empresa X via Fonte Y" + tipo/confiança */
-function SourceBadge({ sourceType, confidence, sourceName, realCompany, manual }: {
-  sourceType?: string; confidence?: number; sourceName?: string | null;
-  realCompany?: string | null; manual?: boolean;
-}) {
-  // rank is intentionally not shown to the user (internal ranking signal).
-  if (!sourceType && !sourceName) return null;
-  const cls = sourceType === "OfficialAts" || sourceType === "OfficialCareerPage" ? "src-official"
-    : sourceType === "SocialIndexed" ? "src-social"
-    : sourceType === "Aggregator" ? "src-agg" : "src-web";
-  const trusted = (confidence ?? 0) >= 70;
-  return (
-    <div className="srcbadge">
-      {sourceType && sourceType !== "Unknown" && (
-        <span className={"src-pill " + cls}>{trusted ? "✓ " : ""}{sourceTypeLabel(sourceType)}</span>
-      )}
-      {realCompany
-        ? <span className="src-co">{realCompany}{sourceName ? <> · via {sourceName}</> : null}</span>
-        : (sourceName && <span className="src-co muted">empresa a confirmar{sourceName ? <> · via {sourceName}</> : null}</span>)}
-      {manual && <span className="src-pill src-manual">⚠ vale revisar a fonte</span>}
-    </div>
-  );
-}
-
-/* quick feedback buttons (P11) */
-function FeedbackBar({ notify, body, onHide }: {
-  notify: (m: string) => void; body: { jobPostingId?: string; rawJobCandidateId?: string };
-  onHide?: () => void;
-}) {
-  const [sent, setSent] = useState<string | null>(null);
-  const send = async (type: string, label: string) => {
-    try { await api.feedback(type, body); setSent(label); notify(`Feedback: ${label}`); }
-    catch { notify("Não foi possível registrar o feedback."); }
-  };
-  if (sent) return <div className="fbbar"><span className="fb-done">✓ {sent}</span></div>;
-  return (
-    <div className="fbbar">
-      <button className="fb" onClick={() => send("Relevant", "relevante")}>👍 Relevante</button>
-      <button className="fb" onClick={() => send("Irrelevant", "irrelevante")}>👎 Irrelevante</button>
-      <button className="fb" onClick={() => send("BadCompanyDetection", "empresa errada")}>🏢 Empresa errada</button>
-      {onHide && <button className="fb" onClick={onHide}>🙈 Ocultar</button>}
-    </div>
-  );
-}
-
-function actionLabel(action: string) {
-  if (action === "ContactedRecruiter") return "✉ contatei recrutador";
-  return "✓ cadastrei/apliquei";
-}
-
-/* one raw firehose candidate */
-function RawCandidateCard({ c, notify, onChanged }: {
-  c: RawCandidate; notify: (m: string) => void; onChanged: () => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [promoted, setPromoted] = useState<string | null>(null);
-  const [original, setOriginal] = useState<string | null>(null);
-  const [finding, setFinding] = useState(false);
-  const [hidden, setHidden] = useState(false);
-  const promote = async () => {
-    setBusy(true); notify("Salvando…");
-    try {
-      const r = await api.promoteRaw(c.id);
-      setPromoted(r.promoted ? (r.wasDuplicate ? "já estava salva" : "salva") : null);
-      notify(r.promoted ? (r.wasDuplicate ? "Essa vaga já estava salva." : "Vaga salva!") : "Não deu pra salvar (confirme a empresa).");
-      if (r.promoted) onChanged();
-    } catch { notify("Falha ao salvar."); }
-    finally { setBusy(false); }
-  };
-  const findOriginal = async () => {
-    setFinding(true); notify("Procurando a vaga original…");
-    try {
-      const r = await api.resolveOriginal(c.id);
-      if (r.found && r.originalUrl) { setOriginal(r.originalUrl); notify(r.atsProvider ? `Original no ${r.atsProvider}!` : "Vaga original encontrada!"); }
-      else notify("Não achei a original — segue como agregador.");
-    } catch { notify("Não foi possível procurar a original."); }
-    finally { setFinding(false); }
-  };
-  const hide = async () => {
-    setHidden(true);
-    try { await api.feedback("HideSimilar", { rawJobCandidateId: c.id }); } catch { /* ignore */ }
-  };
-  if (hidden) return (
-    <div className="rawcard hidden-row"><span>Ocultada.</span>
-      <button className="why-link" onClick={() => setHidden(false)}>desfazer</button></div>
-  );
-  return (
-    <div className="rawcard">
-      <div className="raw-main">
-        <div className="title">{c.title}</div>
-        <SourceBadge sourceType={c.sourceType} confidence={c.sourceConfidenceScore}
-          sourceName={c.sourceName} realCompany={c.realCompanyName} manual={c.requiresManualValidation} />
-        {c.snippet && <div className="raw-snippet">{c.snippet}</div>}
-        {original && <div className="raw-original">✓ vaga original: <a href={original} target="_blank" rel="noreferrer">abrir oficial</a></div>}
-        <FeedbackBar notify={notify} body={{ rawJobCandidateId: c.id }} />
-        <div className="fbbar">
-          <button className="fb" disabled={finding || original != null} onClick={findOriginal}>{finding ? "procurando…" : "🔗 Achar original"}</button>
-          <button className="fb" onClick={hide}>🙈 Ocultar</button>
-        </div>
-      </div>
-      <div className="raw-meta">
-        <span className="posted">{ago(c.discoveredAtUtc)}</span>
-        <span className={"pill raw-status"}>{candidateStatusLabel(c.status)}</span>
-      </div>
-      <div className="opp-actions">
-        <a className="btn" href={original ?? c.discoveredUrl} target="_blank" rel="noreferrer">Abrir vaga</a>
-        {promoted
-          ? <span className="fb-done">✓ {promoted}</span>
-          : <button className="btn primary" disabled={busy || !c.realCompanyName}
-              title={c.realCompanyName ? "Adicionar às suas vagas" : "Precisa confirmar a empresa primeiro"} onClick={promote}>
-              {busy ? "…" : "Salvar vaga"}
-            </button>}
-      </div>
-    </div>
-  );
-}
-
-function MessagePanel({ msg, notify }: { msg: GeneratedMessage; notify: (m: string) => void }) {
-  return (
-    <div className="msgpanel">
-      <p className="msg-note"><Icon name="user" /> Rascunho para revisão humana — nada é enviado automaticamente.</p>
-      <CopyBlock label="Mensagem (LinkedIn / direta)" text={msg.linkedInMessage} notify={notify} />
-      <CopyBlock label="Assunto do e-mail" text={msg.emailSubject} notify={notify} single />
-      <CopyBlock label="Corpo do e-mail" text={msg.emailBody} notify={notify} />
-      {msg.followUpMessage && <CopyBlock label="Follow-up (depois)" text={msg.followUpMessage} notify={notify} />}
-      {msg.humanReviewNotes && (
-        <div className="review"><strong>Observações para revisão:</strong> {msg.humanReviewNotes}</div>
-      )}
-    </div>
-  );
-}
-
-function CopyBlock({ label, text, notify, single }: {
-  label: string; text: string; notify: (m: string) => void; single?: boolean;
-}) {
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(text); notify(`Copiado: ${label}`); }
-    catch { notify("Não foi possível copiar."); }
-  };
-  return (
-    <div className="copyblock">
-      <div className="copyblock-head">
-        <span className="cb-label">{label}</span>
-        <button className="btn copy" onClick={copy}>Copiar</button>
-      </div>
-      {single
-        ? <div className="cb-single">{text}</div>
-        : <pre className="cb-text">{text}</pre>}
-    </div>
-  );
-}
-
-function RunRow({ r }: { r: Run }) {
-  const cls = r.status === "Succeeded" ? "ok" : r.status === "Failed" ? "fail" : r.status === "PartiallyFailed" ? "part" : "run";
-  return (
-    <div className="run">
-      <span className={"dot " + cls} />
-      <div><div className="t">{runLabel(r.runType)}</div><div className="s">{new Date(r.startedAtUtc).toLocaleString()}</div></div>
-      <div className="meta">{r.itemsProcessed}·{r.itemsSucceeded}ok</div>
-    </div>
-  );
-}
-
 /* ---------- helpers ---------- */
-
 function useAsync<T>(fn: () => Promise<T>, deps: unknown[]) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const fnRef = useRef(fn); fnRef.current = fn;
   useEffect(() => {
     let active = true; setError(null);
-    fn().then((d) => active && setData(d)).catch((e) => active && setError(String(e)));
+    fnRef.current().then((d) => active && setData(d)).catch((e) => active && setError(String(e)));
     return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   return { data, error };
 }
-
-function hostOf(url?: string | null) {
-  if (!url) return null;
-  try { return new URL(url).host; } catch { return null; }
-}
+function firstNameOf(full?: string) { return (full ?? "").trim().split(" ")[0] || "Nícolas"; }
+function hostOf(url?: string | null) { if (!url) return null; try { return new URL(url).host; } catch { return null; } }
 function greeting() { const h = new Date().getHours(); return h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite"; }
-function initials(name: string) {
-  const p = name.trim().split(/\s+/);
-  return ((p[0]?.[0] ?? "") + (p[1]?.[0] ?? "")).toUpperCase() || "?";
+function initials(name: string) { const p = name.trim().split(/\s+/); return ((p[0]?.[0] ?? "") + (p[1]?.[0] ?? "")).toUpperCase() || "?"; }
+function logoColor(name: string) { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360; return `hsl(${h} 50% 48%)`; }
+
+function ringTone(s: number) { return s >= 80 ? "good" : s >= 60 ? "warn" : "muted"; }
+function scoreWord(s: number) { return s >= 85 ? "Excelente" : s >= 70 ? "Boa" : "Média"; }
+function adherence(s: number) {
+  if (s >= 85) return { label: "Excelente aderência", tone: "good" };
+  if (s >= 70) return { label: "Boa aderência", tone: "good" };
+  return { label: "Vale atenção", tone: "warn" };
 }
-function logoColor(name: string) {
-  let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
-  return `hsl(${h} 55% 45%)`;
+function confidenceText(conf?: number, weak?: boolean) {
+  if (weak) return "Fonte externa";
+  if ((conf ?? 0) >= 70) return "Confiança alta";
+  if ((conf ?? 0) >= 40) return "Confiança média";
+  return "Fonte externa";
 }
-function ringColor(score: number) { return score >= 75 ? "#16a34a" : score >= 60 ? "#2563eb" : "#9ca3af"; }
-function recLabel(r: string) {
-  if (r === "Strategic" || r === "Prioritize") return "Excelente match";
-  if (r === "Apply") return "Bom match";
-  if (r === "SaveForLater") return "Vale revisar";
-  return "Baixo";
+function sourceLabel(t?: string): { text: string; cls: string; good?: boolean; weak?: boolean } {
+  switch (t) {
+    case "OfficialAts":
+    case "OfficialCareerPage": return { text: "Site oficial", cls: "good", good: true };
+    case "SocialIndexed": return { text: "LinkedIn", cls: "ext" };
+    case "JobBoard": return { text: "Fonte externa", cls: "ext" };
+    case "Aggregator": return { text: "Agregador", cls: "weak", weak: true };
+    default: return { text: "Fonte externa", cls: "ext" };
+  }
 }
-function sourceTypeLabel(t: string) {
-  const map: Record<string, string> = {
-    OfficialAts: "Site oficial de vagas", OfficialCareerPage: "Página de carreira",
-    JobBoard: "Portal de vagas", Aggregator: "Site agregador", SearchResult: "Encontrada na web",
-    SocialIndexed: "LinkedIn", Unknown: "Fonte a confirmar",
-  };
-  return map[t] ?? "Fonte a confirmar";
+function friendlyReason(o: BestOpportunity, why: string, terse: boolean) {
+  if (why && !terse) return why.length > 160 ? why.slice(0, 157) + "…" : why;
+  const sk = o.skills.filter((s) => /\.net|c#|backend|azure|aws|fintech|pagament/i.test(s)).slice(0, 2);
+  const base = sk.length ? sk.join(" e ") : ".NET/C#";
+  return `Forte match com seu perfil em ${base} e backend.`;
 }
-// Friendly status for raw candidates (no enum jargon).
-function candidateStatusLabel(s: string) {
-  const map: Record<string, string> = {
-    Discovered: "nova", Classified: "nova", Enriched: "nova",
-    Duplicate: "repetida", PromotedToJobPosting: "salva", Rejected: "descartada", Expired: "expirada",
-  };
-  return map[s] ?? s;
-}
-function recClass(r: string) {
-  if (r === "Strategic" || r === "Prioritize") return "exc";
-  if (r === "Apply") return "bom";
-  return "low";
-}
-function runLabel(t: string) {
-  const map: Record<string, string> = {
-    DiscoverJobs: "Procurando vagas", SearchJobs: "Procurando por palavra-chave",
-    FirehoseQuickSearch: "Busca rápida", FirehoseAggressive: "Busca ampla",
-    BacenFinancialSweep: "Vagas em bancos e fintechs", ConsultingRadar: "Procurando consultorias",
-    ValidateLinks: "Conferindo links", SendDailyDigest: "Enviando resumo",
-    CompanyOnboarding: "Preparando empresas",
-    BacenPixParticipantsImport: "Atualizando empresas financeiras", BacenPixParticipantsPromotion: "Organizando empresas",
-  };
-  return map[t] ?? "Procurando vagas";
+function actionLabel(a: string) { return a === "ContactedRecruiter" ? "contatei recrutador" : "cadastrei/apliquei"; }
+function priorityLabel(p: string) {
+  const m: Record<string, string> = { Strategic: "estratégica", High: "prioritária", Medium: "no radar", Low: "baixa" };
+  return m[p] ?? p.toLowerCase();
 }
 function ago(iso: string) {
   const days = Math.floor((Date.now() - +new Date(iso)) / 86400000);
   if (days <= 0) {
     const h = Math.floor((Date.now() - +new Date(iso)) / 3600000);
-    if (h <= 0) { const m = Math.floor((Date.now() - +new Date(iso)) / 60000); return m <= 1 ? "agora há pouco" : `há ${m} min`; }
-    return `há ${h} h`;
+    if (h <= 0) { const mn = Math.floor((Date.now() - +new Date(iso)) / 60000); return mn <= 1 ? "há pouco" : `há ${mn} min`; }
+    return `há ${h}h`;
   }
   if (days < 30) return `há ${days} dia(s)`;
-  if (days < 365) return `há ${Math.floor(days / 30)} mes(es)`;
+  if (days < 365) return `há ${Math.floor(days / 30)} mês(es)`;
   return `há ${Math.floor(days / 365)} ano(s)`;
 }
-function isStale(iso: string) { return (Date.now() - +new Date(iso)) / 86400000 > 60; }
