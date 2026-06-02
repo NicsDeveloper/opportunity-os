@@ -126,7 +126,9 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
   const pageCount = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
   const current = Math.min(page, pageCount - 1);
   const shown = all.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE);
-  useEffect(() => { setPage(0); }, [region, contract, query, opps.data?.length]);
+  // Reset to page 1 only when the user changes filters/search — never on a background
+  // refresh (which would yank the user off the page they're reading).
+  useEffect(() => { setPage(0); }, [region, contract, query]);
 
   const runSearch = async () => {
     setBusy(true); notify("Buscando novas vagas .NET…");
