@@ -79,6 +79,22 @@ export interface DiscoveryMetrics {
   relevantFeedback: number; irrelevantFeedback: number; bySourceType: Record<string, number>;
 }
 export interface PromotionResult { promoted: boolean; jobPostingId?: string | null; wasDuplicate: boolean; reason: string; }
+export interface BacenPreview {
+  companies: number; strategic: number; high: number; medium: number; low: number;
+  estimatedQueries: number; estimatedBudgetCost: number;
+}
+export interface ConsultingCandidate {
+  id: string; name: string; websiteUrl?: string | null; country: string; source: string;
+  signals: string[]; consultingConfidenceScore: number; status: string; createdAtUtc: string;
+}
+export interface Campaign {
+  id: string; name: string; description: string; status: string; priority: string;
+  baseKeywords: string[]; dailyQueryBudget: number; lastRunAtUtc?: string | null;
+}
+export interface FirehoseRun {
+  executionRunId: string; status: string; queriesExecuted: number; resultsCount: number;
+  newCandidates: number; duplicates: number; errors: number;
+}
 export interface Profile { fullName: string; headline: string; }
 
 export const api = {
@@ -94,6 +110,16 @@ export const api = {
   promoteRaw: (id: string) => post<PromotionResult>(`/discovery/raw-candidates/${id}/promote`),
   feedback: (type: string, body: { jobPostingId?: string; rawJobCandidateId?: string; reason?: string }) =>
     post(`/feedback`, { type, ...body }),
+  // Descobrir mais (B3): bancos/fintechs, consultorias, buscas salvas.
+  bacenPreview: (minimumPriority = "High") =>
+    get<BacenPreview>(`/discovery/bacen-financial-sweep/preview?minimumPriority=${minimumPriority}&maxCompanies=100&maxQueriesPerCompany=8`),
+  runBacenSweep: () =>
+    post<FirehoseRun>(`/discovery/bacen-financial-sweep`, { minimumPriority: "High", maxCompanies: 60, maxQueriesPerCompany: 8, saveRawCandidates: true }),
+  consultingCandidates: (take = 60) => get<ConsultingCandidate[]>(`/consulting-radar/candidates?take=${take}`),
+  runConsultingDiscover: () => post<{ candidatesFound: number; status: string }>(`/consulting-radar/discover`, { includeSeeds: true }),
+  promoteConsulting: (id: string) => post<{ considered: number; promoted: number; skipped: number }>(`/consulting-radar/candidates/${id}/promote-to-company`),
+  campaigns: () => get<Campaign[]>(`/discovery/campaigns`),
+  runCampaign: (id: string) => post<FirehoseRun>(`/discovery/campaigns/${id}/run`, {}),
   companies: () => get<Company[]>("/companies"),
   jobs: () => get<Job[]>("/jobs"),
   opportunities: () => get<Opportunity[]>("/opportunities"),
