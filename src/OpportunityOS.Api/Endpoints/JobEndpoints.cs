@@ -101,6 +101,25 @@ public static class JobEndpoints
             return Results.Ok(new ValidateLinksResponse(r.Checked, r.Expired));
         });
 
+        // B10 — backfill source quality on jobs discovered before the classifier existed
+        // (they show as "Fonte a confirmar"). Classifies by URL; no network/LLM.
+        group.MapPost("/backfill-source-quality", async (
+            int? limit, OpportunityOsDbContext db, ISourceClassifierService classifier, CancellationToken ct) =>
+        {
+            var max = Math.Clamp(limit ?? 1000, 1, 10000);
+            // Old rows predate the column (stored 0); new unclassified ones are Unknown(7).
+            var jobs = await db.JobPostings
+                .Where(j => j.SourceType == (SourceType)0 || j.SourceType == SourceType.Unknown)
+                .Take(max).ToListAsync(ct);
+            foreach (var j in jobs)
+            {
+                var c = classifier.Classify(j.AbsoluteUrl, j.Title, j.DescriptionText);
+                j.SetSourceQuality(c.SourceType, c.SourceName, c.SourceConfidenceScore, c.RequiresManualValidation);
+            }
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new { updated = jobs.Count });
+        });
+
         group.MapPost("/{id:guid}/archive", async (Guid id, OpportunityOsDbContext db, CancellationToken ct) =>
         {
             var job = await db.JobPostings.FindAsync([id], ct);

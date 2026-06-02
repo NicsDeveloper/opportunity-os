@@ -178,17 +178,22 @@ não duplica; respeita rate-limit.
 
 ---
 
-## Resumo da ordem recomendada
-1. **B1** Agendamento automático (vira "máquina") 🟡
-2. **B2** Varredura real 1× (prova o volume) 🔴
-3. **B3** Telas Bacen/Consultorias/Campanhas 🟢
-4. **B4** Ações que faltam no Explorar tudo 🟡
-5. **B5** Testes de integração 🟢
-6. **B6** Fila de LLM 🟡
-7. **B7** Feedback no ranking 🟢
-8. **B8** Fallback IA no resolver de empresa 🟡
-9. **B9** Providers dedicados (incremental) 🟡
-10. **B10** Housekeeping (PR, warnings, backfill) 🟢
+## Status (atualizado)
+1. **B1** Agendamento automático — ✅ **feito** (`b127681`)
+2. **B2** Varredura real 1× — ⏸ **aguarda aval de custo** (🔴 gasta cota Serper)
+3. **B3** Telas Bacen/Consultorias/Campanhas — ✅ **feito** (`1b9af2c`)
+4. **B4** Ações no Explorar tudo (achar original/ocultar) — ✅ **feito** (`975e546`)
+5. **B5** Testes de integração — ✅ **feito** (`45a38d8`)
+6. **B6** Fila de LLM — 🔜 **deferido** (incremental; os gates atuais já cobrem; rever após B2)
+7. **B7** Feedback no ranking — ✅ **feito** (`08d80dc`)
+8. **B8** Fallback IA no resolver de empresa — 🔜 **deferido** (heurística cobre; rever após B2)
+9. **B9** Providers dedicados — 🔜 **deferido** (Firehose já cobre; guiar pelo provider-quality)
+10. **B10** Housekeeping — ✅ **parcial**: backfill de fonte feito (`/api/jobs/backfill-source-quality`,
+    377 vagas); **pendente**: abrir PR (sem `gh`/token) e avaliar warning NU1903.
+
+**Próximo passo natural:** B2 (com seu aval de cota) — rodar uma varredura real mostra
+o volume e indica se B6/B8/B9 valem o esforço. Os deferidos são, por definição da spec,
+incrementais e guiados por dados.
 
 **Regra de custo:** B1/B2/B4/B6/B8/B9 tocam Serper/LLM — sempre sob `QueryBudgetManager`.
 Os 🟢 (B3/B5/B7/B10) podem ser feitos a qualquer momento sem gastar cota.
