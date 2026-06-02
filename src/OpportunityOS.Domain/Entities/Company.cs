@@ -84,4 +84,10 @@ public sealed class Company
     {
         if (!string.IsNullOrWhiteSpace(tag) && !Tags.Contains(tag)) Tags.Add(tag);
     }
+
+    /// <summary>Raise priority toward <paramref name="priority"/>; never downgrades an existing one.</summary>
+    public void RaisePriorityTo(CompanyPriority priority)
+    {
+        if ((int)priority > (int)Priority) Priority = priority;
+    }
 }
