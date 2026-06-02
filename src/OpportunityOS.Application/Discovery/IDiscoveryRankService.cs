@@ -24,4 +24,7 @@ public interface IDiscoveryRankService
     int ComputeDiscoveryRank(DiscoveryRankInput input);
     int FreshnessScore(DateTime effectiveUtc);
     int CompanyPriorityScore(CompanyPriority priority);
+
+    /// <summary>Boost (0–100, neutro=50) derivado do feedback do usuário sobre a vaga.</summary>
+    int FeedbackBoost(IEnumerable<UserFeedbackType> feedback);
 }

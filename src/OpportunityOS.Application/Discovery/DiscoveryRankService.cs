@@ -41,5 +41,24 @@ public sealed class DiscoveryRankService : IDiscoveryRankService
         _ => 25,
     };
 
+    public int FeedbackBoost(IEnumerable<UserFeedbackType> feedback)
+    {
+        var boost = 50; // neutral
+        foreach (var f in feedback)
+            boost += f switch
+            {
+                UserFeedbackType.Applied => 30,
+                UserFeedbackType.Relevant => 25,
+                UserFeedbackType.ContactedRecruiter => 20,
+                UserFeedbackType.InterestingCompany => 15,
+                UserFeedbackType.Irrelevant => -40,
+                UserFeedbackType.HideSimilar => -30,
+                UserFeedbackType.BadScore => -15,
+                UserFeedbackType.BadCompanyDetection => -10,
+                _ => 0,
+            };
+        return Clamp(boost);
+    }
+
     private static int Clamp(int v) => Math.Clamp(v, 0, 100);
 }

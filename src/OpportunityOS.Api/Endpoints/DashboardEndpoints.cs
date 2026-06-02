@@ -97,6 +97,18 @@ public static class DashboardEndpoints
                 .ToList();
             if (filtered.Count == 0) return Results.Ok(Array.Empty<BestOpportunityResponse>());
 
+            // User feedback (B7): hide jobs marked irrelevant/ocultar; boost/penalize the rest.
+            var feedback = await db.UserFeedbacks
+                .Where(f => f.JobPostingId != null && jobIds.Contains(f.JobPostingId!.Value))
+                .ToListAsync(ct);
+            var fbByJob = feedback.GroupBy(f => f.JobPostingId!.Value)
+                .ToDictionary(g => g.Key, g => g.Select(f => f.Type).ToList());
+            var hidden = fbByJob
+                .Where(kv => kv.Value.Any(t => t == UserFeedbackType.Irrelevant || t == UserFeedbackType.HideSimilar))
+                .Select(kv => kv.Key).ToHashSet();
+            filtered = filtered.Where(m => !hidden.Contains(m.JobPostingId)).ToList();
+            if (filtered.Count == 0) return Results.Ok(Array.Empty<BestOpportunityResponse>());
+
             var companyIds = filtered.Select(m => jobs[m.JobPostingId].CompanyId).Distinct().ToList();
             var companies = await db.Companies.Where(c => companyIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
 
@@ -104,8 +116,9 @@ public static class DashboardEndpoints
             {
                 var job = jobs[m.JobPostingId];
                 companies.TryGetValue(job.CompanyId, out var c);
+                var boost = ranker.FeedbackBoost(fbByJob.TryGetValue(m.JobPostingId, out var types) ? types : Enumerable.Empty<UserFeedbackType>());
                 return ranker.ComputeDiscoveryRank(new DiscoveryRankInput(
-                    m.OverallScore, job.SourceConfidenceScore, job.EffectiveDateUtc, c?.Priority ?? CompanyPriority.Low));
+                    m.OverallScore, job.SourceConfidenceScore, job.EffectiveDateUtc, c?.Priority ?? CompanyPriority.Low, boost));
             }
 
             // Freshness bonus keeps relevance primary within the fresh window (default sort);
