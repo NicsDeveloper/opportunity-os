@@ -172,6 +172,15 @@ tr:last-child td { border-bottom: none; }
 .tab:hover { background: #f3f4f6; }
 .tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
+/* Filter bar (região / contrato) */
+.filterbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 14px; }
+.flabel { font-size: 12px; color: var(--muted); font-weight: 600; }
+.chipgroup { display: inline-flex; gap: 4px; margin-right: 8px; }
+.chiptab { border: 1px solid var(--border); background: #fff; border-radius: 999px; padding: 4px 11px;
+  font-size: 12px; cursor: pointer; color: #374151; }
+.chiptab:hover { background: #f3f4f6; }
+.chiptab.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 700; }
+
 /* Source provenance badge */
 .srcbadge { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
 .src-pill { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }

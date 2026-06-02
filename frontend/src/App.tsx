@@ -96,6 +96,8 @@ function Feed({ reload, notify, onChanged }: {
   const summary = useAsync(api.summary, [reload]);
   const [view, setView] = useState<FeedView>("action");
   const [busy, setBusy] = useState(false);
+  const [region, setRegion] = useState("all");
+  const [contract, setContract] = useState("all");
   const s = summary.data;
 
   const runSearch = async () => {
@@ -142,8 +144,17 @@ function Feed({ reload, notify, onChanged }: {
           </button>
         </div>
 
-        {view === "action" && <ActionView reload={reload} notify={notify} onChanged={onChanged} />}
-        {view === "qualified" && <QualifiedView reload={reload} notify={notify} onChanged={onChanged} />}
+        {(view === "action" || view === "qualified") && (
+          <div className="filterbar">
+            <span className="flabel">Onde:</span>
+            <ChipGroup value={region} onChange={setRegion} options={[["all", "Todas"], ["national", "🇧🇷 Brasil"], ["international", "🌎 Exterior"]]} />
+            <span className="flabel">Contrato:</span>
+            <ChipGroup value={contract} onChange={setContract} options={[["all", "Ambos"], ["clt", "CLT"], ["pj", "PJ"]]} />
+          </div>
+        )}
+
+        {view === "action" && <ActionView reload={reload} region={region} contract={contract} notify={notify} onChanged={onChanged} />}
+        {view === "qualified" && <QualifiedView reload={reload} region={region} contract={contract} notify={notify} onChanged={onChanged} />}
         {view === "firehose" && <FirehoseView reload={reload} notify={notify} onChanged={onChanged} />}
         {view === "discover" && <DiscoverMoreView reload={reload} notify={notify} onChanged={onChanged} />}
       </div>
@@ -151,9 +162,22 @@ function Feed({ reload, notify, onChanged }: {
   );
 }
 
+/* filter chips (região / contrato) */
+function ChipGroup({ value, onChange, options }: {
+  value: string; onChange: (v: string) => void; options: [string, string][];
+}) {
+  return (
+    <span className="chipgroup">
+      {options.map(([v, label]) => (
+        <button key={v} className={"chiptab" + (value === v ? " active" : "")} onClick={() => onChange(v)}>{label}</button>
+      ))}
+    </span>
+  );
+}
+
 /* ---------- Action Today: poucas, acionáveis (Fit >= 75) ---------- */
-function ActionView({ reload, notify, onChanged }: { reload: number; notify: (m: string) => void; onChanged: () => void }) {
-  const opps = useAsync(api.actionToday, [reload]);
+function ActionView({ reload, region, contract, notify, onChanged }: { reload: number; region: string; contract: string; notify: (m: string) => void; onChanged: () => void }) {
+  const opps = useAsync(() => api.actionToday(region, contract), [reload, region, contract]);
   const all = opps.data ?? [];
   return (
     <>
@@ -166,8 +190,8 @@ function ActionView({ reload, notify, onChanged }: { reload: number; notify: (m:
 }
 
 /* ---------- Qualified: triado, ordenado por DiscoveryRank, paginado ---------- */
-function QualifiedView({ reload, notify, onChanged }: { reload: number; notify: (m: string) => void; onChanged: () => void }) {
-  const opps = useAsync(() => api.qualified(120), [reload]);
+function QualifiedView({ reload, region, contract, notify, onChanged }: { reload: number; region: string; contract: string; notify: (m: string) => void; onChanged: () => void }) {
+  const opps = useAsync(() => api.qualified(120, region, contract), [reload, region, contract]);
   const [page, setPage] = useState(0);
   const all = opps.data ?? [];
   const pageCount = Math.max(1, Math.ceil(all.length / PAGE_SIZE));

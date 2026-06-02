@@ -9,6 +9,33 @@ namespace OpportunityOS.Api.Endpoints;
 
 public static class DashboardEndpoints
 {
+    private static readonly string[] BrSignals =
+        { "brasil", "brazil", "latam", "remoto", "são paulo", "sao paulo", "rio de janeiro",
+          "belo horizonte", "curitiba", "porto alegre", "florianópolis", "florianopolis",
+          "recife", "campinas", "brasília", "brasilia", "clt", "pj", "pessoa jurídica" };
+    private static readonly string[] IntlSignals =
+        { "united states", " usa", "u.s.", "united kingdom", " uk ", "newcastle", "london",
+          "europe", "european", "canada", "india", "poland", "germany", "spain", "ireland",
+          "amsterdam", "berlin", "lisbon", "portugal", "est time zone", "cet ", "gmt", "anywhere" };
+
+    /// <summary>Heuristic: BR signal -> national; else an explicit foreign signal -> international.</summary>
+    private static bool IsInternational(JobPosting j)
+    {
+        var t = $"{j.Title} {j.Location} {j.DescriptionText}".ToLowerInvariant();
+        if (BrSignals.Any(b => t.Contains(b))) return false;
+        return IntlSignals.Any(x => t.Contains(x));
+    }
+
+    private static (bool Clt, bool Pj) ContractTypes(JobPosting j)
+    {
+        var t = $"{j.Title} {j.DescriptionText}";
+        var clt = System.Text.RegularExpressions.Regex.IsMatch(t, @"\bCLT\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var lower = t.ToLowerInvariant();
+        var pj = System.Text.RegularExpressions.Regex.IsMatch(t, @"\bPJ\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+            || lower.Contains("pessoa jurídica") || lower.Contains("contractor");
+        return (clt, pj);
+    }
+
     public static void MapDashboardEndpoints(this IEndpointRouteBuilder app)
     {
         // Aggregate counts + "today" deltas for the dashboard cards.
@@ -68,6 +95,7 @@ public static class DashboardEndpoints
         // recent ones get a ranking bonus so a fresh role outranks an old high-scoring one.
         app.MapGet("/api/matches", async (
             int? minScore, int? take, int? freshDays, int? maxAgeDays, string? sort,
+            string? region, string? contract,
             OpportunityOsDbContext db, IDiscoveryRankService ranker, CancellationToken ct) =>
         {
             var min = minScore ?? 60;                  // relevance-first: hide weak matches
@@ -107,6 +135,19 @@ public static class DashboardEndpoints
                 .Where(kv => kv.Value.Any(t => t == UserFeedbackType.Irrelevant || t == UserFeedbackType.HideSimilar))
                 .Select(kv => kv.Key).ToHashSet();
             filtered = filtered.Where(m => !hidden.Contains(m.JobPostingId)).ToList();
+
+            // Region + contract filters (user can ask national/international, PJ/CLT, or both).
+            if (!string.Equals(region, "all", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(region))
+                filtered = filtered.Where(m => string.Equals(region, "international", StringComparison.OrdinalIgnoreCase)
+                    ? IsInternational(jobs[m.JobPostingId]) : !IsInternational(jobs[m.JobPostingId])).ToList();
+            if (!string.Equals(contract, "all", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(contract))
+                filtered = filtered.Where(m =>
+                {
+                    var (clt, pj) = ContractTypes(jobs[m.JobPostingId]);
+                    var either = !clt && !pj; // unknown -> keep (don't over-filter BR posts that don't state it)
+                    return string.Equals(contract, "pj", StringComparison.OrdinalIgnoreCase) ? (pj || either) : (clt || either);
+                }).ToList();
+
             if (filtered.Count == 0) return Results.Ok(Array.Empty<BestOpportunityResponse>());
 
             var companyIds = filtered.Select(m => jobs[m.JobPostingId].CompanyId).Distinct().ToList();

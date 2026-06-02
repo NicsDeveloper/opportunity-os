@@ -12,7 +12,9 @@ public sealed class SourceClassifierService : ISourceClassifierService
 {
     private static readonly string[] AtsHosts =
         { "greenhouse.io", "lever.co", "ashbyhq.com", "smartrecruiters.com", "workdayjobs.com", "myworkdayjobs.com",
-          "teamtailor.com", "recruitee.com", "workable.com", "breezy.hr" };
+          "teamtailor.com", "recruitee.com", "workable.com", "breezy.hr",
+          "quickin.io", "solides.com.br", "kenoby.com", "jobconvo.com", "99jobs.com", "abler.com.br",
+          "pandape.com", "inhire.app" };
     private static readonly string[] JobBoards =
         { "programathor", "geekhunter", "coodesh", "remotar", "trampos", "apinfo", "vagas.com" };
     private static readonly string[] Aggregators =

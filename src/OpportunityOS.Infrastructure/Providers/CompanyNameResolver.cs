@@ -106,10 +106,13 @@ public sealed partial class CompanyNameResolver : ICompanyNameResolver
         try { var u = new Uri(url); host = u.Host.Replace("www.", "", StringComparison.OrdinalIgnoreCase); path = u.AbsolutePath; }
         catch { return null; }
 
-        // boards.greenhouse.io/<company>/..., jobs.lever.co/<handle>/..., jobs.ashbyhq.com/<board>
+        // Platforms that encode the company as the first path segment:
+        //   boards.greenhouse.io/<company>, jobs.lever.co/<handle>, jobs.quickin.io/<company>/jobs/<id>, ...
         var pathToken = path.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
-        if (host.Contains("greenhouse.io") || host.Contains("lever.co") || host.Contains("ashbyhq.com") || host.Contains("smartrecruiters.com"))
-            return string.IsNullOrWhiteSpace(pathToken) ? null : Clean(pathToken);
+        string[] pathSlugHosts = { "greenhouse.io", "lever.co", "ashbyhq.com", "smartrecruiters.com",
+            "quickin.io", "kenoby.com", "jobconvo.com", "99jobs.com" };
+        if (pathSlugHosts.Any(h => host.Contains(h, StringComparison.OrdinalIgnoreCase)))
+            return string.IsNullOrWhiteSpace(pathToken) || pathToken is "jobs" or "vagas" or "job" ? null : Clean(pathToken);
 
         // <company>.gupy.io / <tenant>.myworkdayjobs.com -> subdomain.
         if (host.Contains("gupy.io") || host.Contains("myworkdayjobs.com") || host.Contains("workdayjobs.com"))
