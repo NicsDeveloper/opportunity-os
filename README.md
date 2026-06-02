@@ -339,6 +339,17 @@ sinais explicáveis (`ConsultingSignals`: +consultoria/+outsourcing/+transforma�
 Company (Source=SearchDiscovery, tags consulting/outsourcing/software-house, prioridade por
 confiança) **só com confiança ≥ 70**. Endpoints `/api/consulting-radar/*`.
 
+### Descoberta automática (Worker)
+
+O Worker mantém o Firehose se enchendo sozinho (B1), tudo budget-guarded:
+- **`firehose-sweep`** (`Jobs:FirehoseCron`, default `0 */4 * * *`) — busca ampla periódica.
+- **`promote-candidates`** (`Jobs:PromotionCron`, default `30 */4 * * *`) — promove candidatos com
+  empresa confirmada para o feed qualificado (heurístico, sem LLM).
+- **`bacen-financial-sweep`** e **`consulting-radar`** — varreduras caras, **opt-in** via
+  `FeatureFlags:EnableBacenSweepJob` / `EnableConsultingRadarJob` (off por padrão), crons próprios.
+
+Quando o budget diário esgota, a varredura para com `CompletedWithBudgetLimit` — nunca estoura a cota.
+
 ## AI Copilot Layer (Fase 3)
 
 Camada explícita de IA que **interpreta, analisa e redige** — mantendo ações externas

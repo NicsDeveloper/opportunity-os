@@ -23,6 +23,10 @@ builder.Services.AddScoped<DiscoverJobsJob>();
 builder.Services.AddScoped<SearchJobsJob>();
 builder.Services.AddScoped<ValidateLinksJob>();
 builder.Services.AddScoped<SendDailyDigestJob>();
+builder.Services.AddScoped<FirehoseSweepJob>();
+builder.Services.AddScoped<PromoteCandidatesJob>();
+builder.Services.AddScoped<BacenFinancialSweepJob>();
+builder.Services.AddScoped<ConsultingRadarJob>();
 builder.Services.AddHostedService<RecurringJobScheduler>();
 
 var host = builder.Build();
