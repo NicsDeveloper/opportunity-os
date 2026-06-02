@@ -122,7 +122,12 @@ button { font-family: inherit; }
 
 /* main actions hidden until hover */
 .oppcard .c-actions { opacity: 0; transform: translateX(8px); pointer-events: none; transition: opacity .18s ease, transform .18s ease; }
-.oppcard:hover .c-actions { opacity: 1; transform: none; pointer-events: auto; }
+.oppcard:hover .c-actions,
+.oppcard.menu-open .c-actions { opacity: 1; transform: none; pointer-events: auto; }
+/* Keep the card "open" (no collapse/reflow) while its menu is open, so moving the
+   mouse onto the menu items doesn't make the card lose :hover and jump. */
+.oppcard.menu-open { box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+.oppcard.menu-open .card-x { opacity: 1; transform: scale(1); }
 
 /* leave / enter animations */
 .card.leaving { overflow: hidden; animation: cardOut .28s ease forwards; }
@@ -136,7 +141,7 @@ button { font-family: inherit; }
 .card.done.applied { background: var(--good-soft); border-color: #bbf0cd; color: #15803d; }
 .card.done.hidden { background: #f4f4f8; color: var(--muted); }
 
-.card-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.9fr) 92px 150px 38px; gap: 14px; align-items: center; min-height: 92px; }
+.card-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.9fr) 150px 92px 38px; gap: 14px; align-items: center; min-height: 92px; }
 
 .c-id { display: flex; gap: 12px; align-items: center; min-width: 0; }
 .logo { width: 40px; height: 40px; border-radius: 10px; color: #fff; font-weight: 700; font-size: 14px;
@@ -267,7 +272,7 @@ button { font-family: inherit; }
 
 /* responsive */
 @media (max-width: 1080px) {
-  .card-row { grid-template-columns: minmax(0,1.4fr) 92px 150px 38px; }
+  .card-row { grid-template-columns: minmax(0,1.4fr) 150px 92px 38px; }
   .c-reason { display: none; }
 }
 @media (max-width: 760px) {
