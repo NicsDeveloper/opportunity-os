@@ -103,33 +103,33 @@ function Sidebar({ section, setSection, reload, name, headline }: {
 
 /* ====================== Oportunidades (main) ====================== */
 
-type OppView = "action" | "qualified" | "all";
+const PAGE_SIZE = 10;
 
 function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
   reload: number; notify: (m: string) => void; onChanged: () => void; firstName: string;
 }) {
-  const [view, setView] = useState<OppView>("action");
   const [region, setRegion] = useState("all");
   const [contract, setContract] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
+  const [page, setPage] = useState(0);
 
-  const fetcher =
-    view === "action" ? () => api.actionToday(region, contract)
-    : view === "qualified" ? () => api.qualified(60, region, contract)
-    : () => api.allOpportunities(80, region, contract);
-  const opps = useAsync(fetcher, [reload, view, region, contract]);
-
+  const opps = useAsync(() => api.qualified(80, region, contract), [reload, region, contract]);
   const last = useAsync(() => api.runs(1), [reload]);
+
   const all = (opps.data ?? [])
-    // "Para você hoje" = só vagas prontas pra ação: sem agregadores/fontes fracas.
-    .filter((o) => view !== "action" || !isWeakSource(o))
-    .filter((o) => !query.trim() || `${o.jobTitle} ${o.companyName}`.toLowerCase().includes(query.trim().toLowerCase()));
+    .filter((o) => !query.trim() || `${o.jobTitle} ${o.companyName}`.toLowerCase().includes(query.trim().toLowerCase()))
+    // Ordenar por aderência (score) — fontes fracas empatadas ficam abaixo.
+    .sort((a, b) => (b.overallScore - a.overallScore) || (Number(isWeakSource(a)) - Number(isWeakSource(b))));
   const activeFilters = (region !== "all" ? 1 : 0) + (contract !== "all" ? 1 : 0);
+  const pageCount = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+  const current = Math.min(page, pageCount - 1);
+  const shown = all.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE);
+  useEffect(() => { setPage(0); }, [region, contract, query, opps.data?.length]);
 
   const runSearch = async () => {
-    setBusy(true); notify("Procurando novas vagas .NET…");
+    setBusy(true); notify("Buscando novas vagas .NET…");
     try { await api.search([
       "desenvolvedor .net", "desenvolvedor backend c#", "engenheiro de software .net",
       "vaga .net remoto", "desenvolvedor .net fintech",
@@ -138,12 +138,6 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
     finally { setBusy(false); }
   };
 
-  const heading = view === "action" ? "Para você hoje" : view === "qualified" ? "Boas opções" : "Todas as oportunidades";
-  const subtext = view === "action"
-    ? "As melhores oportunidades com alta aderência ao seu perfil."
-    : view === "qualified" ? "Vagas selecionadas que valem a pena conferir."
-    : "Tudo que encontramos recentemente, ordenado pela relevância pra você.";
-
   return (
     <>
       <header className="hdr">
@@ -151,7 +145,7 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
           <h1>{greeting()}, {firstName}! <span className="wave">👋</span></h1>
           <p className="hdr-sub">
             {opps.data
-              ? `Encontrei ${all.length} ${all.length === 1 ? "oportunidade excelente" : "oportunidades excelentes"} para você hoje.`
+              ? `Encontrei ${all.length} ${all.length === 1 ? "oportunidade" : "oportunidades"} com boa aderência ao seu perfil.`
               : "Procurando as melhores oportunidades pra você…"}
           </p>
         </div>
@@ -165,8 +159,8 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
       <div className="section-bar">
         <div className="sb-left">
           <span className="sb-mark"><Icon name="target" size={18} /></span>
-          <h2>{heading}</h2>
-          <span className="badge">{all.length} {all.length === 1 ? "oportunidade" : "oportunidades"}</span>
+          <h2>Oportunidades pra você</h2>
+          <span className="badge">{all.length}</span>
         </div>
         <div className="sb-right">
           <div className="searchbox">
@@ -176,17 +170,10 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
           <button className={"btn ghost" + (activeFilters ? " on" : "")} onClick={() => setShowFilters((v) => !v)}>
             <Icon name="filter" size={16} /> Filtros {activeFilters > 0 && <span className="dot-badge">{activeFilters}</span>}
           </button>
+          <button className="btn primary sm" disabled={busy} onClick={runSearch}>{busy ? "Buscando…" : "Buscar agora"}</button>
         </div>
       </div>
-      <p className="sb-sub">{subtext}</p>
-
-      <div className="modebar">
-        <Seg value={view} onChange={(v) => setView(v as OppView)} options={[
-          ["action", "Para você hoje"], ["qualified", "Boas opções"], ["all", "Todas"]]} />
-        <button className="btn primary sm" disabled={busy} onClick={runSearch}>
-          {busy ? "Buscando…" : "Buscar agora"}
-        </button>
-      </div>
+      <p className="sb-sub">As melhores oportunidades, ordenadas pela aderência ao seu perfil.</p>
 
       {showFilters && (
         <div className="filterpanel">
@@ -199,15 +186,23 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
 
       <div className="opplist">
         {opps.error && <p className="err">{opps.error}</p>}
-        {all.map((o) => <OppCard key={o.matchId} o={o} notify={notify} onChanged={onChanged} />)}
+        {shown.map((o) => <OppCard key={o.matchId} o={o} notify={notify} onChanged={onChanged} />)}
         {opps.data && all.length === 0 && (
           <div className="empty">
             <p>Nada por aqui agora.</p>
-            <p className="empty-s">Tente <b>Boas opções</b>, ajuste os filtros, ou toque em <b>Procurar vagas</b>.</p>
+            <p className="empty-s">Ajuste os filtros ou toque em <b>Buscar agora</b>.</p>
           </div>
         )}
         {!opps.data && !opps.error && <CardSkeletons />}
       </div>
+
+      {all.length > PAGE_SIZE && (
+        <div className="pager">
+          <button className="btn" disabled={current === 0} onClick={() => setPage(current - 1)}>‹ Anterior</button>
+          <span className="pager-info">Página {current + 1} de {pageCount} · {all.length} vagas</span>
+          <button className="btn" disabled={current >= pageCount - 1} onClick={() => setPage(current + 1)}>Próxima ›</button>
+        </div>
+      )}
     </>
   );
 }
@@ -299,20 +294,20 @@ function OppCard({ o, notify, onChanged }: {
           <div className="act2">
             <button className="btn xs" disabled={busy} onClick={openDraft}>{busy ? "…" : draft ? "Ocultar" : "Rascunho"}</button>
             <button className="btn xs ok" onClick={() => act("Applied", "applied", "feito")}>Feito</button>
-          </div>
-          <div className="menuwrap">
-            <button className="kebab" title="Mais ações" onClick={() => setMenu((v) => !v)}><Icon name="more" size={15} /></button>
-            {menu && (
-              <>
-                <div className="menu-scrim" onClick={() => setMenu(false)} />
-                <div className="menu">
-                  <button onClick={() => { setMenu(false); setOpen((v) => !v); }}>ℹ️ Ver detalhes</button>
-                  <button onClick={() => act("HideSimilar", "hidden", "ocultada")}>🙈 Ocultar</button>
-                  <button onClick={() => act("Irrelevant", "hidden", "irrelevante")}>👎 Irrelevante</button>
-                  <button onClick={() => act("BadCompanyDetection", "hidden", "empresa errada")}>🏢 Empresa errada</button>
-                </div>
-              </>
-            )}
+            <div className="menuwrap">
+              <button className="kebab" title="Mais ações" onClick={() => setMenu((v) => !v)}><Icon name="more" size={16} /></button>
+              {menu && (
+                <>
+                  <div className="menu-scrim" onClick={() => setMenu(false)} />
+                  <div className="menu">
+                    <button onClick={() => { setMenu(false); setOpen((v) => !v); }}>ℹ️ Ver detalhes</button>
+                    <button onClick={() => act("HideSimilar", "hidden", "ocultada")}>🙈 Ocultar</button>
+                    <button onClick={() => act("Irrelevant", "hidden", "irrelevante")}>👎 Irrelevante</button>
+                    <button onClick={() => act("BadCompanyDetection", "hidden", "empresa errada")}>🏢 Empresa errada</button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -550,13 +545,6 @@ function SimpleHeader({ title, sub }: { title: string; sub: string }) {
   return <header className="hdr"><div><h1>{title}</h1><p className="hdr-sub">{sub}</p></div></header>;
 }
 
-function Seg({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: [string, string][] }) {
-  return (
-    <div className="seg">
-      {options.map(([v, l]) => <button key={v} className={value === v ? "active" : ""} onClick={() => onChange(v)}>{l}</button>)}
-    </div>
-  );
-}
 function Chips({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: [string, string][] }) {
   return <span className="chips-g">{options.map(([v, l]) => <button key={v} className={"chip-b" + (value === v ? " active" : "")} onClick={() => onChange(v)}>{l}</button>)}</span>;
 }
