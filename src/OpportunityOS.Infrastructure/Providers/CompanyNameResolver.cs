@@ -114,11 +114,13 @@ public sealed partial class CompanyNameResolver : ICompanyNameResolver
         if (pathSlugHosts.Any(h => host.Contains(h, StringComparison.OrdinalIgnoreCase)))
             return string.IsNullOrWhiteSpace(pathToken) || pathToken is "jobs" or "vagas" or "job" ? null : Clean(pathToken);
 
-        // <company>.gupy.io / <tenant>.myworkdayjobs.com -> subdomain.
-        if (host.Contains("gupy.io") || host.Contains("myworkdayjobs.com") || host.Contains("workdayjobs.com"))
+        // <company>.gupy.io / <tenant>.myworkdayjobs.com / <company>.{solides|abler|pandape|recrutei}... -> subdomain.
+        if (host.Contains("gupy.io") || host.Contains("myworkdayjobs.com") || host.Contains("workdayjobs.com")
+            || host.Contains("solides.com.br") || host.Contains("abler.com.br") || host.Contains("pandape.com")
+            || host.Contains("recrutei.com.br"))
         {
             var sub = host.Split('.').FirstOrDefault();
-            return string.IsNullOrWhiteSpace(sub) || sub is "jobs" or "boards" ? null : Clean(sub);
+            return string.IsNullOrWhiteSpace(sub) || sub is "jobs" or "boards" or "app" or "vagas" or "carreiras" ? null : Clean(sub);
         }
 
         // Generic: second-level domain (acme.com -> Acme). Skip obvious non-companies and
