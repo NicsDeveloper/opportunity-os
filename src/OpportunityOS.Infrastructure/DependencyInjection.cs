@@ -10,6 +10,7 @@ using OpportunityOS.Application.Discovery;
 using OpportunityOS.Application.Matching;
 using OpportunityOS.Application.Normalization;
 using OpportunityOS.Application.Pipeline;
+using OpportunityOS.Application.Profiles;
 using OpportunityOS.Infrastructure.Ai;
 using OpportunityOS.Infrastructure.Bacen;
 using OpportunityOS.Infrastructure.Email;
@@ -33,6 +34,7 @@ public static class DependencyInjection
 
         services.AddScoped<IJobNormalizer, JobNormalizer>();
         services.AddScoped<IMatchEngine, HeuristicMatchEngine>();
+        services.AddScoped<ICurrentCandidateProfileProvider, EfCurrentCandidateProfileProvider>();
         services.AddSingleton<ISourceClassifierService, SourceClassifierService>();
         services.AddSingleton<ICompanyNameResolver, CompanyNameResolver>();
         services.AddSingleton<IJobFingerprintService, JobFingerprintService>();

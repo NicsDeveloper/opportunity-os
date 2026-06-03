@@ -25,7 +25,8 @@ public static class Mapping
     public static CandidateProfileResponse ToResponse(this CandidateProfile p) =>
         new(p.Id, p.FullName, p.Headline, p.Summary, p.Location, p.Seniority, p.PreferredLanguage,
             p.CoreSkills, p.SecondarySkills, p.Domains, p.PreferredRoles, p.PreferredContractTypes,
-            p.PreferredLocations, p.Experiences.Select(ToDto).ToList(), p.CreatedAtUtc, p.UpdatedAtUtc);
+            p.PreferredLocations, p.Experiences.Select(ToDto).ToList(), p.CreatedAtUtc, p.UpdatedAtUtc,
+            p.DisplayName, p.IsDefault, p.ExcludedStacks, p.PreferredWorkModes, p.MinimumScoreToShow);
 
     public static CompanyResponse ToResponse(this Company c) =>
         new(c.Id, c.Name, c.WebsiteUrl, c.CareersUrl, c.LinkedInUrl, c.Industry, c.Country,
