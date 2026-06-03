@@ -48,19 +48,21 @@ public static class DashboardEndpoints
         return "unknown";
     }
 
-    // Company embedded in the title ("... at MARGO", "- FCamara -", "| Stone", "na Dock", "@ Acme").
+    // Company embedded in the title — only the high-confidence "at/@/na/em COMPANY" forms
+    // ("... at MARGO", "na Dock", "@ Acme"). Dash/pipe forms are too noisy (they capture the role).
+    private static readonly string[] NotCompanyToken =
+        { "remoto", "remote", "brasil", "brazil", "latam", "home", "office", "híbrido", "hibrido",
+          "presencial", "casa", "gupy", "recrutei", "linkedin", "indeed", "glassdoor",
+          "desenvolvedor", "desenvolvedora", "analista", "engineer", "engenheir", "developer",
+          "senior", "sênior", "pleno", "junior", "júnior", "vaga", "programador", "fullstack", "backend" };
     private static string? CompanyFromTitle(string title)
     {
         foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
-            title, @"(?:\bat\s+|\bna\s+|\bem\s+|@\s*|[-|–]\s*)([A-Z][\w&.''\- ]{1,28})",
-            System.Text.RegularExpressions.RegexOptions.None))
+            title, @"(?:\bat\s+|\bna\s+|\bem\s+|@\s*)([A-Z][\w&.'\-]+(?:\s+[A-Z][\w&.'\-]+){0,2})"))
         {
-            var c = m.Groups[1].Value.Trim().TrimEnd('-', '|', '–', ' ');
+            var c = m.Groups[1].Value.Trim().TrimEnd('-', '|', '–', ',', '.', ' ');
             var cl = c.ToLowerInvariant();
-            // Reject non-company tokens that follow the same prepositions ("em Remoto", "na Brasil"…).
-            string[] notCompany = { "remoto", "remote", "brasil", "brazil", "latam", "home", "office",
-                "híbrido", "hibrido", "presencial", "casa", "gupy", "recrutei", "linkedin" };
-            if (c.Length >= 2 && !notCompany.Any(n => cl.Contains(n))) return c;
+            if (c.Length >= 2 && !NotCompanyToken.Any(n => cl.Contains(n))) return c;
         }
         return null;
     }
@@ -71,6 +73,27 @@ public static class DashboardEndpoints
         var noAccent = new string(lowered.Normalize(System.Text.NormalizationForm.FormD)
             .Where(ch => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch) != System.Globalization.UnicodeCategory.NonSpacingMark).ToArray());
         return System.Text.RegularExpressions.Regex.Replace(noAccent, @"[^a-z0-9]+", " ").Trim();
+    }
+
+    // Best company to SHOW: real name -> from the title -> (only if the source is the company's own
+    // ATS/career page) the stored name -> else honest "a confirmar" (don't show the aggregator host).
+    // Names that are an ATS/aggregator/board host, not a real employer.
+    private static readonly string[] HostNames =
+        { "lever", "greenhouse", "gupy", "ashby", "smartrecruiters", "workable", "recruitee", "teamtailor",
+          "jobrapido", "jobijoba", "jobleads", "instagram", "facebook", "reddit", "remoteleaf", "dailyremote",
+          "simplyhired", "jobgether", "remotejobs", "himalayas", "adzuna", "buscojobs", "talent", "indeed",
+          "glassdoor", "linkedin", "careers", "vaga de emprego", "trabajo", "empregos", "jooble" };
+    private static bool IsHostName(string? n) =>
+        !string.IsNullOrWhiteSpace(n) && HostNames.Any(h => n!.Trim().ToLowerInvariant() == h || n.Trim().ToLowerInvariant().StartsWith(h));
+
+    private static string BestCompany(JobPosting j, Company? c)
+    {
+        if (!string.IsNullOrWhiteSpace(j.RealCompanyName) && !IsHostName(j.RealCompanyName)) return j.RealCompanyName!;
+        var fromTitle = CompanyFromTitle(j.Title);
+        if (fromTitle is not null) return fromTitle;
+        if (j.SourceType is SourceType.OfficialAts or SourceType.OfficialCareerPage
+            && !string.IsNullOrWhiteSpace(c?.Name) && !IsHostName(c.Name)) return c!.Name;
+        return "Empresa a confirmar";
     }
 
     // Collapse the same job seen across aggregators: company (real -> from title) + normalized title.
@@ -288,7 +311,7 @@ public static class DashboardEndpoints
                 var job = jobs[m.JobPostingId];
                 companies.TryGetValue(job.CompanyId, out var c);
                 return new BestOpportunityResponse(
-                    m.Id, job.Id, job.Title, c?.Name ?? "(empresa)", job.ExtractedSkills.Take(4).ToList(),
+                    m.Id, job.Id, job.Title, BestCompany(job, c), job.ExtractedSkills.Take(4).ToList(),
                     m.OverallScore, m.Recommendation.ToString(), job.AbsoluteUrl, c?.WebsiteUrl,
                     job.EffectiveDateUtc, m.Rationale,
                     DiscoveryRankOf(m), job.SourceType.ToString(), job.SourceConfidenceScore,
