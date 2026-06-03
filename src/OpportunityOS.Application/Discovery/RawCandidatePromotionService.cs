@@ -134,7 +134,7 @@ public sealed class RawCandidatePromotionService : IRawCandidatePromotionService
                 await _discovery.AddMatchAsync(new OpportunityMatch(
                     job.Id, profile.Id, r.OverallScore, r.TechnicalScore, r.DomainScore, r.SeniorityScore,
                     r.LocationScore, r.LanguageScore, r.Recommendation, r.Strengths, r.Risks,
-                    r.MissingRequirements, r.Rationale), ct);
+                    r.MissingRequirements, r.Rationale, HeuristicMatchEngine.Version), ct);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Promotion scoring failed for {JobId}", job.Id); }
         }

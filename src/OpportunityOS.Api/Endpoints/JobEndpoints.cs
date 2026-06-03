@@ -5,6 +5,7 @@ using OpportunityOS.Domain.Entities;
 using OpportunityOS.Domain.Enums;
 using OpportunityOS.Application.Normalization;
 using OpportunityOS.Application.Pipeline;
+using OpportunityOS.Application.Profiles;
 using OpportunityOS.Contracts;
 using OpportunityOS.Infrastructure.Persistence;
 
@@ -55,17 +56,16 @@ public static class JobEndpoints
                 result.ProvidersInvoked, result.JobsDiscovered, result.JobsUpdated, result.Errors));
         });
 
-        // Manual analysis run: normalize + score against the active profile.
+        // Manual analysis run: normalize + score against the requested (or default) profile.
         group.MapPost("/{id:guid}/match", async (
-            Guid id, OpportunityOsDbContext db, IJobNormalizer normalizer, IMatchEngine engine,
+            Guid id, Guid? candidateProfileId, OpportunityOsDbContext db,
+            ICurrentCandidateProfileProvider profiles, IJobNormalizer normalizer, IMatchEngine engine,
             IOpportunityPipeline pipeline, CancellationToken ct) =>
         {
             var job = await db.JobPostings.FindAsync([id], ct);
             if (job is null) return Results.NotFound();
 
-            var profile = await db.CandidateProfiles
-                .OrderByDescending(p => p.CreatedAtUtc)
-                .FirstOrDefaultAsync(ct);
+            var profile = await profiles.GetAsync(candidateProfileId, ct);
             if (profile is null)
                 return Results.BadRequest("No candidate profile registered. Create one first.");
 
@@ -84,49 +84,76 @@ public static class JobEndpoints
             return Results.Ok(match.ToResponse());
         });
 
-        // Re-score every active matched job with the current heuristic engine (applies the
-        // technical gate retroactively). Writes a fresh match only when the score changed.
+        // Re-score active jobs with the current engine. By default ONLY the resolved/default profile
+        // is rescored; pass allProfiles=true to fan out to every profile (heavier). take caps the job
+        // set; engineVersion tags the produced matches. Writes a fresh match only when the score changed.
         group.MapPost("/rescore", async (
-            OpportunityOsDbContext db, IJobNormalizer normalizer, IMatchEngine engine, CancellationToken ct) =>
+            Guid? candidateProfileId, bool? allProfiles, int? take, string? engineVersion,
+            OpportunityOsDbContext db, ICurrentCandidateProfileProvider profiles,
+            IJobNormalizer normalizer, IMatchEngine engine, CancellationToken ct) =>
         {
-            var profile = await db.CandidateProfiles.OrderByDescending(p => p.CreatedAtUtc).FirstOrDefaultAsync(ct);
-            if (profile is null) return Results.BadRequest("No candidate profile registered.");
+            List<CandidateProfile> targets;
+            if (allProfiles == true)
+            {
+                targets = await db.CandidateProfiles.ToListAsync(ct);
+            }
+            else
+            {
+                var profile = await profiles.GetAsync(candidateProfileId, ct);
+                if (profile is null) return Results.BadRequest("No candidate profile registered.");
+                targets = new List<CandidateProfile> { profile };
+            }
+            if (targets.Count == 0) return Results.BadRequest("No candidate profile registered.");
+            var version = string.IsNullOrWhiteSpace(engineVersion) ? HeuristicMatchEngine.Version : engineVersion!;
 
             var run = ExecutionRun.Start("RescoreMatches");
             await db.ExecutionRuns.AddAsync(run, ct);
 
-            var scores = await db.OpportunityMatches
-                .Select(m => new { m.JobPostingId, m.OverallScore, m.CreatedAtUtc }).ToListAsync(ct);
-            var latest = scores.GroupBy(s => s.JobPostingId)
-                .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.CreatedAtUtc).First().OverallScore);
+            var jobsQuery = db.JobPostings
+                .Where(j => j.Status != JobPostingStatus.Expired && j.Status != JobPostingStatus.Archived)
+                .OrderByDescending(j => j.CreatedAtUtc);
+            var jobs = take is { } t
+                ? await jobsQuery.Take(Math.Clamp(t, 1, 100000)).ToListAsync(ct)
+                : await jobsQuery.ToListAsync(ct);
 
-            var jobs = await db.JobPostings
-                .Where(j => latest.Keys.Contains(j.Id)
-                    && j.Status != JobPostingStatus.Expired && j.Status != JobPostingStatus.Archived)
+            // Latest score per (job, profile) so we skip unchanged ones.
+            var pids = targets.Select(p => p.Id).ToList();
+            var existing = await db.OpportunityMatches
+                .Where(m => pids.Contains(m.CandidateProfileId))
+                .Select(m => new { m.JobPostingId, m.CandidateProfileId, m.OverallScore, m.CreatedAtUtc })
                 .ToListAsync(ct);
+            var latest = existing
+                .GroupBy(m => (m.JobPostingId, m.CandidateProfileId))
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(m => m.CreatedAtUtc).First().OverallScore);
 
             int rescored = 0, changed = 0;
             foreach (var job in jobs)
             {
                 var norm = normalizer.Normalize(job);
                 job.ApplyNormalization(norm.Seniority, norm.WorkMode, norm.Language, norm.Skills, norm.Domains);
-                var result = engine.Evaluate(profile, job);
-                rescored++;
-                if (latest.TryGetValue(job.Id, out var prev) && prev == result.OverallScore) continue;
-                db.OpportunityMatches.Add(result.ToEntity(job.Id, profile.Id));
-                changed++;
-                run.RecordSuccess();
+                foreach (var profile in targets)
+                {
+                    var result = engine.Evaluate(profile, job);
+                    rescored++;
+                    if (latest.TryGetValue((job.Id, profile.Id), out var prev) && prev == result.OverallScore) continue;
+                    db.OpportunityMatches.Add(result.ToEntity(job.Id, profile.Id, version));
+                    changed++;
+                    run.RecordSuccess();
+                }
             }
             run.Complete();
             await db.SaveChangesAsync(ct);
-            return Results.Ok(new { rescored, changed });
+            return Results.Ok(new { profiles = targets.Count, rescored, changed });
         });
 
-        // Latest match for a job, if any.
-        group.MapGet("/{id:guid}/match", async (Guid id, OpportunityOsDbContext db, CancellationToken ct) =>
+        // Latest match for a job for the requested (or default) profile.
+        group.MapGet("/{id:guid}/match", async (
+            Guid id, Guid? candidateProfileId, OpportunityOsDbContext db,
+            ICurrentCandidateProfileProvider profiles, CancellationToken ct) =>
         {
+            var profileId = await profiles.ResolveIdAsync(candidateProfileId, ct);
             var match = await db.OpportunityMatches
-                .Where(m => m.JobPostingId == id)
+                .Where(m => m.JobPostingId == id && (profileId == null || m.CandidateProfileId == profileId.Value))
                 .OrderByDescending(m => m.CreatedAtUtc)
                 .FirstOrDefaultAsync(ct);
             return match is null ? Results.NotFound() : Results.Ok(match.ToResponse());

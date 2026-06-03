@@ -81,6 +81,100 @@ public sealed class HeuristicMatchEngineTests
         Assert.True(result.OverallScore <= 70, $"Expected <= 70 but was {result.OverallScore}");
     }
 
+    // ---- Multi-profile: the engine must follow the candidate's stack, not a hardcoded .NET bias ----
+
+    [Fact]
+    public void JavaSpringJob_ScoresHigh_ForJavaProfile()
+    {
+        var engine = CreateEngine();
+        var job = TestData.Job(
+            title: "Senior Backend Engineer (Java / Spring)",
+            description: "Backend engineer with Java, Spring Boot, microservices, Kafka, AWS and PostgreSQL. " +
+                         "Fintech, banking. Remote, Brazil.",
+            location: "Remote - Brazil", language: "en");
+
+        var result = engine.Evaluate(TestData.JavaBackendProfile(), job);
+
+        Assert.True(result.OverallScore >= 85, $"Expected >= 85 but was {result.OverallScore}");
+    }
+
+    [Fact]
+    public void ReactTypeScriptJob_ScoresHigh_ForReactProfile()
+    {
+        var engine = CreateEngine();
+        var job = TestData.Job(
+            title: "Frontend Engineer Pleno (React / TypeScript)",
+            description: "Frontend engineer with React, TypeScript, Next.js, CSS and design systems for our SaaS product. " +
+                         "Remote, Brazil.",
+            location: "Remote - Brazil", language: "en");
+
+        var result = engine.Evaluate(TestData.ReactFrontendProfile(), job);
+
+        Assert.True(result.OverallScore >= 85, $"Expected >= 85 but was {result.OverallScore}");
+    }
+
+    [Fact]
+    public void DataEngineeringJob_ScoresHigh_ForDataProfile()
+    {
+        var engine = CreateEngine();
+        var job = TestData.Job(
+            title: "Senior Data Engineer (Python / Spark)",
+            description: "Data engineer building ETL pipelines and a data lake with Python, SQL, Airflow, Spark, " +
+                         "AWS Glue and Athena. Remote, Brazil.",
+            location: "Remote - Brazil", language: "en");
+
+        var result = engine.Evaluate(TestData.DataEngineerProfile(), job);
+
+        Assert.True(result.OverallScore >= 85, $"Expected >= 85 but was {result.OverallScore}");
+    }
+
+    [Fact]
+    public void PureDotNetJob_ScoresLow_ForReactProfile()
+    {
+        var engine = CreateEngine();
+        var job = TestData.Job(
+            title: "Senior Backend Engineer (.NET / C#)",
+            description: "Backend engineer with .NET, C#, ASP.NET Core and SQL Server. Remote, Brazil.",
+            location: "Remote - Brazil", language: "en");
+
+        var result = engine.Evaluate(TestData.ReactFrontendProfile(), job);
+
+        // A pure .NET role is NOT a good match for a React profile.
+        Assert.True(result.OverallScore < 50, $"Expected < 50 but was {result.OverallScore}");
+    }
+
+    [Fact]
+    public void FullstackReactDotNetJob_StaysRelevant_ForReactProfile()
+    {
+        var engine = CreateEngine();
+        var job = TestData.Job(
+            title: "Fullstack Developer (React / .NET)",
+            description: "Fullstack developer building React + TypeScript + Next.js frontends backed by a .NET, C# API. " +
+                         "Remote, Brazil.",
+            location: "Remote - Brazil", language: "en");
+
+        var result = engine.Evaluate(TestData.ReactFrontendProfile(), job);
+
+        // The candidate's CORE stack (React) is present -> still a strong pick ("salvo fullstack compatível").
+        Assert.True(result.OverallScore >= 75, $"Expected >= 75 but was {result.OverallScore}");
+    }
+
+    [Fact]
+    public void RemoteSeniorJob_WithoutTechnicalAdherence_IsGatedDown()
+    {
+        var engine = CreateEngine();
+        // A perfectly remote, senior, well-paid role — but in a stack the .NET candidate doesn't have.
+        var job = TestData.Job(
+            title: "Senior PHP Developer (Laravel)",
+            description: "Senior developer with PHP, Laravel, MySQL and REST APIs. Remote, Brazil. Great pay.",
+            location: "Remote - Brazil", language: "en");
+
+        var result = engine.Evaluate(TestData.BackendDotNetProfile(), job);
+
+        // Remote + senior must NOT lift a role with no technical adherence into the board.
+        Assert.True(result.OverallScore <= 45, $"Expected <= 45 (gated) but was {result.OverallScore}");
+    }
+
     [Fact]
     public void Evaluate_AlwaysProducesRationaleAndSubScoresInRange()
     {

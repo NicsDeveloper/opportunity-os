@@ -259,7 +259,7 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
             var match = new OpportunityMatch(
                 job.Id, profile.Id, r.OverallScore, r.TechnicalScore, r.DomainScore, r.SeniorityScore,
                 r.LocationScore, r.LanguageScore, r.Recommendation, r.Strengths, r.Risks,
-                r.MissingRequirements, r.Rationale);
+                r.MissingRequirements, r.Rationale, HeuristicMatchEngine.Version);
             await _store.AddMatchAsync(match, ct);
         }
         catch (Exception ex)

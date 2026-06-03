@@ -77,7 +77,8 @@ public sealed class EfDigestStore : IDigestStore
 
     public async Task<string?> GetCandidateNameAsync(CancellationToken ct) =>
         await _db.CandidateProfiles
-            .OrderByDescending(p => p.CreatedAtUtc)
+            .OrderByDescending(p => p.IsDefault)
+            .ThenByDescending(p => p.CreatedAtUtc)
             .Select(p => p.FullName)
             .FirstOrDefaultAsync(ct);
 

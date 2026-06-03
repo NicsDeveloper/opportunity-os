@@ -42,10 +42,11 @@ public static class Mapping
             m.SeniorityScore, m.LocationScore, m.LanguageScore, m.Recommendation.ToString(),
             m.Strengths, m.Risks, m.MissingRequirements, m.Rationale, m.CreatedAtUtc);
 
-    public static OpportunityMatch ToEntity(this MatchResult r, Guid jobId, Guid profileId) =>
+    public static OpportunityMatch ToEntity(this MatchResult r, Guid jobId, Guid profileId,
+        string engineVersion = HeuristicMatchEngine.Version) =>
         new(jobId, profileId, r.OverallScore, r.TechnicalScore, r.DomainScore, r.SeniorityScore,
             r.LocationScore, r.LanguageScore, r.Recommendation, r.Strengths, r.Risks,
-            r.MissingRequirements, r.Rationale);
+            r.MissingRequirements, r.Rationale, engineVersion);
 
     public static JobAnalysisResponse ToResponse(this JobAnalysisResult a) =>
         new(a.RequiredSkills, a.NiceToHaveSkills, a.Domains, a.Seniority, a.WorkMode, a.Language,

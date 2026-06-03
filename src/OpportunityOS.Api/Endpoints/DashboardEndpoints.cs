@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using OpportunityOS.Application.Discovery;
+using OpportunityOS.Application.Profiles;
 using OpportunityOS.Contracts;
 using OpportunityOS.Domain.Entities;
 using OpportunityOS.Domain.Enums;
@@ -36,10 +37,14 @@ public static class DashboardEndpoints
     public static void MapDashboardEndpoints(this IEndpointRouteBuilder app)
     {
         // Aggregate counts + "today" deltas for the dashboard cards.
-        app.MapGet("/api/dashboard/summary", async (OpportunityOsDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/dashboard/summary", async (
+            Guid? candidateProfileId, OpportunityOsDbContext db,
+            ICurrentCandidateProfileProvider profiles, CancellationToken ct) =>
         {
             var today = DateTime.UtcNow.Date;
             var now = DateTime.UtcNow;
+            // Strong-match counters are per profile (default unless one is requested).
+            var profileId = await profiles.ResolveIdAsync(candidateProfileId, ct);
 
             var jobs = await db.JobPostings.CountAsync(ct);
             var jobsToday = await db.JobPostings.CountAsync(j => j.CreatedAtUtc >= today, ct);
@@ -50,6 +55,7 @@ public static class DashboardEndpoints
             var publishedSince = DateTime.UtcNow.AddDays(-120);
             // Latest match per job FIRST, then the >=75 gate (a stale high match must not inflate the count).
             var allScores = await db.OpportunityMatches
+                .Where(m => profileId == null || m.CandidateProfileId == profileId.Value)
                 .Select(m => new { m.JobPostingId, m.OverallScore, m.CreatedAtUtc }).ToListAsync(ct);
             var strongLatest = allScores
                 .GroupBy(m => m.JobPostingId)
@@ -95,8 +101,9 @@ public static class DashboardEndpoints
         // recent ones get a ranking bonus so a fresh role outranks an old high-scoring one.
         app.MapGet("/api/matches", async (
             int? minScore, int? take, int? freshDays, int? maxAgeDays, string? sort,
-            string? region, string? contract,
-            OpportunityOsDbContext db, IDiscoveryRankService ranker, IFeedbackLearningService learner, CancellationToken ct) =>
+            string? region, string? contract, Guid? candidateProfileId,
+            OpportunityOsDbContext db, ICurrentCandidateProfileProvider profiles,
+            IDiscoveryRankService ranker, IFeedbackLearningService learner, CancellationToken ct) =>
         {
             var min = minScore ?? 60;                  // relevance-first: hide weak matches
             var limit = Math.Clamp(take ?? 10, 1, 600); // allow the full eligible set, not a fake cap
@@ -105,9 +112,14 @@ public static class DashboardEndpoints
             // .NET role posted months ago is almost always closed -> "obsolete jobs" problem.
             var publishedSince = DateTime.UtcNow.AddDays(-(maxAgeDays ?? 120));
 
-            // Take the LATEST match per job FIRST, then apply the score gate — otherwise a stale
-            // high-scoring match outranks a fresh re-scored (gated) one and the job never drops off.
+            // Scope to the requested profile (or the default). The feed is PER PROFILE.
+            var profileId = await profiles.ResolveIdAsync(candidateProfileId, ct);
+            if (profileId is null) return Results.Ok(Array.Empty<BestOpportunityResponse>());
+
+            // Take the LATEST match per (job, THIS profile) FIRST, then apply the score gate — otherwise a
+            // stale high-scoring match outranks a fresh re-scored (gated) one and the job never drops off.
             var matches = await db.OpportunityMatches
+                .Where(m => m.CandidateProfileId == profileId.Value)
                 .Select(m => new { m.Id, m.JobPostingId, m.OverallScore, m.CreatedAtUtc })
                 .ToListAsync(ct);
             var latestIds = matches
