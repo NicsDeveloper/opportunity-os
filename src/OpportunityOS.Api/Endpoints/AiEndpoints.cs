@@ -108,8 +108,9 @@ public static class AiEndpoints
         }).WithTags("AI Copilot");
     }
 
+    // Default profile (IsDefault anchor, else most recent). Per-profile AI is wired in a later phase.
     private static Task<CandidateProfile?> ActiveProfile(OpportunityOsDbContext db, CancellationToken ct) =>
-        db.CandidateProfiles.OrderByDescending(p => p.CreatedAtUtc).FirstOrDefaultAsync(ct);
+        db.CandidateProfiles.OrderByDescending(p => p.IsDefault).ThenByDescending(p => p.CreatedAtUtc).FirstOrDefaultAsync(ct);
 
     /// <summary>Latest persisted match for the job, or a freshly computed+persisted heuristic one.</summary>
     private static async Task<OpportunityMatch> GetOrCreateMatch(

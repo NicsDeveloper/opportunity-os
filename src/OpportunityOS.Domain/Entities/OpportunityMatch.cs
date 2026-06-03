@@ -21,6 +21,8 @@ public sealed class OpportunityMatch
     public List<string> Risks { get; private set; } = new();
     public List<string> MissingRequirements { get; private set; } = new();
     public string Rationale { get; private set; } = string.Empty;
+    /// <summary>Which engine/generation produced this match (e.g. "heuristic-v2", "llm-fit-v1").</summary>
+    public string EngineVersion { get; private set; } = string.Empty;
     public DateTime CreatedAtUtc { get; private set; }
 
     private OpportunityMatch() { }
@@ -38,7 +40,8 @@ public sealed class OpportunityMatch
         IEnumerable<string> strengths,
         IEnumerable<string> risks,
         IEnumerable<string> missingRequirements,
-        string rationale)
+        string rationale,
+        string engineVersion = "")
     {
         Id = Guid.NewGuid();
         JobPostingId = jobPostingId;
@@ -54,6 +57,7 @@ public sealed class OpportunityMatch
         Risks = risks.ToList();
         MissingRequirements = missingRequirements.ToList();
         Rationale = rationale;
+        EngineVersion = engineVersion;
         CreatedAtUtc = DateTime.UtcNow;
     }
 }

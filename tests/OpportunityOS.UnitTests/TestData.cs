@@ -19,7 +19,47 @@ internal static class TestData
         seniority: "Pleno/Sênior",
         preferredLanguage: "pt-BR",
         coreSkills: new[] { ".NET", "C#", "ASP.NET Core", "AWS", "Kafka", "RabbitMQ" },
-        domains: new[] { "Pagamentos", "PIX", "Open Finance", "Mensageria" });
+        domains: new[] { "Pagamentos", "PIX", "Open Finance", "Mensageria" },
+        preferredWorkModes: new[] { "Remote" });
+
+    public static CandidateProfile JavaBackendProfile() => new(
+        fullName: "Java Backend Dev",
+        headline: "Backend Java/Spring",
+        summary: "Backend Java, Spring Boot, microsserviços, mensageria, cloud.",
+        location: "Brasil",
+        seniority: "Pleno/Sênior",
+        preferredLanguage: "pt-BR",
+        coreSkills: new[] { "Java", "Spring Boot", "Spring", "Kafka", "AWS", "PostgreSQL" },
+        domains: new[] { "Fintech", "Banking" },
+        preferredRoles: new[] { "Java Backend Engineer", "Senior Java Developer" },
+        preferredWorkModes: new[] { "Remote" },
+        displayName: "Java Backend");
+
+    public static CandidateProfile ReactFrontendProfile() => new(
+        fullName: "Frontend React Dev",
+        headline: "Frontend React/TypeScript",
+        summary: "Frontend React, TypeScript, Next.js, design systems.",
+        location: "Brasil",
+        seniority: "Pleno/Sênior",
+        preferredLanguage: "pt-BR",
+        coreSkills: new[] { "React", "TypeScript", "Next.js", "CSS", "Design System" },
+        domains: new[] { "SaaS", "Product" },
+        preferredRoles: new[] { "Frontend Engineer", "React Developer" },
+        preferredWorkModes: new[] { "Remote" },
+        displayName: "Frontend React");
+
+    public static CandidateProfile DataEngineerProfile() => new(
+        fullName: "Data Engineer Dev",
+        headline: "Data Engineer Python/Spark",
+        summary: "Data engineer, pipelines, ETL, Python/Spark, cloud.",
+        location: "Brasil",
+        seniority: "Pleno/Sênior",
+        preferredLanguage: "pt-BR",
+        coreSkills: new[] { "Python", "SQL", "Airflow", "Spark", "AWS Glue", "Athena" },
+        domains: new[] { "Data", "Analytics" },
+        preferredRoles: new[] { "Data Engineer", "Senior Data Engineer" },
+        preferredWorkModes: new[] { "Remote" },
+        displayName: "Data Engineer");
 
     public static JobPosting Job(string title, string description, string? location = null, string? language = null) =>
         new(

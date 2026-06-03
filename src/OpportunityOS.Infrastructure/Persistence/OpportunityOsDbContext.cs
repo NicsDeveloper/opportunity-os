@@ -120,6 +120,8 @@ public sealed class OpportunityOsDbContext : DbContext
                 .Metadata.SetValueComparer(stringListComparer);
             e.HasIndex(x => x.OverallScore);
             e.HasIndex(x => x.JobPostingId);
+            // Per-profile matches: fetch the latest match for a (job, profile) pair.
+            e.HasIndex(x => new { x.JobPostingId, x.CandidateProfileId });
         });
 
         b.Entity<ExecutionRun>(e =>

@@ -72,7 +72,7 @@ public sealed class CandidateFitAnalysisService : AiServiceBase, ICandidateFitAn
             jobId, profileId, overall, Clamp(d.TechnicalScore), Clamp(d.DomainScore),
             Clamp(d.SeniorityScore), Clamp(d.LocationScore), Clamp(d.LanguageScore),
             recommendation, d.Strengths ?? new(), d.Risks ?? new(), d.MissingRequirements ?? new(),
-            string.IsNullOrWhiteSpace(d.Rationale) ? $"Score {overall}/100" : d.Rationale);
+            string.IsNullOrWhiteSpace(d.Rationale) ? $"Score {overall}/100" : d.Rationale, "llm-fit-v1");
     }
 
     /// <summary>Wire shape for the fit LLM response.</summary>
