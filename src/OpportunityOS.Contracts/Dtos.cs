@@ -163,7 +163,8 @@ public sealed record BestOpportunityResponse(
     List<string> Skills, int OverallScore, string Recommendation, string JobUrl,
     string? CompanyWebsiteUrl, DateTime PostedAtUtc, string Rationale,
     int DiscoveryRank, string SourceType, int SourceConfidenceScore,
-    bool RequiresManualValidation, string? RealCompanyName, string? SourceName);
+    bool RequiresManualValidation, string? RealCompanyName, string? SourceName,
+    bool DatePrecise);
 
 // One opportunity the user already acted on (applications board).
 public sealed record ApplicationResponse(
