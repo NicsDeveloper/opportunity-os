@@ -48,17 +48,18 @@ public sealed class FeedbackLearningServiceTests
     [Fact]
     public void Reason_IsAccentInsensitive()
     {
-        var model = _svc.Build(new[] { new DislikedJob(CoA, System.Array.Empty<string>(), null, "júnior") });
-        // "junior" (no accent) in the candidate still matches the accented reason word.
-        Assert.True(_svc.Penalty(model, new JobSignal(CoB, System.Array.Empty<string>(), "Vaga junior", "")) > 0);
+        var model = _svc.Build(new[] { new DislikedJob(CoA, System.Array.Empty<string>(), null, "híbrido") });
+        // "hibrido" (no accent) in the candidate still matches the accented reason word.
+        Assert.True(_svc.Penalty(model, new JobSignal(CoB, System.Array.Empty<string>(), "Trabalho hibrido", "")) > 0);
     }
 
     [Fact]
-    public void DislikedSkill_AddsPenalty()
+    public void DoesNotLearnDesirableSkills_FromRejectedJob()
     {
-        var model = _svc.Build(new[] { new DislikedJob(CoA, new[] { "Delphi" }, "Dev Delphi", null) });
-        var delphi = new JobSignal(CoB, new[] { "Delphi", "SQL" }, "Dev", "");
-        var dotnet = new JobSignal(CoB, new[] { ".NET", "C#" }, "Dev", "");
-        Assert.True(_svc.Penalty(model, delphi) > _svc.Penalty(model, dotnet));
+        // The user rejects a .NET job (e.g., for location). The system must NOT conclude ".NET is bad"
+        // and penalize other .NET roles — only the company/reason are learned.
+        var model = _svc.Build(new[] { new DislikedJob(CoA, new[] { ".NET", "C#", "SQL" }, "Senior .NET", null) });
+        var otherDotnet = new JobSignal(CoB, new[] { ".NET", "C#", "SQL" }, "Senior .NET Developer", "");
+        Assert.Equal(0, _svc.Penalty(model, otherDotnet));
     }
 }

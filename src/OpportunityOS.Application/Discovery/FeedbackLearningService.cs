@@ -40,19 +40,33 @@ public sealed class FeedbackLearningService : IFeedbackLearningService
 {
     // Weights: how much one past rejection of the same company / skill / reason-word costs a new job.
     private const int CompanyWeight = 14;
-    private const int SkillWeight = 5;
-    private const int TokenWeight = 7;
+    private const int TokenWeight = 5;
 
     // Hard-hide gates: a company rejected this many times, or an overwhelming penalty, disappears.
     private const int CompanyHideCount = 3;
-    private const int HidePenalty = 42;
+    private const int HidePenalty = 50;
 
+    // Words that must NEVER become a negative signal: stop-words PLUS common role/stack/location terms
+    // that appear in almost every good .NET posting. "senior demais" means *this* role is too senior —
+    // it does NOT mean "senior is bad", so penalizing every senior role would nuke the whole board.
     private static readonly HashSet<string> Stop = new(StringComparer.OrdinalIgnoreCase)
     {
+        // generic stop-words
         "a","o","as","os","de","da","do","das","dos","e","ou","que","com","sem","para","pra","por","em",
         "no","na","nos","nas","um","uma","uns","umas","ao","aos","é","ser","muito","muita","mais","menos",
         "nao","não","sim","esse","essa","este","esta","isso","vaga","vagas","empresa","cargo","the","and",
-        "for","with","this","that","job","role",
+        "for","with","this","that","job","role","demais","muitos","muitas","ainda","tem","aqui",
+        // role / seniority (desirable, NOT negatives)
+        "senior","sênior","junior","júnior","pleno","jr","sr","estagio","estágio","trainee",
+        "desenvolvedor","desenvolvedora","developer","engenheiro","engenheira","engineer","programador",
+        "programadora","analista","arquiteto","arquiteta","especialista","tech","lead","dev","software",
+        "sistemas","sistema","desenvolvimento","programacao","programação","ti",
+        // stack (desirable)
+        "net",".net","c#","csharp","dotnet","backend","back","frontend","front","fullstack","full","stack",
+        "api","apis","azure","aws","cloud","sql","java","python","node","react","angular","kafka","docker",
+        // location / contract that appear in GOOD jobs (dangerous to learn). "presencial"/"internacional"
+        // are intentionally NOT here — those are valid negatives the user may want to learn from.
+        "remoto","remote","clt","pj","brasil","brazil","sao","são","paulo","rio",
     };
 
     public NegativeModel Build(IReadOnlyCollection<DislikedJob> disliked)
@@ -60,7 +74,6 @@ public sealed class FeedbackLearningService : IFeedbackLearningService
         if (disliked is null || disliked.Count == 0) return NegativeModel.Empty;
 
         var companies = new Dictionary<Guid, int>();
-        var skills = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var tokens = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var d in disliked)
@@ -68,18 +81,12 @@ public sealed class FeedbackLearningService : IFeedbackLearningService
             if (d.CompanyId != Guid.Empty)
                 companies[d.CompanyId] = companies.GetValueOrDefault(d.CompanyId) + 1;
 
-            foreach (var s in d.Skills ?? Enumerable.Empty<string>())
-            {
-                var k = Norm(s);
-                if (k.Length >= 2) skills[k] = skills.GetValueOrDefault(k) + 1;
-            }
-
             // Reason words are the explicit, highest-signal part — that's why the user can type a motive.
             foreach (var t in Tokenize(d.Reason))
                 tokens[t] = tokens.GetValueOrDefault(t) + 1;
         }
 
-        return new NegativeModel(companies, skills, tokens) { TotalRejections = disliked.Count };
+        return new NegativeModel(companies, new Dictionary<string, int>(), tokens) { TotalRejections = disliked.Count };
     }
 
     public int Penalty(NegativeModel model, JobSignal job)
@@ -87,11 +94,11 @@ public sealed class FeedbackLearningService : IFeedbackLearningService
         if (model is null || model.TotalRejections == 0) return 0;
         var penalty = 0;
 
+        // Company the user keeps rejecting -> clear, safe signal.
         if (model.Companies.TryGetValue(job.CompanyId, out var c)) penalty += c * CompanyWeight;
 
-        foreach (var s in job.Skills ?? Array.Empty<string>())
-            if (model.Skills.TryGetValue(Norm(s), out var sc)) penalty += sc * SkillWeight;
-
+        // ONLY the words the user explicitly typed as a reason. We deliberately do NOT learn the
+        // job's own skills: a .NET role rejected for being onsite must never teach ".NET is bad".
         if (model.ReasonTokens.Count > 0)
         {
             var text = Norm($"{job.Title} {job.Description}");
