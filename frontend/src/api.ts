@@ -105,6 +105,10 @@ export interface Application {
   companyWebsiteUrl?: string | null; overallScore: number; action: string;
   appliedAtUtc: string; postedAtUtc: string;
 }
+export interface DiscoveryResult {
+  executionRunId: string; status: string; companiesProcessed: number;
+  providersInvoked: number; jobsDiscovered: number; jobsUpdated: number; errors: number;
+}
 export interface Profile { fullName: string; headline: string; }
 
 export const api = {
@@ -149,7 +153,8 @@ export const api = {
   runs: (take = 8) => get<Run[]>(`/runs?take=${take}`),
   messages: () => get<Message[]>("/messages"),
   digestPreview: () => get<DigestPreview>("/digest/preview"),
-  search: (keywords: string[]) => post("/jobs/search", { keywords }),
+  search: (keywords: string[]) =>
+    post<DiscoveryResult>("/jobs/search", { keywords }),
   discover: (companyId?: string) => post("/jobs/discover", { companyId: companyId ?? null }),
   sendDigest: () => post<{ sent: boolean; itemCount: number; reason: string }>("/digest/send"),
   analyze: (jobId: string) => post<AnalyzeResult>(`/jobs/${jobId}/ai/analyze`),

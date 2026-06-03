@@ -105,6 +105,46 @@ function Sidebar({ section, setSection, reload, name, headline }: {
 
 const PAGE_SIZE = 6;
 
+// Friendly, jargon-free narration of what the search is doing (Firehose/Serper/provider stay hidden).
+const SEARCH_STEPS = [
+  "Procurando vagas .NET nos portais (Gupy, Recrutei, Infojobs, Vagas.com)…",
+  "Vasculhando a web por vagas novas e recentes…",
+  "Identificando a empresa e a fonte de cada vaga…",
+  "Avaliando a aderência ao seu perfil .NET/C#…",
+];
+
+function SearchProgress({ prog }: { prog: { step: number; done?: { n: number; u: number; s: number; e: number } } }) {
+  const done = prog.done;
+  return (
+    <div className={"searchprog" + (done ? " ok" : "")}>
+      <div className="sp-head">
+        {done
+          ? <><span className="sp-check">✓</span> Busca concluída</>
+          : <><span className="sp-pulse" /> Procurando vagas pra você…</>}
+      </div>
+      {done ? (
+        <div className="sp-result">
+          {done.n > 0
+            ? <><b>{done.n}</b> {done.n === 1 ? "vaga nova" : "vagas novas"}</>
+            : "Nenhuma vaga nova desta vez"}
+          {done.u > 0 && <> · <b>{done.u}</b> atualizadas</>}
+          {" · em "}<b>{done.s}</b> {done.s === 1 ? "fonte" : "fontes"}
+          {done.e > 0 && <span className="sp-warn"> · {done.e} com aviso</span>}
+        </div>
+      ) : (
+        <ul className="sp-steps">
+          {SEARCH_STEPS.map((s, i) => (
+            <li key={i} className={i < prog.step ? "done" : i === prog.step ? "active" : ""}>
+              <span className="sp-mark">{i < prog.step ? "✓" : i === prog.step ? <span className="sp-spin" /> : "○"}</span>
+              {s}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
   reload: number; notify: (m: string) => void; onChanged: () => void; firstName: string;
 }) {
@@ -114,6 +154,7 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
   const [showFilters, setShowFilters] = useState(false);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
+  const [prog, setProg] = useState<{ step: number; done?: { n: number; u: number; s: number; e: number } } | null>(null);
   const [page, setPage] = useState(0);
 
   const fetcher =
@@ -138,13 +179,24 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
   useEffect(() => { setPage(0); }, [region, contract, query, view]);
 
   const runSearch = async () => {
-    setBusy(true); notify("Buscando novas vagas .NET…");
-    try { await api.search([
-      "desenvolvedor .net", "desenvolvedor backend c#", "engenheiro de software .net",
-      "vaga .net remoto", "desenvolvedor .net fintech",
-    ]); notify("Busca disparada — os resultados chegam aqui em instantes."); onChanged(); }
-    catch { notify("Não foi possível buscar agora."); }
-    finally { setBusy(false); }
+    if (busy) return;
+    setBusy(true); setProg({ step: 0 });
+    // Advance the friendly steps while the request is in flight (the API call is synchronous).
+    const timer = window.setInterval(
+      () => setProg((p) => (p && !p.done ? { ...p, step: Math.min(p.step + 1, SEARCH_STEPS.length - 1) } : p)), 1400);
+    try {
+      const r = await api.search([
+        "desenvolvedor .net", "desenvolvedor backend c#", "engenheiro de software .net",
+        "vaga .net remoto", "desenvolvedor .net fintech",
+      ]);
+      window.clearInterval(timer);
+      setProg({ step: SEARCH_STEPS.length, done: { n: r.jobsDiscovered, u: r.jobsUpdated, s: r.providersInvoked, e: r.errors } });
+      onChanged();
+      window.setTimeout(() => setProg(null), 7000);
+    } catch {
+      window.clearInterval(timer);
+      setProg(null); notify("Não foi possível buscar agora.");
+    } finally { setBusy(false); }
   };
 
   return (
@@ -199,6 +251,8 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
           <Chips value={contract} onChange={setContract} options={[["all", "Ambos"], ["clt", "CLT"], ["pj", "PJ"]]} />
         </div>
       )}
+
+      {prog && <SearchProgress prog={prog} />}
 
       <div className="opplist">
         {opps.error && <p className="err">{opps.error}</p>}
