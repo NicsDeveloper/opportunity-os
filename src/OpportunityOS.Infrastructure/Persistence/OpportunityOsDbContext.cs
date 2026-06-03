@@ -47,11 +47,15 @@ public sealed class OpportunityOsDbContext : DbContext
             e.ToTable("candidate_profiles");
             e.HasKey(x => x.Id);
             e.Property(x => x.FullName).IsRequired();
+            e.Property(x => x.IsDefault).HasDefaultValue(false);
+            e.Property(x => x.MinimumScoreToShow).HasDefaultValue(60);
+            e.HasIndex(x => x.IsDefault);
             foreach (var prop in new[]
                      {
                          nameof(CandidateProfile.CoreSkills), nameof(CandidateProfile.SecondarySkills),
-                         nameof(CandidateProfile.Domains), nameof(CandidateProfile.PreferredRoles),
-                         nameof(CandidateProfile.PreferredContractTypes), nameof(CandidateProfile.PreferredLocations)
+                         nameof(CandidateProfile.ExcludedStacks), nameof(CandidateProfile.Domains),
+                         nameof(CandidateProfile.PreferredRoles), nameof(CandidateProfile.PreferredContractTypes),
+                         nameof(CandidateProfile.PreferredLocations), nameof(CandidateProfile.PreferredWorkModes)
                      })
             {
                 e.Property<List<string>>(prop)

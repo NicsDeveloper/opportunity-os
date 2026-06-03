@@ -23,7 +23,12 @@ public sealed record CandidateProfileRequest(
     List<string>? PreferredRoles,
     List<string>? PreferredContractTypes,
     List<string>? PreferredLocations,
-    List<CandidateExperienceDto>? Experiences);
+    List<CandidateExperienceDto>? Experiences,
+    // Multi-profile fields (optional for back-compat with existing callers/tests).
+    string? DisplayName = null,
+    List<string>? ExcludedStacks = null,
+    List<string>? PreferredWorkModes = null,
+    int? MinimumScoreToShow = null);
 
 public sealed record CandidateProfileResponse(
     Guid Id,
@@ -41,7 +46,12 @@ public sealed record CandidateProfileResponse(
     List<string> PreferredLocations,
     List<CandidateExperienceDto> Experiences,
     DateTime CreatedAtUtc,
-    DateTime UpdatedAtUtc);
+    DateTime UpdatedAtUtc,
+    string DisplayName,
+    bool IsDefault,
+    List<string> ExcludedStacks,
+    List<string> PreferredWorkModes,
+    int MinimumScoreToShow);
 
 // ---- Company ----
 

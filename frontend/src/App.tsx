@@ -1,17 +1,26 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./icons";
 import {
   api, type Application, type BestOpportunity, type Company,
-  type GeneratedMessage, type Summary,
+  type GeneratedMessage, type Profile, type ProfileInput, type Summary,
 } from "./api";
 
-type Section = "oportunidades" | "empresas" | "aplicacoes" | "descobertas" | "relatorios";
+type Section = "oportunidades" | "empresas" | "aplicacoes" | "descobertas" | "relatorios" | "perfis";
+
+// The selected candidate profile lives client-side (localStorage) — no global server "active" state.
+const PROFILE_KEY = "oos.selectedProfileId";
 
 export function App() {
   const [reload, setReload] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("oportunidades");
-  const profile = useAsync(api.profile, []);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(() => localStorage.getItem(PROFILE_KEY));
+  const profiles = useAsync(api.profiles, [reload]);
+
+  const list = profiles.data ?? [];
+  const current = list.find((p) => p.id === selectedProfileId) ?? list.find((p) => p.isDefault) ?? list[0];
+
+  const selectProfile = (id: string) => { setSelectedProfileId(id); localStorage.setItem(PROFILE_KEY, id); };
 
   const notify = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3500); };
   const refresh = () => setReload((r) => r + 1);
@@ -25,14 +34,15 @@ export function App() {
   return (
     <div className="layout">
       <Sidebar section={section} setSection={setSection} reload={reload}
-        name={profile.data?.fullName} headline={profile.data?.headline} />
+        profiles={list} current={current} onSelectProfile={selectProfile} />
       <main className="main">
         <div className="main-inner">
-          {section === "oportunidades" && <OpportunitiesScreen reload={reload} notify={notify} onChanged={refresh} firstName={firstNameOf(profile.data?.fullName)} />}
+          {section === "oportunidades" && <OpportunitiesScreen reload={reload} notify={notify} onChanged={refresh} firstName={firstNameOf(current?.fullName)} profileLabel={current?.displayName} />}
           {section === "empresas" && <CompaniesScreen reload={reload} notify={notify} onChanged={refresh} />}
           {section === "aplicacoes" && <ApplicationsScreen reload={reload} notify={notify} onChanged={refresh} />}
           {section === "descobertas" && <DiscoverScreen reload={reload} notify={notify} onChanged={refresh} />}
           {section === "relatorios" && <ReportsScreen reload={reload} />}
+          {section === "perfis" && <ProfilesScreen reload={reload} notify={notify} onChanged={refresh} selectedId={current?.id} onSelectProfile={selectProfile} />}
         </div>
       </main>
       {toast && <div className="toast">{toast}</div>}
@@ -50,10 +60,12 @@ const NAV: { key: Section; label: string; icon: string }[] = [
 const SYS_NAV: { key: Section; label: string; icon: string }[] = [
   { key: "descobertas", label: "Descobertas", icon: "search" },
   { key: "relatorios", label: "Relatórios", icon: "chart" },
+  { key: "perfis", label: "Perfis", icon: "building" },
 ];
 
-function Sidebar({ section, setSection, reload, name, headline }: {
-  section: Section; setSection: (s: Section) => void; reload: number; name?: string; headline?: string;
+function Sidebar({ section, setSection, reload, profiles, current, onSelectProfile }: {
+  section: Section; setSection: (s: Section) => void; reload: number;
+  profiles: Profile[]; current?: Profile; onSelectProfile: (id: string) => void;
 }) {
   const runs = useAsync(() => api.runs(3), [reload]);
   const summary = useAsync(api.summary, [reload]);
@@ -90,11 +102,18 @@ function Sidebar({ section, setSection, reload, name, headline }: {
       </nav>
 
       <div className="usercard">
-        <span className="avatar lg">{initials(name ?? "NS")}</span>
+        <span className="avatar lg">{initials(current?.displayName ?? current?.fullName ?? "NS")}</span>
         <div className="uc-body">
-          <div className="nm">{name ?? "—"}</div>
-          <div className="rl">{headline ?? "Backend Engineer .NET"}</div>
-          <button className="link-btn">Editar perfil ›</button>
+          <div className="uc-label">Perfil ativo</div>
+          {profiles.length > 0 ? (
+            <select className="profile-select" value={current?.id ?? ""} onChange={(e) => onSelectProfile(e.target.value)}>
+              {profiles.map((p) => (
+                <option key={p.id} value={p.id}>{p.displayName}{p.isDefault ? " ★" : ""}</option>
+              ))}
+            </select>
+          ) : <div className="nm">—</div>}
+          <div className="rl">{current?.headline ?? "Backend Engineer .NET"}</div>
+          <button className="link-btn" onClick={() => setSection("perfis")}>Gerenciar perfis ›</button>
         </div>
       </div>
     </aside>
@@ -143,8 +162,8 @@ function SearchProgress({ prog }: { prog: { step: number; done?: { n: number; u:
   );
 }
 
-function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
-  reload: number; notify: (m: string) => void; onChanged: () => void; firstName: string;
+function OpportunitiesScreen({ reload, notify, onChanged, firstName, profileLabel }: {
+  reload: number; notify: (m: string) => void; onChanged: () => void; firstName: string; profileLabel?: string;
 }) {
   const [region, setRegion] = useState("all");
   const [contract, setContract] = useState("all");
@@ -217,7 +236,7 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
           <h1>{greeting()}, {firstName}! <span className="wave">👋</span></h1>
           <p className="hdr-sub">
             {opps.data
-              ? `Encontrei ${all.length} ${all.length === 1 ? "oportunidade" : "oportunidades"} com boa aderência ao seu perfil.`
+              ? `Encontrei ${all.length} ${all.length === 1 ? "oportunidade" : "oportunidades"} com boa aderência ${profileLabel ? `ao perfil ${profileLabel}` : "ao seu perfil"}.`
               : "Procurando as melhores oportunidades pra você…"}
           </p>
         </div>
@@ -662,6 +681,132 @@ function ReportsScreen({ reload }: { reload: number }) {
 }
 function ReportStat({ label, n, sub }: { label: string; n?: number; sub: string }) {
   return <div className="rstat"><div className="rs-n">{n ?? "…"}</div><div className="rs-l">{label}</div><div className="rs-s">{sub}</div></div>;
+}
+
+/* ============================ Perfis ============================ */
+
+const EMPTY_FORM: ProfileInput = {
+  fullName: "", displayName: "", headline: "", summary: "", location: "", seniority: "Pleno/Sênior",
+  preferredLanguage: "pt-BR", coreSkills: [], secondarySkills: [], excludedStacks: [], domains: [],
+  preferredRoles: [], preferredContractTypes: [], preferredLocations: [], preferredWorkModes: [],
+};
+
+function toForm(p: Profile): ProfileInput {
+  return {
+    fullName: p.fullName, displayName: p.displayName, headline: p.headline, summary: p.summary,
+    location: p.location, seniority: p.seniority, preferredLanguage: p.preferredLanguage,
+    coreSkills: p.coreSkills, secondarySkills: p.secondarySkills, excludedStacks: p.excludedStacks,
+    domains: p.domains, preferredRoles: p.preferredRoles, preferredContractTypes: p.preferredContractTypes,
+    preferredLocations: p.preferredLocations, preferredWorkModes: p.preferredWorkModes,
+    minimumScoreToShow: p.minimumScoreToShow,
+  };
+}
+
+function ProfilesScreen({ reload, notify, onChanged, selectedId, onSelectProfile }: {
+  reload: number; notify: (m: string) => void; onChanged: () => void;
+  selectedId?: string; onSelectProfile: (id: string) => void;
+}) {
+  const profiles = useAsync(api.profiles, [reload]);
+  const list = profiles.data ?? [];
+  // null = not editing; "new" = creating; otherwise the profile id being edited.
+  const [editing, setEditing] = useState<string | null>(null);
+  const [form, setForm] = useState<ProfileInput>(EMPTY_FORM);
+  const [busy, setBusy] = useState(false);
+
+  const startNew = () => { setForm({ ...EMPTY_FORM }); setEditing("new"); };
+  const startEdit = (p: Profile) => { setForm(toForm(p)); setEditing(p.id); };
+
+  const save = async () => {
+    if (!form.fullName.trim()) { notify("Informe ao menos o nome."); return; }
+    setBusy(true);
+    try {
+      if (editing === "new") {
+        const created = await api.createProfile(form);
+        onSelectProfile(created.id);
+        notify("Perfil criado.");
+      } else if (editing) {
+        await api.updateProfile(editing, form);
+        notify("Perfil atualizado.");
+      }
+      setEditing(null);
+      onChanged();
+    } catch (e) { notify("Não foi possível salvar: " + String(e)); }
+    finally { setBusy(false); }
+  };
+
+  const makeDefault = async (id: string) => {
+    setBusy(true);
+    try { await api.setDefaultProfile(id); notify("Perfil padrão atualizado."); onChanged(); }
+    catch (e) { notify("Falha ao definir padrão: " + String(e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <header className="hdr">
+        <div>
+          <h1>Perfis</h1>
+          <p className="hdr-sub">Crie e edite perfis de candidato. O motor recomenda vagas por perfil.</p>
+        </div>
+        <div className="hdr-right">
+          <button className="btn primary sm" onClick={startNew}><Icon name="bolt" size={15} /> Novo perfil</button>
+        </div>
+      </header>
+
+      <div className="profiles-grid">
+        {profiles.error && <p className="err">{profiles.error}</p>}
+        {!profiles.data && <CardSkeletons rows={3} />}
+        {list.map((p) => (
+          <div key={p.id} className={"card profile-card" + (p.id === selectedId ? " active" : "")}>
+            <div className="pc-top">
+              <span className="avatar">{initials(p.displayName || p.fullName)}</span>
+              <div className="pc-id">
+                <div className="nm">{p.displayName} {p.isDefault && <span className="tag">padrão</span>}</div>
+                <div className="rl">{p.headline}</div>
+              </div>
+            </div>
+            <div className="pc-skills">{(p.coreSkills ?? []).slice(0, 6).map((s) => <span className="chip" key={s}>{s}</span>)}</div>
+            <div className="pc-actions">
+              <button className="btn sm" onClick={() => onSelectProfile(p.id)}>Selecionar</button>
+              <button className="btn sm" onClick={() => startEdit(p)}>Editar</button>
+              {!p.isDefault && <button className="btn sm ghost" disabled={busy} onClick={() => makeDefault(p.id)}>Tornar padrão</button>}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {editing && (
+        <div className="profile-form card">
+          <h2>{editing === "new" ? "Novo perfil" : "Editar perfil"}</h2>
+          <div className="pf-grid">
+            <Field label="Nome do perfil (rótulo)"><input value={form.displayName ?? ""} onChange={(e) => setForm({ ...form, displayName: e.target.value })} placeholder="Ex.: Java Backend" /></Field>
+            <Field label="Nome completo"><input value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} /></Field>
+            <Field label="Headline"><input value={form.headline} onChange={(e) => setForm({ ...form, headline: e.target.value })} /></Field>
+            <Field label="Senioridade"><input value={form.seniority} onChange={(e) => setForm({ ...form, seniority: e.target.value })} /></Field>
+            <Field label="Localização"><input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></Field>
+            <Field label="Idioma"><input value={form.preferredLanguage} onChange={(e) => setForm({ ...form, preferredLanguage: e.target.value })} /></Field>
+            <Field label="Core skills (vírgula)"><input value={(form.coreSkills ?? []).join(", ")} onChange={(e) => setForm({ ...form, coreSkills: splitCsv(e.target.value) })} /></Field>
+            <Field label="Secondary skills (vírgula)"><input value={(form.secondarySkills ?? []).join(", ")} onChange={(e) => setForm({ ...form, secondarySkills: splitCsv(e.target.value) })} /></Field>
+            <Field label="Domínios (vírgula)"><input value={(form.domains ?? []).join(", ")} onChange={(e) => setForm({ ...form, domains: splitCsv(e.target.value) })} /></Field>
+            <Field label="Cargos desejados (vírgula)"><input value={(form.preferredRoles ?? []).join(", ")} onChange={(e) => setForm({ ...form, preferredRoles: splitCsv(e.target.value) })} /></Field>
+            <Field label="Tipos de contrato (vírgula)"><input value={(form.preferredContractTypes ?? []).join(", ")} onChange={(e) => setForm({ ...form, preferredContractTypes: splitCsv(e.target.value) })} /></Field>
+            <Field label="Modelos de trabalho (vírgula)"><input value={(form.preferredWorkModes ?? []).join(", ")} onChange={(e) => setForm({ ...form, preferredWorkModes: splitCsv(e.target.value) })} /></Field>
+          </div>
+          <div className="pf-actions">
+            <button className="btn primary" disabled={busy} onClick={save}>{busy ? "Salvando…" : "Salvar"}</button>
+            <button className="btn" onClick={() => setEditing(null)}>Cancelar</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return <label className="field"><span className="field-l">{label}</span>{children}</label>;
+}
+function splitCsv(v: string): string[] {
+  return v.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
 /* ============================ shared bits ============================ */

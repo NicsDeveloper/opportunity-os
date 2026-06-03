@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using OpportunityOS.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using OpportunityOS.Infrastructure.Persistence;
 namespace OpportunityOS.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(OpportunityOsDbContext))]
-    partial class OpportunityOsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260603211126_AddCandidateProfileMultiFields")]
+    partial class AddCandidateProfileMultiFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

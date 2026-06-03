@@ -14,6 +14,15 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return (res.status === 204 ? (undefined as T) : (res.json() as Promise<T>));
 }
+async function put<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`/api${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return (res.status === 204 ? (undefined as T) : (res.json() as Promise<T>));
+}
 async function del<T>(path: string): Promise<T> {
   const res = await fetch(`/api${path}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -110,10 +119,29 @@ export interface DiscoveryResult {
   executionRunId: string; status: string; companiesProcessed: number;
   providersInvoked: number; jobsDiscovered: number; jobsUpdated: number; errors: number;
 }
-export interface Profile { fullName: string; headline: string; }
+export interface Profile {
+  id: string; fullName: string; displayName: string; headline: string; summary: string;
+  location: string; seniority: string; preferredLanguage: string; isDefault: boolean;
+  coreSkills: string[]; secondarySkills: string[]; excludedStacks: string[]; domains: string[];
+  preferredRoles: string[]; preferredContractTypes: string[]; preferredLocations: string[];
+  preferredWorkModes: string[]; minimumScoreToShow: number;
+}
+// Payload for create/update. List fields optional; backend fills sane defaults.
+export interface ProfileInput {
+  fullName: string; displayName?: string; headline: string; summary: string; location: string;
+  seniority: string; preferredLanguage: string;
+  coreSkills?: string[]; secondarySkills?: string[]; excludedStacks?: string[]; domains?: string[];
+  preferredRoles?: string[]; preferredContractTypes?: string[]; preferredLocations?: string[];
+  preferredWorkModes?: string[]; minimumScoreToShow?: number;
+}
 
 export const api = {
   profile: () => get<Profile>("/candidate-profile"),
+  // Multi-profile: list, create, edit, and move the default anchor.
+  profiles: () => get<Profile[]>("/candidate-profiles"),
+  createProfile: (body: ProfileInput) => post<Profile>("/candidate-profiles", body),
+  updateProfile: (id: string, body: ProfileInput) => put<Profile>(`/candidate-profiles/${id}`, body),
+  setDefaultProfile: (id: string) => post<Profile>(`/candidate-profiles/${id}/set-default`, {}),
   summary: () => get<Summary>("/dashboard/summary"),
   bestOpportunities: (take = 10, minScore = 60) =>
     get<BestOpportunity[]>(`/matches?take=${take}&minScore=${minScore}`),
