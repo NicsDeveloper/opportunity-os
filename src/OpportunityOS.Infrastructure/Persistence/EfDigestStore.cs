@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using OpportunityOS.Application.Digest;
+using OpportunityOS.Application.Discovery;
 using OpportunityOS.Domain.Entities;
 using OpportunityOS.Domain.Enums;
 
@@ -34,12 +35,20 @@ public sealed class EfDigestStore : IDigestStore
         var hidden = (await _db.UserFeedbacks.Where(f => f.JobPostingId != null && hiddenTypes.Contains(f.Type))
             .Select(f => f.JobPostingId!.Value).ToListAsync(ct)).ToHashSet();
 
+        // Learned location preference: if the user keeps declining international roles, the daily
+        // e-mail must respect it too (same rule as the board).
+        var declineTypes = new[] { UserFeedbackType.Irrelevant, UserFeedbackType.HideSimilar };
+        var intlDislikes = (await _db.UserFeedbacks.Where(f => declineTypes.Contains(f.Type) && f.Reason != null)
+            .Select(f => f.Reason!).ToListAsync(ct))
+            .Count(r => r.ToLowerInvariant() is var rl && (rl.Contains("internacional") || rl.Contains("exterior")));
+
         var messages = await _db.GeneratedMessages.Where(g => jobIds.Contains(g.JobPostingId)).ToListAsync(ct);
         var latestMessageByJob = messages
             .GroupBy(g => g.JobPostingId)
             .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.CreatedAtUtc).First());
 
         var publishedSince = DateTime.UtcNow.AddDays(-120);
+        var seen = new HashSet<string>();
         var items = new List<OpportunityDigestItem>();
         foreach (var match in latestPerJob.OrderByDescending(m => m.OverallScore))
         {
@@ -49,10 +58,12 @@ public sealed class EfDigestStore : IDigestStore
             // Active + fresh only (no expired/archived/talent-pool/obsolete).
             if (job.Status is JobPostingStatus.Expired or JobPostingStatus.Archived || job.IsTalentPool
                 || job.EffectiveDateUtc < publishedSince) continue;
+            // Respect the learned "no international" preference and collapse cross-source duplicates.
+            if (intlDislikes >= 3 && OpportunityHeuristics.IsInternational(job)) continue;
+            if (!seen.Add(OpportunityHeuristics.DedupKey(job))) continue;
 
             companies.TryGetValue(job.CompanyId, out var c);
-            var companyName = !string.IsNullOrWhiteSpace(job.RealCompanyName) ? job.RealCompanyName!
-                : (!string.IsNullOrWhiteSpace(c?.Name) ? c!.Name : "Empresa a confirmar");
+            var companyName = OpportunityHeuristics.BestCompany(job, c?.Name);
             latestMessageByJob.TryGetValue(job.Id, out var msg);
 
             items.Add(new OpportunityDigestItem(

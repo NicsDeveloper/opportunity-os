@@ -9,22 +9,7 @@ namespace OpportunityOS.Api.Endpoints;
 
 public static class DashboardEndpoints
 {
-    private static readonly string[] BrSignals =
-        { "brasil", "brazil", "latam", "remoto", "são paulo", "sao paulo", "rio de janeiro",
-          "belo horizonte", "curitiba", "porto alegre", "florianópolis", "florianopolis",
-          "recife", "campinas", "brasília", "brasilia", "clt", "pj", "pessoa jurídica" };
-    private static readonly string[] IntlSignals =
-        { "united states", " usa", "u.s.", "united kingdom", " uk ", "newcastle", "london",
-          "europe", "european", "canada", "india", "poland", "germany", "spain", "ireland",
-          "amsterdam", "berlin", "lisbon", "portugal", "est time zone", "cet ", "gmt", "anywhere" };
-
-    /// <summary>Heuristic: BR signal -> national; else an explicit foreign signal -> international.</summary>
-    private static bool IsInternational(JobPosting j)
-    {
-        var t = $"{j.Title} {j.Location} {j.DescriptionText}".ToLowerInvariant();
-        if (BrSignals.Any(b => t.Contains(b))) return false;
-        return IntlSignals.Any(x => t.Contains(x));
-    }
+    // Region/company/dedup heuristics now live in OpportunityHeuristics (shared with the digest).
 
     // Exactly one bucket per job: "clt" | "pj" | "both" | "unknown". We only claim CLT/PJ when the
     // posting actually says so — otherwise it's "unknown" (so the PJ/CLT filters are precise, not noisy).
@@ -46,68 +31,6 @@ public static class DashboardEndpoints
         if (clt) return "clt";
         if (pj) return "pj";
         return "unknown";
-    }
-
-    // Company embedded in the title — only the high-confidence "at/@/na/em COMPANY" forms
-    // ("... at MARGO", "na Dock", "@ Acme"). Dash/pipe forms are too noisy (they capture the role).
-    private static readonly string[] NotCompanyToken =
-        { "remoto", "remote", "brasil", "brazil", "latam", "home", "office", "híbrido", "hibrido",
-          "presencial", "casa", "gupy", "recrutei", "linkedin", "indeed", "glassdoor",
-          "desenvolvedor", "desenvolvedora", "analista", "engineer", "engenheir", "developer",
-          "senior", "sênior", "pleno", "junior", "júnior", "vaga", "programador", "fullstack", "backend" };
-    private static string? CompanyFromTitle(string title)
-    {
-        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
-            title, @"(?:\bat\s+|\bna\s+|\bem\s+|@\s*)([A-Z][\w&.'\-]+(?:\s+[A-Z][\w&.'\-]+){0,2})"))
-        {
-            var c = m.Groups[1].Value.Trim().TrimEnd('-', '|', '–', ',', '.', ' ');
-            var cl = c.ToLowerInvariant();
-            if (c.Length >= 2 && !NotCompanyToken.Any(n => cl.Contains(n))) return c;
-        }
-        return null;
-    }
-
-    private static string NormForDedup(string s)
-    {
-        var lowered = (s ?? "").ToLowerInvariant();
-        var noAccent = new string(lowered.Normalize(System.Text.NormalizationForm.FormD)
-            .Where(ch => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch) != System.Globalization.UnicodeCategory.NonSpacingMark).ToArray());
-        return System.Text.RegularExpressions.Regex.Replace(noAccent, @"[^a-z0-9]+", " ").Trim();
-    }
-
-    // Best company to SHOW: real name -> from the title -> (only if the source is the company's own
-    // ATS/career page) the stored name -> else honest "a confirmar" (don't show the aggregator host).
-    // Names that are an ATS/aggregator/board host, not a real employer.
-    private static readonly string[] HostNames =
-        { "lever", "greenhouse", "gupy", "ashby", "smartrecruiters", "workable", "recruitee", "teamtailor",
-          "jobrapido", "jobijoba", "jobleads", "instagram", "facebook", "reddit", "remoteleaf", "dailyremote",
-          "simplyhired", "jobgether", "remotejobs", "himalayas", "adzuna", "buscojobs", "talent", "indeed",
-          "glassdoor", "linkedin", "careers", "vaga de emprego", "trabajo", "empregos", "jooble" };
-    private static bool IsHostName(string? n) =>
-        !string.IsNullOrWhiteSpace(n) && HostNames.Any(h => n!.Trim().ToLowerInvariant() == h || n.Trim().ToLowerInvariant().StartsWith(h));
-
-    private static string BestCompany(JobPosting j, Company? c)
-    {
-        if (!string.IsNullOrWhiteSpace(j.RealCompanyName) && !IsHostName(j.RealCompanyName)) return j.RealCompanyName!;
-        var fromTitle = CompanyFromTitle(j.Title);
-        if (fromTitle is not null) return fromTitle;
-        if (j.SourceType is SourceType.OfficialAts or SourceType.OfficialCareerPage
-            && !string.IsNullOrWhiteSpace(c?.Name) && !IsHostName(c.Name)) return c!.Name;
-        return "Empresa a confirmar";
-    }
-
-    // Collapse the same job seen across aggregators: company (real -> from title) + normalized title.
-    // No reliable company -> unique key (never merge generic-titled jobs from different places).
-    private static string DedupKey(JobPosting j)
-    {
-        var title = NormForDedup(j.Title);
-        var co = !string.IsNullOrWhiteSpace(j.RealCompanyName) ? j.RealCompanyName : CompanyFromTitle(j.Title);
-        if (!string.IsNullOrWhiteSpace(co)) return "c|" + NormForDedup(co) + "|" + title;
-        // No company we trust: collapse only when the title is SPECIFIC enough that an exact match
-        // is almost surely the same posting (avoids merging generic "Desenvolvedor .NET Sênior").
-        var words = title.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
-        if (title.Length >= 32 && words >= 5) return "t|" + title;
-        return j.Id.ToString();
     }
 
     public static void MapDashboardEndpoints(this IEndpointRouteBuilder app)
@@ -253,13 +176,13 @@ public static class DashboardEndpoints
                 // ("Internacional" is a LOCATION, not a word in the posting, so token-learning misses it).
                 // Once the signal is clear, hide international by default — still reachable via "Exterior".
                 if (negModel.IntlDislikes >= 3 && !string.Equals(region, "international", StringComparison.OrdinalIgnoreCase))
-                    filtered = filtered.Where(m => !IsInternational(jobs[m.JobPostingId])).ToList();
+                    filtered = filtered.Where(m => !OpportunityHeuristics.IsInternational(jobs[m.JobPostingId])).ToList();
             }
 
             // Region + contract filters (user can ask national/international, PJ/CLT, or both).
             if (!string.Equals(region, "all", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(region))
                 filtered = filtered.Where(m => string.Equals(region, "international", StringComparison.OrdinalIgnoreCase)
-                    ? IsInternational(jobs[m.JobPostingId]) : !IsInternational(jobs[m.JobPostingId])).ToList();
+                    ? OpportunityHeuristics.IsInternational(jobs[m.JobPostingId]) : !OpportunityHeuristics.IsInternational(jobs[m.JobPostingId])).ToList();
             // Precise contract filter: exact bucket match (clt | pj | both | unknown). "all" = no filter.
             if (!string.Equals(contract, "all", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(contract))
                 filtered = filtered.Where(m =>
@@ -270,7 +193,7 @@ public static class DashboardEndpoints
             // Collapse the same job seen across multiple sources/aggregators — keep the most
             // trustworthy copy (official ATS > higher confidence > real publish date > score).
             filtered = filtered
-                .GroupBy(m => DedupKey(jobs[m.JobPostingId]))
+                .GroupBy(m => OpportunityHeuristics.DedupKey(jobs[m.JobPostingId]))
                 .Select(g => g
                     .OrderByDescending(m => jobs[m.JobPostingId].SourceType is SourceType.OfficialAts or SourceType.OfficialCareerPage ? 1 : 0)
                     .ThenByDescending(m => jobs[m.JobPostingId].SourceConfidenceScore)
@@ -314,7 +237,7 @@ public static class DashboardEndpoints
                 var job = jobs[m.JobPostingId];
                 companies.TryGetValue(job.CompanyId, out var c);
                 return new BestOpportunityResponse(
-                    m.Id, job.Id, job.Title, BestCompany(job, c), job.ExtractedSkills.Take(4).ToList(),
+                    m.Id, job.Id, job.Title, OpportunityHeuristics.BestCompany(job, c?.Name), job.ExtractedSkills.Take(4).ToList(),
                     m.OverallScore, m.Recommendation.ToString(), job.AbsoluteUrl, c?.WebsiteUrl,
                     job.EffectiveDateUtc, m.Rationale,
                     DiscoveryRankOf(m), job.SourceType.ToString(), job.SourceConfidenceScore,
