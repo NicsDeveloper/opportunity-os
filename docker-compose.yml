@@ -2,6 +2,8 @@ services:
   postgres:
     image: postgres:18
     container_name: opportunity-os-postgres
+    mem_limit: 512m        # dev Postgres needs little; hard cap as defense-in-depth
+    shm_size: 128m
     environment:
       POSTGRES_DB: opportunity_os
       POSTGRES_USER: postgres
