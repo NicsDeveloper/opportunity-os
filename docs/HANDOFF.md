@@ -147,6 +147,11 @@ triagem), só promovendo a `JobPosting` o que passa pelos filtros. Alimenta a ab
   + CompanyPriority×0.10 + FeedbackBoost×0.05** (puro/stateless). É o `sort=rank` da aba "Boas opções".
 - **`IConsultingRadarService`** — radar de consultorias .NET: descobre candidatas (`ConsultingCompanyCandidate`),
   pontua confiança e promove a `Company` (manual ou em lote) — não cria vaga.
+- **`IFeedbackLearningService` (melhoria contínua, sem LLM)** — aprende dos descartes: monta um
+  *modelo negativo* a partir de TODO feedback `Irrelevant`/`HideSimilar` (empresa, stack e as **palavras
+  do motivo** que o usuário digita ao dispensar). No `/api/matches` aplica **penalidade** no ranking de
+  vagas parecidas e **oculta** quando o sinal é forte (mesma empresa rejeitada ≥3× ou penalidade alta).
+  Acento-insensível. Quanto mais o usuário marca "não serve" + motivo, menos vagas do tipo aparecem.
 
 ---
 
