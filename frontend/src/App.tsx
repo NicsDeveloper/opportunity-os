@@ -148,6 +148,7 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
 }) {
   const [region, setRegion] = useState("all");
   const [contract, setContract] = useState("all");
+  const [sort, setSort] = useState<"score" | "recent">("score");
   const [showFilters, setShowFilters] = useState(false);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
@@ -175,15 +176,18 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
 
   const all = (opps.data ?? [])
     .filter((o) => !query.trim() || `${o.jobTitle} ${o.companyName}`.toLowerCase().includes(query.trim().toLowerCase()))
-    // Ordenar por aderência (score) — fontes fracas empatadas ficam abaixo.
-    .sort((a, b) => (b.overallScore - a.overallScore) || (Number(isWeakSource(a)) - Number(isWeakSource(b))));
-  const activeFilters = (region !== "all" ? 1 : 0) + (contract !== "all" ? 1 : 0);
+    .sort(sort === "recent"
+      // Mais recentes: vagas com data de publicação real primeiro, por data desc; depois o resto.
+      ? (a, b) => (Number(!!b.datePrecise) - Number(!!a.datePrecise)) || (+new Date(b.postedAtUtc) - +new Date(a.postedAtUtc))
+      // Aderência (padrão): score desc; fontes fracas empatadas ficam abaixo.
+      : (a, b) => (b.overallScore - a.overallScore) || (Number(isWeakSource(a)) - Number(isWeakSource(b))));
+  const activeFilters = (region !== "all" ? 1 : 0) + (contract !== "all" ? 1 : 0) + (sort !== "score" ? 1 : 0);
   const pageCount = Math.max(1, Math.ceil(all.length / pageSize));
   const current = Math.min(page, pageCount - 1);
   const shown = all.slice(current * pageSize, current * pageSize + pageSize);
   // Reset to page 1 only when the user changes filters/search — never on a background
   // refresh (which would yank the user off the page they're reading).
-  useEffect(() => { setPage(0); }, [region, contract, query]);
+  useEffect(() => { setPage(0); }, [region, contract, query, sort]);
 
   const runSearch = async () => {
     if (busy) return;
@@ -250,7 +254,9 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
           <span className="flabel">Onde</span>
           <Chips value={region} onChange={setRegion} options={[["all", "Todas"], ["national", "🇧🇷 Brasil"], ["international", "🌎 Exterior"]]} />
           <span className="flabel">Contrato</span>
-          <Chips value={contract} onChange={setContract} options={[["all", "Ambos"], ["clt", "CLT"], ["pj", "PJ"]]} />
+          <Chips value={contract} onChange={setContract} options={[["all", "Todos"], ["clt", "CLT"], ["pj", "PJ"], ["both", "Ambos"], ["unknown", "Não informado"]]} />
+          <span className="flabel">Ordenar</span>
+          <Chips value={sort} onChange={(v) => setSort(v as "score" | "recent")} options={[["score", "Aderência"], ["recent", "Recentes"]]} />
         </div>
       )}
 
@@ -261,8 +267,14 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
         {shown.map((o) => <OppCard key={o.matchId} o={o} notify={notify} onChanged={onChanged} />)}
         {opps.data && all.length === 0 && (
           <div className="empty">
-            <p>Nada por aqui agora.</p>
-            <p className="empty-s">Ajuste os filtros ou toque em <b>Buscar agora</b>.</p>
+            <p>Nenhuma vaga com esses filtros.</p>
+            <p className="empty-s">
+              {contract === "pj" ? "Poucas vagas declaram PJ explicitamente — a maioria não informa o contrato."
+                : contract === "clt" ? "Poucas vagas declaram CLT explicitamente — a maioria não informa o contrato."
+                : contract === "both" ? "Poucas vagas dizem oferecer CLT e PJ."
+                : activeFilters > 0 ? "Tente afrouxar os filtros (ex.: Contrato “Todos”)."
+                : <>Toque em <b>Buscar agora</b> pra trazer vagas novas.</>}
+            </p>
           </div>
         )}
         {!opps.data && !opps.error && <CardSkeletons />}

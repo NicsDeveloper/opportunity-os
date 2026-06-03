@@ -26,14 +26,26 @@ public static class DashboardEndpoints
         return IntlSignals.Any(x => t.Contains(x));
     }
 
-    private static (bool Clt, bool Pj) ContractTypes(JobPosting j)
+    // Exactly one bucket per job: "clt" | "pj" | "both" | "unknown". We only claim CLT/PJ when the
+    // posting actually says so — otherwise it's "unknown" (so the PJ/CLT filters are precise, not noisy).
+    private static string ContractKind(JobPosting j)
     {
         var t = $"{j.Title} {j.DescriptionText}";
-        var clt = System.Text.RegularExpressions.Regex.IsMatch(t, @"\bCLT\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         var lower = t.ToLowerInvariant();
-        var pj = System.Text.RegularExpressions.Regex.IsMatch(t, @"\bPJ\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
-            || lower.Contains("pessoa jurídica") || lower.Contains("contractor");
-        return (clt, pj);
+        var rx = System.Text.RegularExpressions.RegexOptions.IgnoreCase;
+
+        if (System.Text.RegularExpressions.Regex.IsMatch(t, @"\bclt\s*(?:ou|/|e|,|\\|x)\s*pj\b|\bpj\s*(?:ou|/|e|,|\\|x)\s*clt\b", rx))
+            return "both";
+
+        var clt = System.Text.RegularExpressions.Regex.IsMatch(t, @"\bCLT\b", rx)
+            || lower.Contains("carteira assinada") || lower.Contains("regime clt") || lower.Contains("efetivo (clt)");
+        var pj = System.Text.RegularExpressions.Regex.IsMatch(t, @"\bPJ\b", rx)
+            || lower.Contains("pessoa jur") || lower.Contains("contractor") || lower.Contains("prestador de servi");
+
+        if (clt && pj) return "both";
+        if (clt) return "clt";
+        if (pj) return "pj";
+        return "unknown";
     }
 
     public static void MapDashboardEndpoints(this IEndpointRouteBuilder app)
@@ -176,13 +188,10 @@ public static class DashboardEndpoints
             if (!string.Equals(region, "all", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(region))
                 filtered = filtered.Where(m => string.Equals(region, "international", StringComparison.OrdinalIgnoreCase)
                     ? IsInternational(jobs[m.JobPostingId]) : !IsInternational(jobs[m.JobPostingId])).ToList();
+            // Precise contract filter: exact bucket match (clt | pj | both | unknown). "all" = no filter.
             if (!string.Equals(contract, "all", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(contract))
                 filtered = filtered.Where(m =>
-                {
-                    var (clt, pj) = ContractTypes(jobs[m.JobPostingId]);
-                    var either = !clt && !pj; // unknown -> keep (don't over-filter BR posts that don't state it)
-                    return string.Equals(contract, "pj", StringComparison.OrdinalIgnoreCase) ? (pj || either) : (clt || either);
-                }).ToList();
+                    string.Equals(ContractKind(jobs[m.JobPostingId]), contract, StringComparison.OrdinalIgnoreCase)).ToList();
 
             if (filtered.Count == 0) return Results.Ok(Array.Empty<BestOpportunityResponse>());
 
