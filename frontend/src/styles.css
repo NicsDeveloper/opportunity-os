@@ -126,7 +126,8 @@ button { font-family: inherit; }
 .oppcard.menu-open .c-actions { opacity: 1; transform: none; pointer-events: auto; }
 /* Keep the card "open" (no collapse/reflow) while its menu is open, so moving the
    mouse onto the menu items doesn't make the card lose :hover and jump. */
-.oppcard.menu-open { box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+/* lift the whole card above sibling cards so the dropdown isn't covered by the next one */
+.oppcard.menu-open { box-shadow: var(--shadow-hover); transform: translateY(-1px); z-index: 30; }
 .oppcard.menu-open .card-x { opacity: 1; transform: scale(1); }
 
 /* leave / enter animations */
