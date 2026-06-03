@@ -77,7 +77,7 @@ function Sidebar({ section, setSection, reload, name, headline }: {
           <span className="radar-t">Radar ativo</span>
         </div>
         <div className="radar-s">Última atualização: {last ? ago(last.startedAtUtc) : "agora"}</div>
-        <div className="radar-n"><b>{summary.data?.jobsToday ?? "—"}</b> vagas analisadas hoje</div>
+        <div className="radar-n"><b>{summary.data?.jobsToday ?? "—"}</b> vagas novas hoje</div>
       </div>
 
       <nav className="nav sys">
@@ -171,7 +171,7 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
 
   // One direct feed: the best matches for the profile (learned prefs already applied server-side),
   // ordered by adherence. No tabs — weak sources just sort to the bottom.
-  const opps = useAsync(() => api.qualified(100, region, contract), [reload, region, contract]);
+  const opps = useAsync(() => api.qualified(500, region, contract), [reload, region, contract]);
   const last = useAsync(() => api.runs(1), [reload]);
 
   const all = (opps.data ?? [])

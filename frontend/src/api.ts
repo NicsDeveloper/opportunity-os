@@ -123,7 +123,7 @@ export const api = {
   // Main board: order by fit (overallScore + freshness) so the highest-adherence roles are
   // inside the returned window — the UI then sorts by score. (sort=rank buried high-fit jobs
   // from weaker sources outside the window.)
-  qualified: (take = 100, region = "all", contract = "all") =>
+  qualified: (take = 500, region = "all", contract = "all") =>
     get<BestOpportunity[]>(`/matches?take=${take}&minScore=60&region=${region}&contract=${contract}`),
   allOpportunities: (take = 80, region = "all", contract = "all") =>
     get<BestOpportunity[]>(`/matches?take=${take}&minScore=45&sort=rank&region=${region}&contract=${contract}`),

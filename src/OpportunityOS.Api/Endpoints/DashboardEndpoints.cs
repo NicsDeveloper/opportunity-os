@@ -111,7 +111,7 @@ public static class DashboardEndpoints
             OpportunityOsDbContext db, IDiscoveryRankService ranker, IFeedbackLearningService learner, CancellationToken ct) =>
         {
             var min = minScore ?? 60;                  // relevance-first: hide weak matches
-            var limit = Math.Clamp(take ?? 10, 1, 100);
+            var limit = Math.Clamp(take ?? 10, 1, 600); // allow the full eligible set, not a fake cap
             var freshSince = DateTime.UtcNow.AddDays(-(freshDays ?? 45));
             // Drop postings whose REAL publish date is older than this (default 120d): a
             // .NET role posted months ago is almost always closed -> "obsolete jobs" problem.
