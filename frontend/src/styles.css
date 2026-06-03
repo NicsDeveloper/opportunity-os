@@ -214,6 +214,7 @@ button { font-family: inherit; }
 .src.weak { color: var(--warn); }
 .dotsep { color: var(--border-strong); }
 .time { color: var(--muted); }
+.time.approx { font-style: italic; opacity: .85; }
 .tags { display: flex; flex-wrap: nowrap; gap: 5px; margin-top: 6px; overflow: hidden; height: 19px; }
 .tag { font-size: 11px; background: #f3f3f8; color: var(--ink-2); padding: 2px 8px; border-radius: 6px; font-weight: 500; white-space: nowrap; flex-shrink: 0; }
 

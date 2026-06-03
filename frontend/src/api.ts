@@ -50,6 +50,7 @@ export interface BestOpportunity {
   companyWebsiteUrl?: string | null; postedAtUtc: string; rationale: string;
   discoveryRank?: number; sourceType?: string; sourceConfidenceScore?: number;
   requiresManualValidation?: boolean; realCompanyName?: string | null; sourceName?: string | null;
+  datePrecise?: boolean;
 }
 export interface Run {
   id: string; runType: string; status: string; startedAtUtc: string;

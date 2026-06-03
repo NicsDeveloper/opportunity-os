@@ -356,7 +356,9 @@ function OppCard({ o, notify, onChanged }: {
               {src.good && <span className="ok-check"><Icon name="check" size={12} /></span>}
               <span className={"src " + src.cls}>{src.text}</span>
               <span className="dotsep">·</span>
-              <span className="time">{ago(o.postedAtUtc)}</span>
+              <span className={"time" + (o.datePrecise ? "" : " approx")} title={o.datePrecise ? "data de publicação da vaga" : "quando o radar encontrou (data de publicação desconhecida)"}>
+                {(o.datePrecise ? "publicada " : "encontrada ") + ago(o.postedAtUtc)}
+              </span>
             </div>
             <div className="job-title">{titleParts.title}</div>
             {titleParts.sub && <div className="job-sub">{titleParts.sub}</div>}

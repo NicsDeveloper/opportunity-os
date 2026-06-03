@@ -225,7 +225,7 @@ public static class DashboardEndpoints
                     m.OverallScore, m.Recommendation.ToString(), job.AbsoluteUrl, c?.WebsiteUrl,
                     job.EffectiveDateUtc, m.Rationale,
                     DiscoveryRankOf(m), job.SourceType.ToString(), job.SourceConfidenceScore,
-                    job.RequiresManualValidation, job.RealCompanyName, job.SourceName);
+                    job.RequiresManualValidation, job.RealCompanyName, job.SourceName, job.HasSourceDate);
             });
             return Results.Ok(result);
         }).WithTags("Matches");
