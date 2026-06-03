@@ -48,6 +48,45 @@ public static class DashboardEndpoints
         return "unknown";
     }
 
+    // Company embedded in the title ("... at MARGO", "- FCamara -", "| Stone", "na Dock", "@ Acme").
+    private static string? CompanyFromTitle(string title)
+    {
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
+            title, @"(?:\bat\s+|\bna\s+|\bem\s+|@\s*|[-|–]\s*)([A-Z][\w&.''\- ]{1,28})",
+            System.Text.RegularExpressions.RegexOptions.None))
+        {
+            var c = m.Groups[1].Value.Trim().TrimEnd('-', '|', '–', ' ');
+            var cl = c.ToLowerInvariant();
+            // Reject non-company tokens that follow the same prepositions ("em Remoto", "na Brasil"…).
+            string[] notCompany = { "remoto", "remote", "brasil", "brazil", "latam", "home", "office",
+                "híbrido", "hibrido", "presencial", "casa", "gupy", "recrutei", "linkedin" };
+            if (c.Length >= 2 && !notCompany.Any(n => cl.Contains(n))) return c;
+        }
+        return null;
+    }
+
+    private static string NormForDedup(string s)
+    {
+        var lowered = (s ?? "").ToLowerInvariant();
+        var noAccent = new string(lowered.Normalize(System.Text.NormalizationForm.FormD)
+            .Where(ch => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch) != System.Globalization.UnicodeCategory.NonSpacingMark).ToArray());
+        return System.Text.RegularExpressions.Regex.Replace(noAccent, @"[^a-z0-9]+", " ").Trim();
+    }
+
+    // Collapse the same job seen across aggregators: company (real -> from title) + normalized title.
+    // No reliable company -> unique key (never merge generic-titled jobs from different places).
+    private static string DedupKey(JobPosting j)
+    {
+        var title = NormForDedup(j.Title);
+        var co = !string.IsNullOrWhiteSpace(j.RealCompanyName) ? j.RealCompanyName : CompanyFromTitle(j.Title);
+        if (!string.IsNullOrWhiteSpace(co)) return "c|" + NormForDedup(co) + "|" + title;
+        // No company we trust: collapse only when the title is SPECIFIC enough that an exact match
+        // is almost surely the same posting (avoids merging generic "Desenvolvedor .NET Sênior").
+        var words = title.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+        if (title.Length >= 32 && words >= 5) return "t|" + title;
+        return j.Id.ToString();
+    }
+
     public static void MapDashboardEndpoints(this IEndpointRouteBuilder app)
     {
         // Aggregate counts + "today" deltas for the dashboard cards.
@@ -117,11 +156,18 @@ public static class DashboardEndpoints
             // .NET role posted months ago is almost always closed -> "obsolete jobs" problem.
             var publishedSince = DateTime.UtcNow.AddDays(-(maxAgeDays ?? 120));
 
-            var matches = await db.OpportunityMatches.Where(m => m.OverallScore >= min).ToListAsync(ct);
-            var latestByJob = matches
+            // Take the LATEST match per job FIRST, then apply the score gate — otherwise a stale
+            // high-scoring match outranks a fresh re-scored (gated) one and the job never drops off.
+            var matches = await db.OpportunityMatches
+                .Select(m => new { m.Id, m.JobPostingId, m.OverallScore, m.CreatedAtUtc })
+                .ToListAsync(ct);
+            var latestIds = matches
                 .GroupBy(m => m.JobPostingId)
                 .Select(g => g.OrderByDescending(m => m.CreatedAtUtc).First())
-                .ToList();
+                .Where(m => m.OverallScore >= min)
+                .Select(m => m.Id)
+                .ToHashSet();
+            var latestByJob = await db.OpportunityMatches.Where(m => latestIds.Contains(m.Id)).ToListAsync(ct);
             if (latestByJob.Count == 0) return Results.Ok(Array.Empty<BestOpportunityResponse>());
 
             var jobIds = latestByJob.Select(m => m.JobPostingId).ToList();
@@ -194,6 +240,18 @@ public static class DashboardEndpoints
                     string.Equals(ContractKind(jobs[m.JobPostingId]), contract, StringComparison.OrdinalIgnoreCase)).ToList();
 
             if (filtered.Count == 0) return Results.Ok(Array.Empty<BestOpportunityResponse>());
+
+            // Collapse the same job seen across multiple sources/aggregators — keep the most
+            // trustworthy copy (official ATS > higher confidence > real publish date > score).
+            filtered = filtered
+                .GroupBy(m => DedupKey(jobs[m.JobPostingId]))
+                .Select(g => g
+                    .OrderByDescending(m => jobs[m.JobPostingId].SourceType is SourceType.OfficialAts or SourceType.OfficialCareerPage ? 1 : 0)
+                    .ThenByDescending(m => jobs[m.JobPostingId].SourceConfidenceScore)
+                    .ThenByDescending(m => jobs[m.JobPostingId].HasSourceDate)
+                    .ThenByDescending(m => m.OverallScore)
+                    .First())
+                .ToList();
 
             var companyIds = filtered.Select(m => jobs[m.JobPostingId].CompanyId).Distinct().ToList();
             var companies = await db.Companies.Where(c => companyIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
