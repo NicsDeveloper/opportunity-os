@@ -148,7 +148,6 @@ function SearchProgress({ prog }: { prog: { step: number; done?: { n: number; u:
 function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
   reload: number; notify: (m: string) => void; onChanged: () => void; firstName: string;
 }) {
-  const [view, setView] = useState<"action" | "qualified" | "all">("action");
   const [region, setRegion] = useState("all");
   const [contract, setContract] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
@@ -157,16 +156,12 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
   const [prog, setProg] = useState<{ step: number; done?: { n: number; u: number; s: number; e: number } } | null>(null);
   const [page, setPage] = useState(0);
 
-  const fetcher =
-    view === "qualified" ? () => api.qualified(100, region, contract)
-    : view === "all" ? () => api.allOpportunities(100, region, contract)
-    : () => api.qualified(100, region, contract);
-  const opps = useAsync(fetcher, [reload, view, region, contract]);
+  // One direct feed: the best matches for the profile (learned prefs already applied server-side),
+  // ordered by adherence. No tabs — weak sources just sort to the bottom.
+  const opps = useAsync(() => api.qualified(100, region, contract), [reload, region, contract]);
   const last = useAsync(() => api.runs(1), [reload]);
 
   const all = (opps.data ?? [])
-    // "Para você hoje" = só acionáveis: fontes fracas (agregador) saem (vão pra Boas opções / Todas).
-    .filter((o) => view !== "action" || !isWeakSource(o))
     .filter((o) => !query.trim() || `${o.jobTitle} ${o.companyName}`.toLowerCase().includes(query.trim().toLowerCase()))
     // Ordenar por aderência (score) — fontes fracas empatadas ficam abaixo.
     .sort((a, b) => (b.overallScore - a.overallScore) || (Number(isWeakSource(a)) - Number(isWeakSource(b))));
@@ -176,7 +171,7 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
   const shown = all.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE);
   // Reset to page 1 only when the user changes filters/search — never on a background
   // refresh (which would yank the user off the page they're reading).
-  useEffect(() => { setPage(0); }, [region, contract, query, view]);
+  useEffect(() => { setPage(0); }, [region, contract, query]);
 
   const runSearch = async () => {
     if (busy) return;
@@ -237,11 +232,6 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
         </div>
       </div>
       <p className="sb-sub">As melhores oportunidades, ordenadas pela aderência ao seu perfil.</p>
-
-      <div className="tabsrow">
-        <Seg value={view} onChange={(v) => setView(v as "action" | "qualified" | "all")}
-          options={[["action", "Para você hoje"], ["qualified", "Boas opções"], ["all", "Todas"]]} />
-      </div>
 
       {showFilters && (
         <div className="filterpanel">
@@ -656,13 +646,6 @@ function SimpleHeader({ title, sub }: { title: string; sub: string }) {
   return <header className="hdr"><div><h1>{title}</h1><p className="hdr-sub">{sub}</p></div></header>;
 }
 
-function Seg({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: [string, string][] }) {
-  return (
-    <div className="seg">
-      {options.map(([v, l]) => <button key={v} className={value === v ? "active" : ""} onClick={() => onChange(v)}>{l}</button>)}
-    </div>
-  );
-}
 function Chips({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: [string, string][] }) {
   return <span className="chips-g">{options.map(([v, l]) => <button key={v} className={"chip-b" + (value === v ? " active" : "")} onClick={() => onChange(v)}>{l}</button>)}</span>;
 }
