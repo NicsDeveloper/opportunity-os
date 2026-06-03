@@ -108,6 +108,7 @@ const PAGE_SIZE = 6;
 function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
   reload: number; notify: (m: string) => void; onChanged: () => void; firstName: string;
 }) {
+  const [view, setView] = useState<"action" | "qualified" | "all">("action");
   const [region, setRegion] = useState("all");
   const [contract, setContract] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
@@ -115,10 +116,16 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState(0);
 
-  const opps = useAsync(() => api.qualified(100, region, contract), [reload, region, contract]);
+  const fetcher =
+    view === "qualified" ? () => api.qualified(100, region, contract)
+    : view === "all" ? () => api.allOpportunities(100, region, contract)
+    : () => api.qualified(100, region, contract);
+  const opps = useAsync(fetcher, [reload, view, region, contract]);
   const last = useAsync(() => api.runs(1), [reload]);
 
   const all = (opps.data ?? [])
+    // "Para você hoje" = só acionáveis: fontes fracas (agregador) saem (vão pra Boas opções / Todas).
+    .filter((o) => view !== "action" || !isWeakSource(o))
     .filter((o) => !query.trim() || `${o.jobTitle} ${o.companyName}`.toLowerCase().includes(query.trim().toLowerCase()))
     // Ordenar por aderência (score) — fontes fracas empatadas ficam abaixo.
     .sort((a, b) => (b.overallScore - a.overallScore) || (Number(isWeakSource(a)) - Number(isWeakSource(b))));
@@ -128,7 +135,7 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
   const shown = all.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE);
   // Reset to page 1 only when the user changes filters/search — never on a background
   // refresh (which would yank the user off the page they're reading).
-  useEffect(() => { setPage(0); }, [region, contract, query]);
+  useEffect(() => { setPage(0); }, [region, contract, query, view]);
 
   const runSearch = async () => {
     setBusy(true); notify("Buscando novas vagas .NET…");
@@ -172,10 +179,17 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
           <button className={"btn ghost" + (activeFilters ? " on" : "")} onClick={() => setShowFilters((v) => !v)}>
             <Icon name="filter" size={16} /> Filtros {activeFilters > 0 && <span className="dot-badge">{activeFilters}</span>}
           </button>
-          <button className="btn primary sm" disabled={busy} onClick={runSearch}>{busy ? "Buscando…" : "Buscar agora"}</button>
+          <button className="btn primary sm" disabled={busy} onClick={runSearch}>
+            <Icon name="bolt" size={15} /> {busy ? "Buscando…" : "Buscar agora"}
+          </button>
         </div>
       </div>
       <p className="sb-sub">As melhores oportunidades, ordenadas pela aderência ao seu perfil.</p>
+
+      <div className="tabsrow">
+        <Seg value={view} onChange={(v) => setView(v as "action" | "qualified" | "all")}
+          options={[["action", "Para você hoje"], ["qualified", "Boas opções"], ["all", "Todas"]]} />
+      </div>
 
       {showFilters && (
         <div className="filterpanel">
@@ -228,6 +242,7 @@ function OppCard({ o, notify, onChanged }: {
 
   const src = sourceLabel(o.sourceType);
   const adh = adherence(score);
+  const titleParts = cleanTitle(o.jobTitle);
   const isTerse = /^score\s+\d+\/100/i.test((why ?? "").trim());
 
   // Fire the feedback (with optional reason the system learns from), play the leave
@@ -282,7 +297,6 @@ function OppCard({ o, notify, onChanged }: {
         <div className="c-id">
           <Logo name={o.companyName} website={o.companyWebsiteUrl} />
           <div className="id-body">
-            <div className="job-title">{o.jobTitle}</div>
             <div className="co-line">
               <span className="co-name">{o.companyName}</span>
               {src.good && <span className="ok-check"><Icon name="check" size={12} /></span>}
@@ -290,7 +304,9 @@ function OppCard({ o, notify, onChanged }: {
               <span className="dotsep">·</span>
               <span className="time">{ago(o.postedAtUtc)}</span>
             </div>
-            <div className="tags">{o.skills.slice(0, 4).map((s) => <span className="tag" key={s}>{s}</span>)}</div>
+            <div className="job-title">{titleParts.title}</div>
+            {titleParts.sub && <div className="job-sub">{titleParts.sub}</div>}
+            <div className="tags">{o.skills.slice(0, 5).map((s) => <span className="tag" key={s}>{s}</span>)}</div>
           </div>
         </div>
 
@@ -300,20 +316,20 @@ function OppCard({ o, notify, onChanged }: {
           <p className="reason">{friendlyReason(o, score)}</p>
         </div>
 
-        {/* col 3 — actions (revealed on hover, in the score's old spot) */}
+        {/* col 3 — score */}
+        <div className="c-score">
+          <div className={"ring " + ringTone(score)}>{score}</div>
+          <div className="score-word">{scoreAction(score)}</div>
+          <div className="conf">{confidenceText(o.sourceConfidenceScore, src.weak)}</div>
+        </div>
+
+        {/* col 4 — actions */}
         <div className="c-actions">
-          <a className="btn primary xs" href={o.jobUrl} target="_blank" rel="noreferrer">Ver vaga</a>
+          <a className="btn primary xs" href={o.jobUrl} target="_blank" rel="noreferrer"><Icon name="external" size={13} /> Ver vaga</a>
           <div className="act2">
             <button className="btn xs" disabled={busy} onClick={openDraft}>{busy ? "…" : draft ? "Ocultar" : "Rascunho"}</button>
             <button className="btn xs ok" onClick={() => act("Applied", "applied", "feito")}>Feito</button>
           </div>
-        </div>
-
-        {/* col 4 — score (right) */}
-        <div className="c-score">
-          <div className={"ring " + ringTone(score)}>{score}</div>
-          <div className="score-word">{scoreWord(score)}</div>
-          <div className="conf">{confidenceText(o.sourceConfidenceScore, src.weak)}</div>
         </div>
 
         {/* col 5 — secondary actions */}
@@ -584,6 +600,13 @@ function SimpleHeader({ title, sub }: { title: string; sub: string }) {
   return <header className="hdr"><div><h1>{title}</h1><p className="hdr-sub">{sub}</p></div></header>;
 }
 
+function Seg({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: [string, string][] }) {
+  return (
+    <div className="seg">
+      {options.map(([v, l]) => <button key={v} className={value === v ? "active" : ""} onClick={() => onChange(v)}>{l}</button>)}
+    </div>
+  );
+}
 function Chips({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: [string, string][] }) {
   return <span className="chips-g">{options.map(([v, l]) => <button key={v} className={"chip-b" + (value === v ? " active" : "")} onClick={() => onChange(v)}>{l}</button>)}</span>;
 }
@@ -619,7 +642,24 @@ function initials(name: string) { const p = name.trim().split(/\s+/); return ((p
 function logoColor(name: string) { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360; return `hsl(${h} 50% 48%)`; }
 
 function ringTone(s: number) { return s >= 80 ? "good" : s >= 60 ? "warn" : "muted"; }
-function scoreWord(s: number) { return s >= 85 ? "Excelente" : s >= 70 ? "Boa" : "Média"; }
+function scoreAction(s: number) { return s >= 90 ? "Abrir primeiro" : s >= 80 ? "Vale olhar" : s >= 75 ? "Boa opção" : "Vale conferir"; }
+
+// Clean noisy titles into a bold main title + a soft subtitle.
+// "Pessoa Desenvolvedor .Net Pleno | Vagas 100% remotas" -> { title: "Desenvolvedor .Net Pleno", sub: "Vagas 100% remotas" }
+function cleanTitle(raw: string): { title: string; sub?: string } {
+  let t = (raw ?? "").trim();
+  // drop trailing source/board noise ("- Gupy", "- Recrutei", "| JobLeads.com", "- Vaga de emprego ...")
+  t = t.replace(/\s*[-|–·]\s*(gupy|recrutei|adzuna|jobleads(\.com)?|buscojobs|jobrapido|simplyhired|jobgether|remotejobs|remoteleaf|himalayas|caderno nacional|vaga de emprego.*|p[áa]gina da vaga.*)\s*$/i, "");
+  // strip leading filler
+  t = t.replace(/^\s*(pessoa\s+|vaga\s+(para|de)\s+|wanted:\s*|oportunidade:\s*|nova vaga\s*\|?\s*)/i, "");
+  // split into segments and pick the first that looks like a real title (skip codes like "11251", "#5241")
+  const parts = t.split(/\s*[|–·]\s*|\s+-\s+/).map((p) => p.trim()).filter(Boolean);
+  let idx = parts.findIndex((p) => /[a-zà-ú]/i.test(p) && p.replace(/[^a-zà-ú]/gi, "").length >= 3);
+  if (idx < 0) idx = 0;
+  const title = (parts[idx] || t).replace(/\s{2,}/g, " ").trim();
+  const sub = parts.slice(idx + 1).join(" · ").trim() || undefined;
+  return { title: title.length > 64 ? title.slice(0, 62) + "…" : title, sub: sub && sub.length <= 48 ? sub : undefined };
+}
 function adherence(s: number) {
   if (s >= 85) return { label: "Excelente aderência", tone: "good" };
   if (s >= 70) return { label: "Boa aderência", tone: "good" };
