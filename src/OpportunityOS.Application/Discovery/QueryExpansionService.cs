@@ -51,6 +51,9 @@ public sealed class QueryExpansionService
         // ATS brasileiros muito usados por consultorias/fintechs (cauda longa real):
         "site:quickin.io", "site:solides.com.br", "site:kenoby.com", "site:jobconvo.com",
         "site:99jobs.com", "site:abler.com.br", "site:pandape.com", "site:inhire.app",
+        // ATS/boards adicionais (Recrutei, Infojobs, INTERA, Michael Page, Vagas.com):
+        "site:recrutei.com.br", "site:infojobs.com.br", "site:intera.io",
+        "site:michaelpage.com.br", "site:vagas.com.br",
     };
 
     /// <summary>

@@ -14,13 +14,14 @@ public sealed class SourceClassifierService : ISourceClassifierService
         { "greenhouse.io", "lever.co", "ashbyhq.com", "smartrecruiters.com", "workdayjobs.com", "myworkdayjobs.com",
           "teamtailor.com", "recruitee.com", "workable.com", "breezy.hr",
           "quickin.io", "solides.com.br", "kenoby.com", "jobconvo.com", "99jobs.com", "abler.com.br",
-          "pandape.com", "inhire.app" };
+          "pandape.com", "inhire.app", "recrutei.com.br" };
     private static readonly string[] JobBoards =
-        { "programathor", "geekhunter", "coodesh", "remotar", "trampos", "apinfo", "vagas.com" };
+        { "programathor", "geekhunter", "coodesh", "remotar", "trampos", "apinfo", "vagas.com",
+          "infojobs.com.br", "intera.io", "intera.com.br", "michaelpage.com" };
     private static readonly string[] Aggregators =
         { "indeed.", "glassdoor.", "jobgether", "simplyhired", "ziprecruiter", "bebee", "catho.", "reddit.",
-          "remotejobs", "remoteok", "remoterocketship", "jooble", "neuvoo", "recrutei", "apibr", "bne.com",
-          "talent.com", "empregare", "vagas.com" };
+          "remotejobs", "remoteok", "remoterocketship", "jooble", "neuvoo", "apibr", "bne.com",
+          "talent.com", "empregare" };
 
     public SourceClassificationResult Classify(string url, string? title, string? snippet)
     {
