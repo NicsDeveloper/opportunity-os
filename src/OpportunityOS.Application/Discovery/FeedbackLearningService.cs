@@ -22,6 +22,9 @@ public sealed record NegativeModel(
         new(new Dictionary<Guid, int>(), new Dictionary<string, int>(), new Dictionary<string, int>());
 
     public int TotalRejections { get; init; }
+    // Structured preferences learned from explicit reasons that aren't words in the posting:
+    public int IntlDislikes { get; init; }   // declined for "Internacional"/"Exterior"
+    public int OnsiteDislikes { get; init; } // declined for "Presencial"/"Híbrido"
 }
 
 /// <summary>
@@ -75,18 +78,25 @@ public sealed class FeedbackLearningService : IFeedbackLearningService
 
         var companies = new Dictionary<Guid, int>();
         var tokens = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        int intl = 0, onsite = 0;
 
         foreach (var d in disliked)
         {
             if (d.CompanyId != Guid.Empty)
                 companies[d.CompanyId] = companies.GetValueOrDefault(d.CompanyId) + 1;
 
+            // Structured location/work-mode signals that aren't words inside the posting itself.
+            var rn = Norm(d.Reason);
+            if (rn.Contains("internacional") || rn.Contains("exterior") || rn.Contains("fora do brasil")) intl++;
+            if (rn.Contains("presencial") || rn.Contains("hibrido")) onsite++;
+
             // Reason words are the explicit, highest-signal part — that's why the user can type a motive.
             foreach (var t in Tokenize(d.Reason))
                 tokens[t] = tokens.GetValueOrDefault(t) + 1;
         }
 
-        return new NegativeModel(companies, new Dictionary<string, int>(), tokens) { TotalRejections = disliked.Count };
+        return new NegativeModel(companies, new Dictionary<string, int>(), tokens)
+        { TotalRejections = disliked.Count, IntlDislikes = intl, OnsiteDislikes = onsite };
     }
 
     public int Penalty(NegativeModel model, JobSignal job)

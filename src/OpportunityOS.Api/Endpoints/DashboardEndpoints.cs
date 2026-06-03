@@ -164,6 +164,12 @@ public static class DashboardEndpoints
                     var j = jobs[m.JobPostingId];
                     return !learner.ShouldHide(negModel, new JobSignal(j.CompanyId, j.ExtractedSkills, j.Title, j.DescriptionText));
                 }).ToList();
+
+                // Learned location preference: the user keeps declining international roles
+                // ("Internacional" is a LOCATION, not a word in the posting, so token-learning misses it).
+                // Once the signal is clear, hide international by default — still reachable via "Exterior".
+                if (negModel.IntlDislikes >= 3 && !string.Equals(region, "international", StringComparison.OrdinalIgnoreCase))
+                    filtered = filtered.Where(m => !IsInternational(jobs[m.JobPostingId])).ToList();
             }
 
             // Region + contract filters (user can ask national/international, PJ/CLT, or both).

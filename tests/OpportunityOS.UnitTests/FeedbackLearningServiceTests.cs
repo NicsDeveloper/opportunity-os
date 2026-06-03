@@ -54,6 +54,19 @@ public sealed class FeedbackLearningServiceTests
     }
 
     [Fact]
+    public void LearnsLocationPreference_FromReasons()
+    {
+        var model = _svc.Build(new[]
+        {
+            new DislikedJob(CoA, System.Array.Empty<string>(), "X", "Internacional"),
+            new DislikedJob(CoA, System.Array.Empty<string>(), "Y", "internacional"),
+            new DislikedJob(CoB, System.Array.Empty<string>(), "Z", "Presencial"),
+        });
+        Assert.Equal(2, model.IntlDislikes);
+        Assert.Equal(1, model.OnsiteDislikes);
+    }
+
+    [Fact]
     public void DoesNotLearnDesirableSkills_FromRejectedJob()
     {
         // The user rejects a .NET job (e.g., for location). The system must NOT conclude ".NET is bad"
