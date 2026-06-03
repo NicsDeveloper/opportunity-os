@@ -37,6 +37,7 @@ public static class DependencyInjection
         services.AddSingleton<ICompanyNameResolver, CompanyNameResolver>();
         services.AddSingleton<IJobFingerprintService, JobFingerprintService>();
         services.AddSingleton<IDiscoveryRankService, DiscoveryRankService>();
+        services.AddSingleton<IFeedbackLearningService, FeedbackLearningService>();
 
         // Link validation (HEAD-check -> expire dead postings), used by API + Worker.
         services.AddHttpClient<IJobLinkValidator, JobLinkValidator>(ConfigureClient);

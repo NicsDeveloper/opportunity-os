@@ -221,6 +221,17 @@ button { font-family: inherit; }
   border-radius: 9px; padding: 11px 13px; margin: 0; line-height: 1.5; }
 .copy-single { font-size: 13px; background: #fff; border: 1px solid var(--border); border-radius: 9px; padding: 10px 13px; }
 
+/* "Por que não serve?" reason capture (continuous learning) */
+.reasonbox { margin-top: 14px; padding: 14px 16px; background: #fff7f7; border: 1px solid #fbdada; border-radius: 13px; animation: rowIn .2s ease; }
+.reason-q { font-size: 13px; font-weight: 700; color: #b4423a; }
+.reason-q span { font-weight: 400; color: var(--muted); font-size: 12px; }
+.reason-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.reason-chips button { border: 1px solid var(--border-strong); background: #fff; border-radius: 999px; padding: 5px 12px; font-size: 12.5px; cursor: pointer; color: var(--ink-2); transition: background .14s, border-color .14s, color .14s; }
+.reason-chips button:hover { background: #fdecec; border-color: #f3b9b9; color: #b4423a; }
+.reason-row { display: flex; gap: 8px; align-items: center; }
+.reason-row input { flex: 1; border: 1px solid var(--border-strong); border-radius: 10px; padding: 9px 12px; font-size: 13.5px; outline: none; transition: border-color .14s; }
+.reason-row input:focus { border-color: var(--accent); }
+
 /* empty / error */
 .empty { text-align: center; padding: 56px 20px; color: var(--ink-2); }
 .empty p { margin: 0; font-size: 15px; font-weight: 600; }

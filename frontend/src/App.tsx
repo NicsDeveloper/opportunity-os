@@ -219,6 +219,8 @@ function OppCard({ o, notify, onChanged }: {
   const [menu, setMenu] = useState(false);
   const [busy, setBusy] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const [reason, setReason] = useState("");
   const [done, setDone] = useState<{ kind: "applied" | "hidden"; label: string } | null>(null);
   const [why, setWhy] = useState(o.rationale);
   const [score, setScore] = useState(o.overallScore);
@@ -228,15 +230,20 @@ function OppCard({ o, notify, onChanged }: {
   const adh = adherence(score);
   const isTerse = /^score\s+\d+\/100/i.test((why ?? "").trim());
 
-  // Fire the feedback, play the leave animation, then show the slim undo row.
-  const act = (type: string, kind: "applied" | "hidden", label: string) => {
-    setMenu(false);
+  // Fire the feedback (with optional reason the system learns from), play the leave
+  // animation, then show the slim undo row.
+  const act = (type: string, kind: "applied" | "hidden", label: string, why?: string) => {
+    setMenu(false); setAsking(false);
     setLeaving(true);
-    api.feedback(type, { jobPostingId: o.jobPostingId })
-      .then(() => { if (kind === "applied") notify("Movida pra Aplicações ✅"); })
+    api.feedback(type, { jobPostingId: o.jobPostingId, reason: why?.trim() || undefined })
+      .then(() => {
+        if (kind === "applied") notify("Movida pra Aplicações ✅");
+        else if (why?.trim()) notify("Anotado — o radar vai aprender 👍");
+      })
       .catch(() => notify("Não foi possível agora."));
     window.setTimeout(() => setDone({ kind, label }), 280);
   };
+  const dismissWithReason = (r: string) => { setReason(""); act("Irrelevant", "hidden", "irrelevante", r); };
   const undo = async () => {
     const wasApplied = done?.kind === "applied";
     setDone(null); setLeaving(false);
@@ -267,7 +274,7 @@ function OppCard({ o, notify, onChanged }: {
 
   return (
     <div className={"card oppcard" + (src.weak ? " weak" : "") + (leaving ? " leaving" : "") + (menu ? " menu-open" : "")}>
-      <button className="card-x" title="Remover do mural" onClick={() => act("HideSimilar", "hidden", "removida")}>
+      <button className="card-x" title="Não serve — dizer por quê" onClick={() => { setMenu(false); setAsking(true); }}>
         <Icon name="close" size={13} />
       </button>
       <div className="card-row">
@@ -317,14 +324,32 @@ function OppCard({ o, notify, onChanged }: {
               <div className="menu-scrim" onClick={() => setMenu(false)} />
               <div className="menu">
                 <button onClick={() => { setMenu(false); setOpen((v) => !v); }}>ℹ️ Ver detalhes</button>
-                <button onClick={() => act("HideSimilar", "hidden", "ocultada")}>🙈 Ocultar</button>
-                <button onClick={() => act("Irrelevant", "hidden", "irrelevante")}>👎 Irrelevante</button>
+                <button onClick={() => { setMenu(false); setAsking(true); }}>👎 Não serve (dizer por quê)</button>
+                <button onClick={() => act("HideSimilar", "hidden", "ocultada")}>🙈 Só ocultar</button>
                 <button onClick={() => act("BadCompanyDetection", "hidden", "empresa errada")}>🏢 Empresa errada</button>
               </div>
             </>
           )}
         </div>
       </div>
+
+      {asking && (
+        <div className="reasonbox">
+          <div className="reason-q">Por que não serve? <span>ajuda o radar a aprender e parar de sugerir parecidas</span></div>
+          <div className="reason-chips">
+            {["Empresa", "Stack diferente", "Sênior demais", "Júnior demais", "Internacional", "Presencial", "Não é .NET"].map((c) => (
+              <button key={c} onClick={() => dismissWithReason(c)}>{c}</button>
+            ))}
+          </div>
+          <div className="reason-row">
+            <input autoFocus placeholder="Escreva o motivo (opcional)…" value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") dismissWithReason(reason); }} />
+            <button className="btn xs primary" onClick={() => dismissWithReason(reason)}>Confirmar</button>
+            <button className="btn xs" onClick={() => { setAsking(false); setReason(""); }}>Cancelar</button>
+          </div>
+        </div>
+      )}
 
       {open && (
         <div className="card-details">

@@ -96,7 +96,7 @@ public static class DashboardEndpoints
         app.MapGet("/api/matches", async (
             int? minScore, int? take, int? freshDays, int? maxAgeDays, string? sort,
             string? region, string? contract,
-            OpportunityOsDbContext db, IDiscoveryRankService ranker, CancellationToken ct) =>
+            OpportunityOsDbContext db, IDiscoveryRankService ranker, IFeedbackLearningService learner, CancellationToken ct) =>
         {
             var min = minScore ?? 60;                  // relevance-first: hide weak matches
             var limit = Math.Clamp(take ?? 10, 1, 100);
@@ -140,6 +140,32 @@ public static class DashboardEndpoints
                 .Select(kv => kv.Key).ToHashSet();
             filtered = filtered.Where(m => !hidden.Contains(m.JobPostingId)).ToList();
 
+            // Continuous improvement: learn from EVERYTHING the user rejected (not only the current
+            // candidates) so jobs similar to past "irrelevante"/"ocultar" — same company, stack, or the
+            // words the user typed as the reason — get demoted and, when the signal is strong, hidden.
+            var negTypes = new[] { UserFeedbackType.Irrelevant, UserFeedbackType.HideSimilar };
+            var negFb = await db.UserFeedbacks
+                .Where(f => f.JobPostingId != null && negTypes.Contains(f.Type))
+                .Select(f => new { JobId = f.JobPostingId!.Value, f.Reason })
+                .ToListAsync(ct);
+            var negModel = NegativeModel.Empty;
+            if (negFb.Count > 0)
+            {
+                var negJobIds = negFb.Select(f => f.JobId).Distinct().ToList();
+                var negJobs = await db.JobPostings.Where(j => negJobIds.Contains(j.Id))
+                    .Select(j => new { j.Id, j.CompanyId, j.ExtractedSkills, j.Title })
+                    .ToDictionaryAsync(j => j.Id, ct);
+                var disliked = negFb.Where(f => negJobs.ContainsKey(f.JobId))
+                    .Select(f => { var nj = negJobs[f.JobId]; return new DislikedJob(nj.CompanyId, nj.ExtractedSkills, nj.Title, f.Reason); })
+                    .ToList();
+                negModel = learner.Build(disliked);
+                filtered = filtered.Where(m =>
+                {
+                    var j = jobs[m.JobPostingId];
+                    return !learner.ShouldHide(negModel, new JobSignal(j.CompanyId, j.ExtractedSkills, j.Title, j.DescriptionText));
+                }).ToList();
+            }
+
             // Region + contract filters (user can ask national/international, PJ/CLT, or both).
             if (!string.Equals(region, "all", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(region))
                 filtered = filtered.Where(m => string.Equals(region, "international", StringComparison.OrdinalIgnoreCase)
@@ -157,13 +183,17 @@ public static class DashboardEndpoints
             var companyIds = filtered.Select(m => jobs[m.JobPostingId].CompanyId).Distinct().ToList();
             var companies = await db.Companies.Where(c => companyIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
 
+            int LearnPenalty(Domain.Entities.JobPosting job) =>
+                learner.Penalty(negModel, new JobSignal(job.CompanyId, job.ExtractedSkills, job.Title, job.DescriptionText));
+
             int DiscoveryRankOf(Domain.Entities.OpportunityMatch m)
             {
                 var job = jobs[m.JobPostingId];
                 companies.TryGetValue(job.CompanyId, out var c);
                 var boost = ranker.FeedbackBoost(fbByJob.TryGetValue(m.JobPostingId, out var types) ? types : Enumerable.Empty<UserFeedbackType>());
                 return ranker.ComputeDiscoveryRank(new DiscoveryRankInput(
-                    m.OverallScore, job.SourceConfidenceScore, job.EffectiveDateUtc, c?.Priority ?? CompanyPriority.Low, boost));
+                    m.OverallScore, job.SourceConfidenceScore, job.EffectiveDateUtc, c?.Priority ?? CompanyPriority.Low, boost))
+                    - LearnPenalty(job);
             }
 
             // Freshness bonus keeps relevance primary within the fresh window (default sort);
@@ -176,7 +206,7 @@ public static class DashboardEndpoints
 
             var ordered = string.Equals(sort, "rank", StringComparison.OrdinalIgnoreCase)
                 ? filtered.OrderByDescending(DiscoveryRankOf).ThenByDescending(m => jobs[m.JobPostingId].EffectiveDateUtc)
-                : filtered.OrderByDescending(m => m.OverallScore + FreshnessBonus(jobs[m.JobPostingId].EffectiveDateUtc))
+                : filtered.OrderByDescending(m => m.OverallScore + FreshnessBonus(jobs[m.JobPostingId].EffectiveDateUtc) - LearnPenalty(jobs[m.JobPostingId]))
                           .ThenByDescending(m => jobs[m.JobPostingId].EffectiveDateUtc);
             var ranked = ordered.Take(limit).ToList();
 
