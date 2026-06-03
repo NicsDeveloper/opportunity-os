@@ -103,8 +103,6 @@ function Sidebar({ section, setSection, reload, name, headline }: {
 
 /* ====================== Oportunidades (main) ====================== */
 
-const PAGE_SIZE = 6;
-
 // Friendly, jargon-free narration of what the search is doing (Firehose/Serper/provider stay hidden).
 const SEARCH_STEPS = [
   "Procurando vagas .NET nos portais (Gupy, Recrutei, Infojobs, Vagas.com)…",
@@ -156,6 +154,20 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
   const [prog, setProg] = useState<{ step: number; done?: { n: number; u: number; s: number; e: number } } | null>(null);
   const [page, setPage] = useState(0);
 
+  // Fit-to-screen: show exactly as many cards as fit the viewport so the user never scrolls.
+  const listRef = useRef<HTMLDivElement>(null);
+  const [pageSize, setPageSize] = useState(5);
+  useEffect(() => {
+    const calc = () => {
+      const top = listRef.current?.getBoundingClientRect().top ?? 280;
+      const fit = Math.floor((window.innerHeight - top - 110) / 146); // ~card h incl gap; reserve pager + padding
+      setPageSize(Math.max(3, Math.min(8, fit)));
+    };
+    calc();
+    window.addEventListener("resize", calc);
+    return () => window.removeEventListener("resize", calc);
+  }, [showFilters]);
+
   // One direct feed: the best matches for the profile (learned prefs already applied server-side),
   // ordered by adherence. No tabs — weak sources just sort to the bottom.
   const opps = useAsync(() => api.qualified(100, region, contract), [reload, region, contract]);
@@ -166,9 +178,9 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
     // Ordenar por aderência (score) — fontes fracas empatadas ficam abaixo.
     .sort((a, b) => (b.overallScore - a.overallScore) || (Number(isWeakSource(a)) - Number(isWeakSource(b))));
   const activeFilters = (region !== "all" ? 1 : 0) + (contract !== "all" ? 1 : 0);
-  const pageCount = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(all.length / pageSize));
   const current = Math.min(page, pageCount - 1);
-  const shown = all.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE);
+  const shown = all.slice(current * pageSize, current * pageSize + pageSize);
   // Reset to page 1 only when the user changes filters/search — never on a background
   // refresh (which would yank the user off the page they're reading).
   useEffect(() => { setPage(0); }, [region, contract, query]);
@@ -244,7 +256,7 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
 
       {prog && <SearchProgress prog={prog} />}
 
-      <div className="opplist">
+      <div className="opplist" ref={listRef}>
         {opps.error && <p className="err">{opps.error}</p>}
         {shown.map((o) => <OppCard key={o.matchId} o={o} notify={notify} onChanged={onChanged} />)}
         {opps.data && all.length === 0 && (
@@ -256,7 +268,7 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
         {!opps.data && !opps.error && <CardSkeletons />}
       </div>
 
-      {all.length > PAGE_SIZE && (
+      {all.length > pageSize && (
         <div className="pager">
           <button className="btn" disabled={current === 0} onClick={() => setPage(current - 1)}>‹ Anterior</button>
           <span className="pager-info">Página {current + 1} de {pageCount} · {all.length} vagas</span>
