@@ -22,6 +22,15 @@ public static class FeedbackEndpoints
 
             var feedback = new UserFeedback(type, req.JobPostingId, req.RawJobCandidateId, req.Reason);
             db.UserFeedbacks.Add(feedback);
+
+            // Dead-link signal: if the user says the posting is closed/moved/gone, expire it so it
+            // (and any rediscovery) drops out of the board.
+            if (req.JobPostingId is { } jid && (type == UserFeedbackType.Expired || LooksDead(req.Reason)))
+            {
+                var job = await db.JobPostings.FindAsync([jid], ct);
+                job?.MarkExpired();
+            }
+
             await db.SaveChangesAsync(ct);
             return Results.Created($"/api/feedback/{feedback.Id}", new { feedback.Id, Type = type.ToString(), feedback.CreatedAtUtc });
         });
@@ -35,5 +44,14 @@ public static class FeedbackEndpoints
                 .ToListAsync(ct);
             return Results.Ok(items);
         });
+    }
+
+    private static bool LooksDead(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) return false;
+        var r = reason.ToLowerInvariant();
+        return r.Contains("encerrad") || r.Contains("expirad") || r.Contains("movida")
+            || r.Contains("não existe") || r.Contains("nao existe") || r.Contains("fora do ar")
+            || r.Contains("removida") || r.Contains("não está mais") || r.Contains("nao esta mais");
     }
 }
