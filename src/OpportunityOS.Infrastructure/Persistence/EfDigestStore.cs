@@ -1,44 +1,58 @@
 using Microsoft.EntityFrameworkCore;
 using OpportunityOS.Application.Digest;
 using OpportunityOS.Domain.Entities;
+using OpportunityOS.Domain.Enums;
 
 namespace OpportunityOS.Infrastructure.Persistence;
 
 public sealed class EfDigestStore : IDigestStore
 {
+    private const int TopN = 3; // the digest is a focused "apply today" list, not a dump
+
     private readonly OpportunityOsDbContext _db;
 
     public EfDigestStore(OpportunityOsDbContext db) => _db = db;
 
     public async Task<IReadOnlyList<OpportunityDigestItem>> GetDigestItemsAsync(int minScore, CancellationToken ct)
     {
-        var matches = await _db.OpportunityMatches
-            .Where(m => m.OverallScore >= minScore)
-            .ToListAsync(ct);
-
-        // Keep the latest match per job.
-        var latestPerJob = matches
+        // Latest match per job FIRST, then the score gate (so a re-scored/gated job actually drops).
+        var all = await _db.OpportunityMatches.ToListAsync(ct);
+        var latestPerJob = all
             .GroupBy(m => m.JobPostingId)
             .Select(g => g.OrderByDescending(m => m.CreatedAtUtc).First())
+            .Where(m => m.OverallScore >= minScore)
             .ToList();
-        if (latestPerJob.Count == 0)
-            return Array.Empty<OpportunityDigestItem>();
+        if (latestPerJob.Count == 0) return Array.Empty<OpportunityDigestItem>();
 
         var jobIds = latestPerJob.Select(m => m.JobPostingId).ToList();
         var jobs = await _db.JobPostings.Where(j => jobIds.Contains(j.Id)).ToDictionaryAsync(j => j.Id, ct);
         var companyIds = jobs.Values.Select(j => j.CompanyId).Distinct().ToList();
         var companies = await _db.Companies.Where(c => companyIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
 
+        // Hidden (irrelevant/hide/applied) jobs never go into the daily e-mail.
+        var hiddenTypes = new[] { UserFeedbackType.Irrelevant, UserFeedbackType.HideSimilar, UserFeedbackType.Applied, UserFeedbackType.ContactedRecruiter };
+        var hidden = (await _db.UserFeedbacks.Where(f => f.JobPostingId != null && hiddenTypes.Contains(f.Type))
+            .Select(f => f.JobPostingId!.Value).ToListAsync(ct)).ToHashSet();
+
         var messages = await _db.GeneratedMessages.Where(g => jobIds.Contains(g.JobPostingId)).ToListAsync(ct);
         var latestMessageByJob = messages
             .GroupBy(g => g.JobPostingId)
             .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.CreatedAtUtc).First());
 
+        var publishedSince = DateTime.UtcNow.AddDays(-120);
         var items = new List<OpportunityDigestItem>();
         foreach (var match in latestPerJob.OrderByDescending(m => m.OverallScore))
         {
+            if (items.Count >= TopN) break;
             if (!jobs.TryGetValue(match.JobPostingId, out var job)) continue;
-            var companyName = companies.TryGetValue(job.CompanyId, out var c) ? c.Name : "(empresa)";
+            if (hidden.Contains(job.Id)) continue;
+            // Active + fresh only (no expired/archived/talent-pool/obsolete).
+            if (job.Status is JobPostingStatus.Expired or JobPostingStatus.Archived || job.IsTalentPool
+                || job.EffectiveDateUtc < publishedSince) continue;
+
+            companies.TryGetValue(job.CompanyId, out var c);
+            var companyName = !string.IsNullOrWhiteSpace(job.RealCompanyName) ? job.RealCompanyName!
+                : (!string.IsNullOrWhiteSpace(c?.Name) ? c!.Name : "Empresa a confirmar");
             latestMessageByJob.TryGetValue(job.Id, out var msg);
 
             items.Add(new OpportunityDigestItem(

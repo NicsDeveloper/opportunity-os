@@ -125,10 +125,13 @@ public static class DashboardEndpoints
             // stale/closed postings. Load strong matches + their jobs and filter in memory
             // (EffectiveDateUtc / IsTalentPool are computed, not SQL-mappable).
             var publishedSince = DateTime.UtcNow.AddDays(-120);
-            var strong = await db.OpportunityMatches.Where(m => m.OverallScore >= 75).ToListAsync(ct);
-            var strongLatest = strong
+            // Latest match per job FIRST, then the >=75 gate (a stale high match must not inflate the count).
+            var allScores = await db.OpportunityMatches
+                .Select(m => new { m.JobPostingId, m.OverallScore, m.CreatedAtUtc }).ToListAsync(ct);
+            var strongLatest = allScores
                 .GroupBy(m => m.JobPostingId)
                 .Select(g => g.OrderByDescending(m => m.CreatedAtUtc).First())
+                .Where(m => m.OverallScore >= 75)
                 .ToList();
             var strongJobIds = strongLatest.Select(m => m.JobPostingId).ToList();
             var strongJobs = await db.JobPostings
