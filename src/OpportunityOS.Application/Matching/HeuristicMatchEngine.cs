@@ -25,7 +25,7 @@ public sealed class HeuristicMatchEngine : IMatchEngine
         var risks = new List<string>();
         var missing = new List<string>();
 
-        var technical = ScoreTechnical(haystack, strengths, risks, missing);
+        var technical = ScoreTechnical(job.Title.ToLowerInvariant(), haystack, strengths, risks, missing);
         var domain = ScoreDomain(haystack, strengths, risks);
         var seniority = ScoreSeniority(norm.Seniority, strengths, risks);
         var location = ScoreLocation(norm.WorkMode, haystack, strengths, risks);
@@ -41,6 +41,20 @@ public sealed class HeuristicMatchEngine : IMatchEngine
             language * 0.10,
             MidpointRounding.AwayFromZero);
 
+        // TECHNICAL GATE: domain/seniority/location/language must NOT lift a role that isn't
+        // actually a backend/.NET job into the top. Without this, a "Director, Collections" at a
+        // fintech scores ~70 on domain alone. The candidate is a backend .NET dev — weak tech fit
+        // means a weak opportunity, period.
+        if (technical < 40)
+        {
+            overall = Math.Min(overall, 40);   // not a backend/.NET role -> below the board threshold
+            risks.Add("Não parece uma vaga de backend/.NET — rebaixada");
+        }
+        else if (technical < 60)
+        {
+            overall = Math.Min(overall, 70);   // backend, but .NET not confirmed -> can show, never "topo"
+        }
+
         var recommendation = Recommend(overall);
         var rationale = BuildRationale(overall, technical, domain, seniority, location, language);
 
@@ -49,8 +63,27 @@ public sealed class HeuristicMatchEngine : IMatchEngine
             recommendation, strengths, risks, missing, rationale);
     }
 
-    private static int ScoreTechnical(string haystack, List<string> strengths, List<string> risks, List<string> missing)
+    // Titles that are clearly NOT an individual-contributor dev role…
+    private static readonly string[] NonEngRoleTitles =
+        { "director", "diretor", " manager", "gerente", "consultant", "consultor", "designer", "marketing",
+          "sales", "vendas", "recruiter", "recrutad", "product owner", "product manager", "head of",
+          " vp ", "chief", "controller", "accountant", "contador", "advogad", "lawyer", "executive", "analista de neg" };
+    // …unless the title also carries a real dev signal.
+    private static readonly string[] DevTitleSignals =
+        { "developer", "desenvolvedor", "desenvolvedora", "engineer", "engenheir", "programador", "programadora",
+          ".net", "c#", "backend", "back-end", "fullstack", "full-stack", "software", "dev " };
+
+    private static int ScoreTechnical(string titleLower, string haystack, List<string> strengths, List<string> risks, List<string> missing)
     {
+        // Role gate by title: a Director/Manager/Consultant/Marketing role is not for a backend dev,
+        // even when the company's JD is full of "API/systems/engineering" noise.
+        if (ContainsAny(titleLower, NonEngRoleTitles) && !ContainsAny(titleLower, DevTitleSignals))
+        {
+            risks.Add("Cargo não-técnico (gestão/negócio) — não é vaga de dev");
+            missing.Add("Não é uma posição de desenvolvedor backend");
+            return 12;
+        }
+
         var hasDotNet = ContainsAny(haystack, KnownTerms.CoreDotNet);
         var hasBackend = ContainsAny(haystack, KnownTerms.BackendSignals);
         var bonusCount = CountDistinct(haystack, KnownTerms.BonusStack);

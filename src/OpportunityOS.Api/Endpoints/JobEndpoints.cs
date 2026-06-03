@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using OpportunityOS.Application.Discovery;
 using OpportunityOS.Application.Matching;
+using OpportunityOS.Domain.Entities;
 using OpportunityOS.Domain.Enums;
 using OpportunityOS.Application.Normalization;
 using OpportunityOS.Application.Pipeline;
@@ -81,6 +82,44 @@ public static class JobEndpoints
             await pipeline.EnsureForMatchAsync(match, ct);
 
             return Results.Ok(match.ToResponse());
+        });
+
+        // Re-score every active matched job with the current heuristic engine (applies the
+        // technical gate retroactively). Writes a fresh match only when the score changed.
+        group.MapPost("/rescore", async (
+            OpportunityOsDbContext db, IJobNormalizer normalizer, IMatchEngine engine, CancellationToken ct) =>
+        {
+            var profile = await db.CandidateProfiles.OrderByDescending(p => p.CreatedAtUtc).FirstOrDefaultAsync(ct);
+            if (profile is null) return Results.BadRequest("No candidate profile registered.");
+
+            var run = ExecutionRun.Start("RescoreMatches");
+            await db.ExecutionRuns.AddAsync(run, ct);
+
+            var scores = await db.OpportunityMatches
+                .Select(m => new { m.JobPostingId, m.OverallScore, m.CreatedAtUtc }).ToListAsync(ct);
+            var latest = scores.GroupBy(s => s.JobPostingId)
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.CreatedAtUtc).First().OverallScore);
+
+            var jobs = await db.JobPostings
+                .Where(j => latest.Keys.Contains(j.Id)
+                    && j.Status != JobPostingStatus.Expired && j.Status != JobPostingStatus.Archived)
+                .ToListAsync(ct);
+
+            int rescored = 0, changed = 0;
+            foreach (var job in jobs)
+            {
+                var norm = normalizer.Normalize(job);
+                job.ApplyNormalization(norm.Seniority, norm.WorkMode, norm.Language, norm.Skills, norm.Domains);
+                var result = engine.Evaluate(profile, job);
+                rescored++;
+                if (latest.TryGetValue(job.Id, out var prev) && prev == result.OverallScore) continue;
+                db.OpportunityMatches.Add(result.ToEntity(job.Id, profile.Id));
+                changed++;
+                run.RecordSuccess();
+            }
+            run.Complete();
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new { rescored, changed });
         });
 
         // Latest match for a job, if any.
