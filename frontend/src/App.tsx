@@ -115,7 +115,7 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName }: {
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState(0);
 
-  const opps = useAsync(() => api.qualified(80, region, contract), [reload, region, contract]);
+  const opps = useAsync(() => api.qualified(100, region, contract), [reload, region, contract]);
   const last = useAsync(() => api.runs(1), [reload]);
 
   const all = (opps.data ?? [])
