@@ -48,6 +48,40 @@ public sealed class HeuristicMatchEngineTests
     }
 
     [Fact]
+    public void NonTechRoleAtFintech_IsGatedDown()
+    {
+        var engine = CreateEngine();
+        var profile = TestData.BackendDotNetProfile();
+        var job = TestData.Job(
+            title: "Director, Collections",
+            description: "Lead our collections and credit recovery operations at a fast-growing " +
+                         "fintech / payments company. Manage a team, own the financial strategy. Remote, Brazil.",
+            location: "Remote - Brazil",
+            language: "en");
+
+        var result = engine.Evaluate(profile, job);
+
+        // Strong domain + remote + language must NOT push a non-backend role to the top.
+        Assert.True(result.OverallScore <= 40, $"Expected <= 40 (gated) but was {result.OverallScore}");
+    }
+
+    [Fact]
+    public void BackendWithoutDotNet_CappedBelowTop()
+    {
+        var engine = CreateEngine();
+        var job = TestData.Job(
+            title: "Senior Backend Engineer (Java / Spring)",
+            description: "Backend engineer with Java, Spring Boot, microservices, AWS and payments. Remote, Brazil.",
+            location: "Remote - Brazil",
+            language: "en");
+
+        var result = engine.Evaluate(TestData.BackendDotNetProfile(), job);
+
+        // Backend but no .NET confirmed: allowed to appear, but never a top/strategic pick.
+        Assert.True(result.OverallScore <= 70, $"Expected <= 70 but was {result.OverallScore}");
+    }
+
+    [Fact]
     public void Evaluate_AlwaysProducesRationaleAndSubScoresInRange()
     {
         var engine = CreateEngine();
