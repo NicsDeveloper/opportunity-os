@@ -41,7 +41,7 @@ export function App() {
           {section === "empresas" && <CompaniesScreen reload={reload} notify={notify} onChanged={refresh} />}
           {section === "aplicacoes" && <ApplicationsScreen reload={reload} notify={notify} onChanged={refresh} profileId={current?.id} />}
           {section === "descobertas" && <DiscoverScreen reload={reload} notify={notify} onChanged={refresh} />}
-          {section === "relatorios" && <ReportsScreen reload={reload} />}
+          {section === "relatorios" && <ReportsScreen reload={reload} profileId={current?.id} />}
           {section === "perfis" && <ProfilesScreen reload={reload} notify={notify} onChanged={refresh} selectedId={current?.id} onSelectProfile={selectProfile} />}
         </div>
       </main>
@@ -660,10 +660,10 @@ function DiscoverScreen({ reload, notify, onChanged }: { reload: number; notify:
 
 /* ============================ Relatórios ============================ */
 
-function ReportsScreen({ reload }: { reload: number }) {
-  const s = useAsync(api.summary, [reload]) as { data: Summary | null };
+function ReportsScreen({ reload, profileId }: { reload: number; profileId?: string }) {
+  const s = useAsync(() => api.summary(profileId), [reload, profileId]) as { data: Summary | null };
   const companies = useAsync(api.companies, [reload]);
-  const apps = useAsync(api.applications, [reload]);
+  const apps = useAsync(() => api.applications(profileId), [reload, profileId]);
   const d = s.data;
   return (
     <>

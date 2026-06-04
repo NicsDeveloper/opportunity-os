@@ -19,9 +19,10 @@ public sealed class SendDailyDigestJob
     [AutomaticRetry(Attempts = 1)]
     public async Task RunAsync(CancellationToken ct)
     {
-        var result = await _digest.SendDailyDigestAsync(EmailDigestService.DefaultMinScore, ct);
+        // One digest per candidate profile (each uses its own MinimumScoreToShow).
+        var results = await _digest.SendAllAsync(ct);
         _logger.LogInformation(
-            "SendDailyDigestJob finished: sent={Sent} items={Items} reason={Reason}",
-            result.Sent, result.ItemCount, result.Reason);
+            "SendDailyDigestJob finished: profiles={Profiles} sent={Sent} totalItems={Items}",
+            results.Count, results.Count(r => r.Sent), results.Sum(r => r.ItemCount));
     }
 }

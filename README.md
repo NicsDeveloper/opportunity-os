@@ -528,16 +528,77 @@ O dev server faz proxy de `/api` para a API (sem CORS em dev). Se a API estiver 
 outra porta (ex.: `5000` no docker compose), use
 `VITE_API_TARGET=http://localhost:5000 npm run dev`.
 
-## Match Engine (heurístico, v1)
+## Multi-perfil de candidato (entidades globais vs por perfil)
 
-Sem LLM nesta fase — o score é **transparente e explicável** (ver
-`src/OpportunityOS.Application/Matching/KnownTerms.cs`).
+O sistema pontua oportunidades para **vários perfis de candidato** (ex.: Backend .NET,
+Java, Frontend React, Data Engineer). A descoberta continua **global** — uma vaga **não** é
+duplicada por perfil; o que muda por perfil é o **score, o feedback, a oportunidade, o
+rascunho e a aplicação**.
+
+| Global (uma vez para todos) | Por perfil (`CandidateProfileId`) |
+|-----------------------------|-----------------------------------|
+| `Company`, `JobPosting`, `RawJobCandidate` | `OpportunityMatch` |
+| `SearchCampaign`, `SearchQueryExecution` | `Opportunity` |
+| `JobPostingSourceOccurrence` | `GeneratedMessage` |
+| `BacenInstitution`, `ConsultingCompanyCandidate` | `UserFeedback` / Applications |
+
+**Resolução do perfil atual** — `ICurrentCandidateProfileProvider`
+(`src/OpportunityOS.Application/Profiles/`): `id explícito → IsDefault → mais recente`. Não
+há estado global mutável de “perfil ativo”; a seleção vai **explícita** em cada request
+(`?candidateProfileId=…`) e o front lembra a escolha em `localStorage`. Isso prepara o
+caminho para auth/multi-tenancy: o mesmo ponto passa a resolver pelo usuário autenticado.
+
+**Criar / alternar perfil**
+
+```bash
+# Listar perfis
+curl localhost:5077/api/candidate-profiles
+
+# Criar um perfil
+curl -X POST localhost:5077/api/candidate-profiles -H "Content-Type: application/json" -d '{
+  "fullName":"Java Dev","displayName":"Java Backend","headline":"Backend Java/Spring",
+  "summary":"...","location":"Brasil","seniority":"Pleno/Sênior","preferredLanguage":"pt-BR",
+  "coreSkills":["Java","Spring Boot","Kafka","AWS","PostgreSQL"]
+}'
+
+# Mover a âncora padrão (fallback de compatibilidade)
+curl -X POST localhost:5077/api/candidate-profiles/{id}/set-default
+```
+
+No frontend, o seletor no topo da sidebar troca o perfil; o feed, as aplicações e a copy
+recarregam para o perfil escolhido.
+
+**Rodar o match por perfil**
+
+```bash
+# Feed de um perfil específico
+curl "localhost:5077/api/matches?candidateProfileId={id}&minScore=60"
+
+# Re-pontuar só um perfil (default), ou todos
+curl -X POST "localhost:5077/api/jobs/rescore?candidateProfileId={id}"
+curl -X POST "localhost:5077/api/jobs/rescore?allProfiles=true"
+
+# Match sob demanda de uma vaga para um perfil
+curl -X POST "localhost:5077/api/jobs/{jobId}/match?candidateProfileId={id}"
+```
+
+> Fase atual: **multi-perfil sem auth**. As próximas fases (Auth com `AppUser`/Identity e
+> depois SaaS/Tenant/billing) plugam em cima do `ICurrentCandidateProfileProvider` e do
+> `CandidateProfileId` já presentes nas entidades por perfil.
+
+## Match Engine (heurístico, v2 — dirigido pelo perfil)
+
+Sem LLM nesta fase — o score é **transparente e explicável**. As famílias de stack ficam em
+`src/OpportunityOS.Application/Matching/StackTaxonomy.cs` e o motor em
+`HeuristicMatchEngine.cs`. O **TechnicalFit** compara a vaga com a stack do **perfil**
+(core/secondary/excluded), em vez de um viés fixo em .NET.
 
 ```
-OverallScore = Técnico*0.35 + Domínio*0.25 + Senioridade*0.15 + Localização*0.15 + Idioma*0.10
+OverallScore = Técnico*0.50 + Cargo*0.15 + Senioridade*0.10 + Domínio*0.10 + Localização*0.10 + Idioma*0.05
 ```
 
-Faixas de recomendação:
+Gates: `Técnico < 35 → ≤ 45`; cargo de gestão/negócio sem sinal técnico → `≤ 40`; vaga fora
+da stack core do perfil → `≤ 70`. Faixas de recomendação:
 
 | Score | Recomendação |
 |-------|--------------|

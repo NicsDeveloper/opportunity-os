@@ -14,10 +14,12 @@ public sealed class EfDigestStore : IDigestStore
 
     public EfDigestStore(OpportunityOsDbContext db) => _db = db;
 
-    public async Task<IReadOnlyList<OpportunityDigestItem>> GetDigestItemsAsync(int minScore, CancellationToken ct)
+    public async Task<IReadOnlyList<OpportunityDigestItem>> GetDigestItemsAsync(Guid candidateProfileId, int minScore, CancellationToken ct)
     {
-        // Latest match per job FIRST, then the score gate (so a re-scored/gated job actually drops).
-        var all = await _db.OpportunityMatches.ToListAsync(ct);
+        // Latest match per job FOR THIS PROFILE FIRST, then the score gate (so a re-scored/gated job drops).
+        var all = await _db.OpportunityMatches
+            .Where(m => m.CandidateProfileId == candidateProfileId)
+            .ToListAsync(ct);
         var latestPerJob = all
             .GroupBy(m => m.JobPostingId)
             .Select(g => g.OrderByDescending(m => m.CreatedAtUtc).First())
@@ -30,19 +32,23 @@ public sealed class EfDigestStore : IDigestStore
         var companyIds = jobs.Values.Select(j => j.CompanyId).Distinct().ToList();
         var companies = await _db.Companies.Where(c => companyIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
 
-        // Hidden (irrelevant/hide/applied) jobs never go into the daily e-mail.
+        // Hidden (irrelevant/hide/applied) jobs never go into the daily e-mail — PER PROFILE.
         var hiddenTypes = new[] { UserFeedbackType.Irrelevant, UserFeedbackType.HideSimilar, UserFeedbackType.Applied, UserFeedbackType.ContactedRecruiter };
-        var hidden = (await _db.UserFeedbacks.Where(f => f.JobPostingId != null && hiddenTypes.Contains(f.Type))
+        var hidden = (await _db.UserFeedbacks.Where(f => f.JobPostingId != null && hiddenTypes.Contains(f.Type)
+                && f.CandidateProfileId == candidateProfileId)
             .Select(f => f.JobPostingId!.Value).ToListAsync(ct)).ToHashSet();
 
-        // Learned location preference: if the user keeps declining international roles, the daily
-        // e-mail must respect it too (same rule as the board).
+        // Learned location preference (per profile): if this profile keeps declining international
+        // roles, the daily e-mail must respect it too (same rule as the board).
         var declineTypes = new[] { UserFeedbackType.Irrelevant, UserFeedbackType.HideSimilar };
-        var intlDislikes = (await _db.UserFeedbacks.Where(f => declineTypes.Contains(f.Type) && f.Reason != null)
+        var intlDislikes = (await _db.UserFeedbacks.Where(f => declineTypes.Contains(f.Type) && f.Reason != null
+                && f.CandidateProfileId == candidateProfileId)
             .Select(f => f.Reason!).ToListAsync(ct))
             .Count(r => r.ToLowerInvariant() is var rl && (rl.Contains("internacional") || rl.Contains("exterior")));
 
-        var messages = await _db.GeneratedMessages.Where(g => jobIds.Contains(g.JobPostingId)).ToListAsync(ct);
+        var messages = await _db.GeneratedMessages
+            .Where(g => jobIds.Contains(g.JobPostingId) && g.CandidateProfileId == candidateProfileId)
+            .ToListAsync(ct);
         var latestMessageByJob = messages
             .GroupBy(g => g.JobPostingId)
             .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.CreatedAtUtc).First());
@@ -75,10 +81,16 @@ public sealed class EfDigestStore : IDigestStore
         return items;
     }
 
-    public async Task<string?> GetCandidateNameAsync(CancellationToken ct) =>
+    public async Task<IReadOnlyList<DigestProfile>> GetProfilesAsync(CancellationToken ct) =>
         await _db.CandidateProfiles
             .OrderByDescending(p => p.IsDefault)
             .ThenByDescending(p => p.CreatedAtUtc)
+            .Select(p => new DigestProfile(p.Id, p.FullName, p.MinimumScoreToShow))
+            .ToListAsync(ct);
+
+    public async Task<string?> GetCandidateNameAsync(Guid candidateProfileId, CancellationToken ct) =>
+        await _db.CandidateProfiles
+            .Where(p => p.Id == candidateProfileId)
             .Select(p => p.FullName)
             .FirstOrDefaultAsync(ct);
 

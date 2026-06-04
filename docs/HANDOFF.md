@@ -6,6 +6,34 @@
 
 ---
 
+## 0. Atualização — Multi-perfil de candidato (pré-auth)
+
+O sistema deixou de ser fixo no perfil do Nícolas: agora pontua oportunidades para
+**múltiplos `CandidateProfile`** (Backend .NET, Java, Frontend React, Data Engineer seedados).
+
+- **Entidades globais** (uma vez para todos): `Company`, `JobPosting`, `RawJobCandidate`,
+  `SearchCampaign`, `SearchQueryExecution`, `JobPostingSourceOccurrence`, `BacenInstitution`,
+  `ConsultingCompanyCandidate`. A **descoberta continua global** — a vaga não é duplicada por perfil.
+- **Entidades por perfil** (`CandidateProfileId`): `OpportunityMatch`, `Opportunity`,
+  `GeneratedMessage`, `UserFeedback`/Applications, e o **digest**.
+- **Resolução do perfil**: `ICurrentCandidateProfileProvider`
+  (`Application/Profiles`) → `id explícito → IsDefault → mais recente`. Sem estado global de
+  “ativo”; o id vai explícito por request (`?candidateProfileId=`) e o front guarda a seleção
+  em `localStorage`. Substituiu os antigos `CandidateProfiles.OrderByDescending(CreatedAtUtc)`
+  espalhados (AiEndpoints, JobEndpoints, EfDiscoveryStore, EfDigestStore).
+- **Motor**: `HeuristicMatchEngine` (v2) + `StackTaxonomy` — TechnicalFit dirigido pela stack
+  do perfil (core/secondary/excluded), pesos `Tech .50 / Cargo .15 / Sen .10 / Domínio .10 /
+  Local .10 / Idioma .05` e gates. `OpportunityMatch.EngineVersion` marca a geração.
+- **API**: `GET/POST /api/candidate-profiles` (+ `set-default`); `?candidateProfileId=` em
+  `/api/matches`, `/api/jobs/{id}/match`, `/api/jobs/rescore` (`allProfiles=true`),
+  `/api/applications`, `/api/feedback`, `/api/jobs/{id}/ai/*`, `/api/digest/*` (+ `send-all`).
+- **Como criar/alternar/rodar match por perfil**: ver a seção “Multi-perfil” do `README.md`.
+- **Caminho p/ auth/multi-tenancy**: a próxima fase pluga `AppUser`/Identity e resolve o perfil
+  pelo usuário autenticado dentro do `ICurrentCandidateProfileProvider`; SaaS (Tenant/billing)
+  vem depois. As entidades por perfil já carregam `CandidateProfileId`.
+
+---
+
 ## 1. O que é
 
 Sistema pessoal de **inteligência de oportunidades de emprego** para um candidato backend
