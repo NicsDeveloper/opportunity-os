@@ -35,7 +35,9 @@ O sistema passou de multi-perfil **pré-auth** para um **produto logado**. Cada 
   perfis pré-auth ao workspace dele e garante 1 default; valida que não sobrou `workspace_id` NULL.
 - **Frontend**: gate de auth em `App.tsx` (`/api/auth/me`), telas Login/Cadastro, onboarding de 4
   passos (cria o 1º perfil), logout e seletor de perfil validado contra o workspace. `api.ts` usa
-  `credentials:"include"`.
+  `credentials:"include"`. UI ajustada ao tema claro (seletor de perfil e inputs `.field` deixaram de
+  herdar fallback escuro → caixa preta) e o feed agora **reseta a paginação ao trocar de perfil**
+  (`profileId` nas deps do reset de página em `OpportunitiesScreen`).
 - **Testes**: unit do provider workspace-scoped; integração com cliente autenticado por cookie
   (`CreateAuthenticatedClientAsync`) + 401/403/isolamento/troca-de-perfil/logout.
 - **Fora de escopo** (adiado): ProductEvent (§26), CompanyWatchlist, billing/freemium, orgs/times.
