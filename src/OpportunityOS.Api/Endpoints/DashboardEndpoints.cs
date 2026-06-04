@@ -144,9 +144,11 @@ public static class DashboardEndpoints
                 .ToList();
             if (filtered.Count == 0) return Results.Ok(Array.Empty<BestOpportunityResponse>());
 
-            // User feedback (B7): hide jobs marked irrelevant/ocultar; boost/penalize the rest.
+            // User feedback (B7) — PER PROFILE: feedback from another profile must not hide/boost
+            // this one. Hide jobs marked irrelevant/ocultar; boost/penalize the rest.
             var feedback = await db.UserFeedbacks
-                .Where(f => f.JobPostingId != null && jobIds.Contains(f.JobPostingId!.Value))
+                .Where(f => f.JobPostingId != null && jobIds.Contains(f.JobPostingId!.Value)
+                    && f.CandidateProfileId == profileId.Value)
                 .ToListAsync(ct);
             var fbByJob = feedback.GroupBy(f => f.JobPostingId!.Value)
                 .ToDictionary(g => g.Key, g => g.Select(f => f.Type).ToList());
@@ -164,7 +166,8 @@ public static class DashboardEndpoints
             // words the user typed as the reason — get demoted and, when the signal is strong, hidden.
             var negTypes = new[] { UserFeedbackType.Irrelevant, UserFeedbackType.HideSimilar };
             var negFb = await db.UserFeedbacks
-                .Where(f => f.JobPostingId != null && negTypes.Contains(f.Type))
+                .Where(f => f.JobPostingId != null && negTypes.Contains(f.Type)
+                    && f.CandidateProfileId == profileId.Value)
                 .Select(f => new { JobId = f.JobPostingId!.Value, f.Reason })
                 .ToListAsync(ct);
             var negModel = NegativeModel.Empty;
@@ -261,11 +264,17 @@ public static class DashboardEndpoints
         // Applications board: opportunities the user already acted on ("já me cadastrei"/apliquei
         // or contatei recrutador). These leave the main board (above) and live here so the user
         // can track what's already been handled. Ordered by when it was marked (most recent first).
-        app.MapGet("/api/applications", async (OpportunityOsDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/applications", async (
+            Guid? candidateProfileId, OpportunityOsDbContext db,
+            ICurrentCandidateProfileProvider profiles, CancellationToken ct) =>
         {
+            // Applications board is PER PROFILE: only this profile's "já me cadastrei/contatei".
+            var profileId = await profiles.ResolveIdAsync(candidateProfileId, ct);
+            if (profileId is null) return Results.Ok(Array.Empty<ApplicationResponse>());
             var appliedTypes = new[] { UserFeedbackType.Applied, UserFeedbackType.ContactedRecruiter };
             var fb = await db.UserFeedbacks
-                .Where(f => f.JobPostingId != null && appliedTypes.Contains(f.Type))
+                .Where(f => f.JobPostingId != null && appliedTypes.Contains(f.Type)
+                    && f.CandidateProfileId == profileId.Value)
                 .ToListAsync(ct);
             if (fb.Count == 0) return Results.Ok(Array.Empty<ApplicationResponse>());
 
@@ -299,11 +308,15 @@ public static class DashboardEndpoints
         }).WithTags("Matches");
 
         // Undo: move an application back to the main board by removing its Applied/ContactedRecruiter feedback.
-        app.MapDelete("/api/applications/{jobId:guid}", async (Guid jobId, OpportunityOsDbContext db, CancellationToken ct) =>
+        app.MapDelete("/api/applications/{jobId:guid}", async (
+            Guid jobId, Guid? candidateProfileId, OpportunityOsDbContext db,
+            ICurrentCandidateProfileProvider profiles, CancellationToken ct) =>
         {
+            var profileId = await profiles.ResolveIdAsync(candidateProfileId, ct);
             var appliedTypes = new[] { UserFeedbackType.Applied, UserFeedbackType.ContactedRecruiter };
             var toRemove = await db.UserFeedbacks
-                .Where(f => f.JobPostingId == jobId && appliedTypes.Contains(f.Type))
+                .Where(f => f.JobPostingId == jobId && appliedTypes.Contains(f.Type)
+                    && (profileId == null || f.CandidateProfileId == profileId.Value))
                 .ToListAsync(ct);
             if (toRemove.Count == 0) return Results.NotFound();
             db.UserFeedbacks.RemoveRange(toRemove);

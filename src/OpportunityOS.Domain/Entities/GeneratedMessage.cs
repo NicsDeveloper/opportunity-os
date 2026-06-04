@@ -11,6 +11,8 @@ public sealed class GeneratedMessage
     public Guid Id { get; private set; }
     public Guid JobPostingId { get; private set; }
     public Guid OpportunityMatchId { get; private set; }
+    /// <summary>The profile this draft was tailored for (the same job yields a different draft per profile).</summary>
+    public Guid CandidateProfileId { get; private set; }
     public string LinkedInMessage { get; private set; } = string.Empty;
     public string CoverLetter { get; private set; } = string.Empty;
     public string EmailSubject { get; private set; } = string.Empty;
@@ -38,11 +40,13 @@ public sealed class GeneratedMessage
         string followUpMessage,
         string humanReviewNotes,
         string promptVersion,
-        string modelName)
+        string modelName,
+        Guid candidateProfileId = default)
     {
         Id = Guid.NewGuid();
         JobPostingId = jobPostingId;
         OpportunityMatchId = opportunityMatchId;
+        CandidateProfileId = candidateProfileId;
         LinkedInMessage = linkedInMessage;
         CoverLetter = coverLetter;
         EmailSubject = emailSubject;

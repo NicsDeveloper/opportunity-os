@@ -12,8 +12,8 @@ public interface IOpportunityPipeline
     /// </summary>
     Task<Opportunity?> EnsureForMatchAsync(OpportunityMatch match, CancellationToken ct);
 
-    /// <summary>Advance an existing opportunity to MessageGenerated (system-allowed).</summary>
-    Task MarkMessageGeneratedAsync(Guid jobPostingId, CancellationToken ct);
+    /// <summary>Advance an existing opportunity (for a job + profile) to MessageGenerated (system-allowed).</summary>
+    Task MarkMessageGeneratedAsync(Guid jobPostingId, Guid candidateProfileId, CancellationToken ct);
 }
 
 public sealed class OpportunityPipeline : IOpportunityPipeline
@@ -35,22 +35,22 @@ public sealed class OpportunityPipeline : IOpportunityPipeline
         if (match.OverallScore < AutoCreateThreshold)
             return null;
 
-        var existing = await _store.FindByJobAsync(match.JobPostingId, ct);
+        var existing = await _store.FindByJobAsync(match.JobPostingId, match.CandidateProfileId, ct);
         if (existing is not null)
             return existing;
 
-        var opportunity = Opportunity.Create(match.JobPostingId, OpportunityStatus.Analyzed);
+        var opportunity = Opportunity.Create(match.JobPostingId, match.CandidateProfileId, OpportunityStatus.Analyzed);
         await _store.AddAsync(opportunity, ct);
         await _store.SaveChangesAsync(ct);
         _logger.LogInformation(
-            "OpportunityCreated {OpportunityId} for job {JobId} (score {Score})",
-            opportunity.Id, match.JobPostingId, match.OverallScore);
+            "OpportunityCreated {OpportunityId} for job {JobId} profile {ProfileId} (score {Score})",
+            opportunity.Id, match.JobPostingId, match.CandidateProfileId, match.OverallScore);
         return opportunity;
     }
 
-    public async Task MarkMessageGeneratedAsync(Guid jobPostingId, CancellationToken ct)
+    public async Task MarkMessageGeneratedAsync(Guid jobPostingId, Guid candidateProfileId, CancellationToken ct)
     {
-        var opportunity = await _store.FindByJobAsync(jobPostingId, ct);
+        var opportunity = await _store.FindByJobAsync(jobPostingId, candidateProfileId, ct);
         if (opportunity is null) return;
 
         // System may advance only up to ReadyForHumanReview.

@@ -59,7 +59,7 @@ public sealed class OpportunityPipelineTests
         var match = Match(90);
         await pipeline.EnsureForMatchAsync(match, CancellationToken.None);
 
-        await pipeline.MarkMessageGeneratedAsync(match.JobPostingId, CancellationToken.None);
+        await pipeline.MarkMessageGeneratedAsync(match.JobPostingId, match.CandidateProfileId, CancellationToken.None);
 
         Assert.Equal(OpportunityStatus.ReadyForHumanReview, store.Opportunities[0].Status);
     }
@@ -67,14 +67,14 @@ public sealed class OpportunityPipelineTests
     [Fact]
     public void System_CannotAdvanceBeyondReadyForHumanReview()
     {
-        var opp = Opportunity.Create(Guid.NewGuid());
+        var opp = Opportunity.Create(Guid.NewGuid(), Guid.NewGuid());
         Assert.Throws<InvalidOperationException>(() => opp.AdvanceTo(OpportunityStatus.SentManually));
     }
 
     [Fact]
     public void Human_CanSetSentManually()
     {
-        var opp = Opportunity.Create(Guid.NewGuid());
+        var opp = Opportunity.Create(Guid.NewGuid(), Guid.NewGuid());
         opp.SetStatusManually(OpportunityStatus.SentManually);
         Assert.Equal(OpportunityStatus.SentManually, opp.Status);
     }

@@ -135,6 +135,12 @@ export interface ProfileInput {
   preferredWorkModes?: string[]; minimumScoreToShow?: number;
 }
 
+// Append &candidateProfileId=… (or ?… when first param) when a profile is selected.
+function pid(profileId?: string, first = false) {
+  if (!profileId) return "";
+  return `${first ? "?" : "&"}candidateProfileId=${profileId}`;
+}
+
 export const api = {
   profile: () => get<Profile>("/candidate-profile"),
   // Multi-profile: list, create, edit, and move the default anchor.
@@ -142,29 +148,29 @@ export const api = {
   createProfile: (body: ProfileInput) => post<Profile>("/candidate-profiles", body),
   updateProfile: (id: string, body: ProfileInput) => put<Profile>(`/candidate-profiles/${id}`, body),
   setDefaultProfile: (id: string) => post<Profile>(`/candidate-profiles/${id}/set-default`, {}),
-  summary: () => get<Summary>("/dashboard/summary"),
-  bestOpportunities: (take = 10, minScore = 60) =>
-    get<BestOpportunity[]>(`/matches?take=${take}&minScore=${minScore}`),
+  summary: (profileId?: string) => get<Summary>(`/dashboard/summary${pid(profileId)}`),
+  bestOpportunities: (take = 10, minScore = 60, profileId?: string) =>
+    get<BestOpportunity[]>(`/matches?take=${take}&minScore=${minScore}${pid(profileId)}`),
   // Three layers (P8): Action Today (acionável), Qualified (triado), Firehose (tudo).
-  actionToday: (region = "all", contract = "all") =>
-    get<BestOpportunity[]>(`/matches?take=10&minScore=75&region=${region}&contract=${contract}`),
+  actionToday: (region = "all", contract = "all", profileId?: string) =>
+    get<BestOpportunity[]>(`/matches?take=10&minScore=75&region=${region}&contract=${contract}${pid(profileId)}`),
   // Main board: order by fit (overallScore + freshness) so the highest-adherence roles are
   // inside the returned window — the UI then sorts by score. (sort=rank buried high-fit jobs
   // from weaker sources outside the window.)
-  qualified: (take = 500, region = "all", contract = "all") =>
-    get<BestOpportunity[]>(`/matches?take=${take}&minScore=60&region=${region}&contract=${contract}`),
-  allOpportunities: (take = 80, region = "all", contract = "all") =>
-    get<BestOpportunity[]>(`/matches?take=${take}&minScore=45&sort=rank&region=${region}&contract=${contract}`),
+  qualified: (take = 500, region = "all", contract = "all", profileId?: string) =>
+    get<BestOpportunity[]>(`/matches?take=${take}&minScore=60&region=${region}&contract=${contract}${pid(profileId)}`),
+  allOpportunities: (take = 80, region = "all", contract = "all", profileId?: string) =>
+    get<BestOpportunity[]>(`/matches?take=${take}&minScore=45&sort=rank&region=${region}&contract=${contract}${pid(profileId)}`),
   rawCandidates: (take = 150) => get<RawCandidate[]>(`/discovery/raw-candidates?take=${take}`),
   discoveryMetrics: () => get<DiscoveryMetrics>(`/discovery/metrics`),
   promoteRaw: (id: string) => post<PromotionResult>(`/discovery/raw-candidates/${id}/promote`),
   resolveOriginal: (id: string) =>
     post<{ found: boolean; originalUrl?: string | null; companyName?: string | null; atsProvider?: string | null; confidence: number; reason?: string | null }>(`/discovery/raw-candidates/${id}/resolve-original`),
-  feedback: (type: string, body: { jobPostingId?: string; rawJobCandidateId?: string; reason?: string }) =>
+  feedback: (type: string, body: { jobPostingId?: string; rawJobCandidateId?: string; reason?: string; candidateProfileId?: string }) =>
     post(`/feedback`, { type, ...body }),
-  // Applications board: opportunities already acted on ("já me cadastrei").
-  applications: () => get<Application[]>("/applications"),
-  unapply: (jobId: string) => del<void>(`/applications/${jobId}`),
+  // Applications board: opportunities already acted on ("já me cadastrei"), per profile.
+  applications: (profileId?: string) => get<Application[]>(`/applications${pid(profileId, true)}`),
+  unapply: (jobId: string, profileId?: string) => del<void>(`/applications/${jobId}${pid(profileId, true)}`),
   // Descobrir mais (B3): bancos/fintechs, consultorias, buscas salvas.
   bacenPreview: (minimumPriority = "High") =>
     get<BacenPreview>(`/discovery/bacen-financial-sweep/preview?minimumPriority=${minimumPriority}&maxCompanies=100&maxQueriesPerCompany=8`),
@@ -186,7 +192,7 @@ export const api = {
     post<DiscoveryResult>("/jobs/search", { keywords }),
   discover: (companyId?: string) => post("/jobs/discover", { companyId: companyId ?? null }),
   sendDigest: () => post<{ sent: boolean; itemCount: number; reason: string }>("/digest/send"),
-  analyze: (jobId: string) => post<AnalyzeResult>(`/jobs/${jobId}/ai/analyze`),
-  generateOutreach: (jobId: string) => post<GeneratedMessage>(`/jobs/${jobId}/ai/generate-outreach`),
+  analyze: (jobId: string, profileId?: string) => post<AnalyzeResult>(`/jobs/${jobId}/ai/analyze${pid(profileId, true)}`),
+  generateOutreach: (jobId: string, profileId?: string) => post<GeneratedMessage>(`/jobs/${jobId}/ai/generate-outreach${pid(profileId, true)}`),
   backfillWebsites: () => post<{ processed: number; found: number }>("/companies/backfill-websites"),
 };

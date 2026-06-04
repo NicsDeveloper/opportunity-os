@@ -141,6 +141,7 @@ public sealed class OpportunityOsDbContext : DbContext
             e.Property(x => x.Status).HasConversion<int>();
             e.HasIndex(x => x.JobPostingId);
             e.HasIndex(x => x.OpportunityMatchId);
+            e.HasIndex(x => x.CandidateProfileId);
         });
 
         b.Entity<PromptExecutionLog>(e =>
@@ -160,7 +161,9 @@ public sealed class OpportunityOsDbContext : DbContext
             e.HasKey(x => x.Id);
             e.Property(x => x.Status).HasConversion<int>();
             e.HasIndex(x => x.Status);
-            e.HasIndex(x => x.JobPostingId).IsUnique();
+            // One opportunity per (job, profile): the same job is a distinct opportunity per profile.
+            e.HasIndex(x => new { x.JobPostingId, x.CandidateProfileId }).IsUnique();
+            e.HasIndex(x => x.CandidateProfileId);
             e.HasIndex(x => x.NextFollowUpAtUtc);
         });
 
@@ -253,6 +256,7 @@ public sealed class OpportunityOsDbContext : DbContext
             e.HasIndex(x => x.JobPostingId);
             e.HasIndex(x => x.RawJobCandidateId);
             e.HasIndex(x => x.Type);
+            e.HasIndex(x => x.CandidateProfileId);
         });
 
         b.Entity<ConsultingCompanyCandidate>(e =>

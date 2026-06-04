@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using OpportunityOS.Application.Profiles;
 using OpportunityOS.Contracts;
 using OpportunityOS.Domain.Entities;
 using OpportunityOS.Domain.Enums;
@@ -13,14 +14,18 @@ public static class FeedbackEndpoints
     {
         var group = app.MapGroup("/api/feedback").WithTags("Feedback");
 
-        group.MapPost("/", async (FeedbackRequest req, OpportunityOsDbContext db, CancellationToken ct) =>
+        group.MapPost("/", async (
+            FeedbackRequest req, OpportunityOsDbContext db,
+            ICurrentCandidateProfileProvider profiles, CancellationToken ct) =>
         {
             if (!Enum.TryParse<UserFeedbackType>(req.Type, ignoreCase: true, out var type))
                 return Results.BadRequest($"Invalid feedback type '{req.Type}'.");
             if (req.JobPostingId is null && req.RawJobCandidateId is null)
                 return Results.BadRequest("Provide JobPostingId or RawJobCandidateId.");
 
-            var feedback = new UserFeedback(type, req.JobPostingId, req.RawJobCandidateId, req.Reason);
+            // Feedback is personal to a profile (defaults to the current/default profile).
+            var profileId = await profiles.ResolveIdAsync(req.CandidateProfileId, ct);
+            var feedback = new UserFeedback(type, req.JobPostingId, req.RawJobCandidateId, req.Reason, profileId);
             db.UserFeedbacks.Add(feedback);
 
             // Dead-link signal: if the user says the posting is closed/moved/gone, expire it so it
@@ -40,7 +45,7 @@ public static class FeedbackEndpoints
             var limit = Math.Clamp(take ?? 100, 1, 500);
             var items = await db.UserFeedbacks
                 .OrderByDescending(f => f.CreatedAtUtc).Take(limit)
-                .Select(f => new { f.Id, Type = f.Type.ToString(), f.JobPostingId, f.RawJobCandidateId, f.Reason, f.CreatedAtUtc })
+                .Select(f => new { f.Id, Type = f.Type.ToString(), f.JobPostingId, f.RawJobCandidateId, f.CandidateProfileId, f.Reason, f.CreatedAtUtc })
                 .ToListAsync(ct);
             return Results.Ok(items);
         });
