@@ -237,7 +237,7 @@ triagem), só promovendo a `JobPosting` o que passa pelos filtros. Alimenta a ab
 
 Cinco serviços (cada um com prompt versionado e auditado em `PromptExecutionLog`):
 1. **IJobUnderstandingService** (`job-analysis-v1`) — interpreta a vaga → skills, domínios, senioridade, work mode, idioma, responsabilidades, riscos, resumo.
-2. **ICandidateFitAnalysisService** (`fit-score-v1`) — compara perfil × vaga → `OpportunityMatch` com score + rationale rico. *Técnico (.NET/C#/backend) é prioridade; pagamentos é bônus, não gate; .NET role ⇒ match forte (≥75).*
+2. **ICandidateFitAnalysisService** (`fit-score-v1`) — compara **o perfil selecionado** × vaga → `OpportunityMatch` (com `CandidateProfileId` + `EngineVersion=llm-fit-v1`) com score + rationale rico. *Aderência técnica é o que domina, **relativa à stack do perfil** (core/secondary/excluded): para o perfil Nícolas, .NET/C# é match forte; para o perfil Java, Java/Spring; para React, React/TS; etc. Domínio (ex.: pagamentos) é bônus, não gate.*
 3. **IOutreachDraftService** (`outreach-v1`) — rascunhos: mensagem LinkedIn/direta, cover letter, assunto+corpo de e-mail, follow-up, observações de revisão humana.
 4. **ICvTailoringSuggestionService** (`cv-tailoring-v1`) — sugestões de ajuste de CV (advisory).
 5. **ICareerInsightService** (`career-insight-v1`) — padrões entre várias vagas analisadas.
@@ -248,21 +248,25 @@ Gate: **outreach exige score ≥60** (`MinScoreForOutreach`).
 
 ## 7. Pipeline de oportunidades
 
-`OpportunityPipeline`:
-- **Auto-cria** `Opportunity` quando um match tem score **≥70** (`AutoCreateThreshold`), status inicial `Analyzed`.
-- Ao gerar mensagem, avança a oportunidade — mas o **sistema só pode chegar até `ReadyForHumanReview`**. Daí pra frente (SentManually, AppliedManually, …) é ação humana via API.
+`OpportunityPipeline` (**por perfil** — `FindByJobAsync(jobId, candidateProfileId)`):
+- **Auto-cria** `Opportunity` quando um match tem score **≥70** (`AutoCreateThreshold`), status inicial `Analyzed`, **para o `CandidateProfileId` do match**. A mesma vaga vira oportunidades distintas para perfis distintos (única por `JobPostingId + CandidateProfileId`).
+- Ao gerar mensagem, avança a oportunidade **daquele perfil** — mas o **sistema só pode chegar até `ReadyForHumanReview`**. Daí pra frente (SentManually, AppliedManually, …) é ação humana via API.
 
 ---
 
 ## 8. Digest por e-mail
 
 `EmailDigestService` + `DigestRenderer` → HTML com as **3 melhores** oportunidades "pra aplicar hoje"
-(não um dump). O `EfDigestStore` agora: pega o **último match por vaga ANTES do gate de score**, exclui
-ocultas/aplicadas/expiradas, aplica as **mesmas regras do mural** via `OpportunityHeuristics` (esconde
-internacional quando `IntlDislikes≥3`, empresa real via `BestCompany`, **dedup**), ordena por score e
-pega o **top-3**. Cada item traz empresa, "por que combina" e link **Ver vaga** (+ mensagem sugerida se houver).
-`SmtpEmailSender` (config `Email:Smtp:*`; `From` vazio → usa a conta autenticada, senão o Gmail rejeita).
-Endpoints `GET /api/digest/preview` e `POST /api/digest/send`. Worker manda diariamente às 9h (`send-daily-digest`). Flag `EnableEmailDigest`.
+(não um dump). **O digest é POR PERFIL:** `IDigestStore.GetDigestItemsAsync(candidateProfileId, minScore)`
+pega o **último match por (vaga, perfil) ANTES do gate de score** (filtra `OpportunityMatch`,
+`UserFeedback` ocultas/aplicadas e `GeneratedMessage` **deste perfil**), aplica as **mesmas regras do
+mural** via `OpportunityHeuristics` (esconde internacional quando o perfil tem `IntlDislikes≥3`, empresa
+real via `BestCompany`, **dedup**), ordena por score e pega o **top-3**. A greeting usa o `FullName`
+**daquele** perfil. `SmtpEmailSender` (config `Email:Smtp:*`; `From` vazio → usa a conta autenticada).
+- **Endpoints:** `GET /api/digest/preview?candidateProfileId=` · `POST /api/digest/send?candidateProfileId=`
+  (um perfil; default se omitido) · `POST /api/digest/send-all` (itera **todos** os perfis, cada um com seu
+  `MinimumScoreToShow`).
+- **Worker** (`send-daily-digest`, diário às 9h) chama `SendAllAsync` → **um digest por perfil**. Flag `EnableEmailDigest`.
 
 ---
 
@@ -344,7 +348,7 @@ Irrelevant/HideSimilar **ocultam** do mural; Applied/ContactedRecruiter **movem*
 | `promote-candidates` (PromoteCandidatesJob) | `Jobs:PromotionCron` | `30 */4 * * *` | promove RawJobCandidates → JobPosting (com triagem/dedup) |
 | `bacen-financial-sweep` (BacenFinancialSweepJob) | `Jobs:BacenSweepCron` | `0 6 * * 1` | busca vagas nos bancos/fintechs do radar (condicional por flag) |
 | `consulting-radar` (ConsultingRadarJob) | `Jobs:ConsultingRadarCron` | `0 7 * * 2` | descobre consultorias .NET (condicional por flag) |
-| `send-daily-digest` (SendDailyDigestJob) | `Jobs:DailyDigestCron` | `0 9 * * *` | envia digest |
+| `send-daily-digest` (SendDailyDigestJob) | `Jobs:DailyDigestCron` | `0 9 * * *` | `SendAllAsync` → **um digest por perfil** |
 
 `SearchJobsJob` usa keywords: desenvolvedor .net, desenvolvedor backend c#, engenheiro de software .net, programador c# pleno, vaga .net remoto, desenvolvedor .net fintech, arquiteto .net, desenvolvedor c# sênior.
 
