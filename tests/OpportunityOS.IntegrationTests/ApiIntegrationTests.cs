@@ -253,6 +253,66 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
         Assert.Contains(companies, c => c.Source == "Bacen" && c.Priority == "Strategic"); // 99PAY/BTG
     }
 
+    // Insert a match directly (bypassing the API/projection) with a controlled CreatedAtUtc — to
+    // simulate pre-projection data and out-of-order arrivals.
+    private async Task SeedMatch(Guid jobId, Guid profileId, int score, DateTime createdAt)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<Infrastructure.Persistence.OpportunityOsDbContext>();
+        var m = new Domain.Entities.OpportunityMatch(
+            jobId, profileId, score, score, 0, 0, 0, 0, Domain.Enums.MatchRecommendation.Apply,
+            new[] { "s" }, Array.Empty<string>(), Array.Empty<string>(), "r", "heuristic-test");
+        typeof(Domain.Entities.OpportunityMatch)
+            .GetProperty(nameof(Domain.Entities.OpportunityMatch.CreatedAtUtc))!.SetValue(m, createdAt);
+        db.OpportunityMatches.Add(m);
+        await db.SaveChangesAsync();
+    }
+
+    [DbFact]
+    public async Task Backfill_RebuildsProjection_AndFeedReadsIt()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        var a = await CreateProfile("Dev A", ".NET", "C#", "AWS");
+        var jobId = await SeedJob("Senior Backend (.NET)", "Backend .NET, C#, AWS. Remote, Brazil.");
+        await SeedMatch(jobId, a, 90, DateTime.UtcNow); // match exists but projection does NOT
+
+        // Feed reads the projection -> empty until we backfill.
+        Assert.Empty(await Matches(client, a));
+
+        var rebuild = await (await client.PostAsync("/api/jobs/rebuild-latest-matches", null))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(1, rebuild.GetProperty("processedPairs").GetInt32());
+        Assert.Equal(1, rebuild.GetProperty("created").GetInt32());
+
+        Assert.Contains(await Matches(client, a), m => m.JobPostingId == jobId);
+    }
+
+    [DbFact]
+    public async Task Feed_UsesLatestProjection_NotStaleHighMatch()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        var a = await CreateProfile("Dev A", ".NET", "C#", "AWS");
+        var jobId = await SeedJob("Senior Backend (.NET)", "Backend .NET, C#, AWS. Remote, Brazil.");
+        // Old strong match (90) then a NEWER weak one (20). The feed must use the latest (20).
+        await SeedMatch(jobId, a, 90, DateTime.UtcNow.AddMinutes(-10));
+        await SeedMatch(jobId, a, 20, DateTime.UtcNow);
+        await client.PostAsync("/api/jobs/rebuild-latest-matches", null);
+
+        // minScore 60: the latest score is 20 -> the job must NOT appear (no stale-high leak).
+        var feed = await client.GetFromJsonAsync<List<BestOpportunityResponse>>(
+            $"/api/matches?minScore=60&take=200&candidateProfileId={a}");
+        Assert.DoesNotContain(feed!, m => m.JobPostingId == jobId);
+
+        // minScore 0: it appears, with the LATEST score (20).
+        var all = await Matches(client, a);
+        var row = Assert.Single(all.Where(m => m.JobPostingId == jobId));
+        Assert.Equal(20, row.OverallScore);
+    }
+
     private async Task<Guid> SeedJob(string title, string description)
     {
         var companyResp = await CreateCompany();

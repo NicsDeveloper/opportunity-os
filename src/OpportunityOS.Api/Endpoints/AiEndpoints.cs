@@ -3,6 +3,7 @@ using OpportunityOS.Application.AI;
 using OpportunityOS.Application.Matching;
 using OpportunityOS.Application.Pipeline;
 using OpportunityOS.Application.Profiles;
+using OpportunityOS.Application.Projections;
 using OpportunityOS.Contracts;
 using OpportunityOS.Domain.Entities;
 using OpportunityOS.Infrastructure.Persistence;
@@ -22,7 +23,7 @@ public static class AiEndpoints
         jobs.MapPost("/analyze", async (
             Guid jobId, Guid? candidateProfileId, OpportunityOsDbContext db, ICurrentCandidateProfileProvider profiles,
             IJobUnderstandingService understanding, ICandidateFitAnalysisService fit,
-            IOpportunityPipeline pipeline, CancellationToken ct) =>
+            ILatestOpportunityMatchProjection latest, IOpportunityPipeline pipeline, CancellationToken ct) =>
         {
             var job = await db.JobPostings.FindAsync([jobId], ct);
             if (job is null) return Results.NotFound();
@@ -38,6 +39,7 @@ public static class AiEndpoints
             var match = await fit.AnalyzeFitAsync(profile, job, analysis, ct);
             job.MarkAnalyzed();
             db.OpportunityMatches.Add(match);
+            await latest.UpsertAsync(match, ct);
             await db.SaveChangesAsync(ct);
 
             // Auto-create an Opportunity (for this profile) when the score qualifies (score >= 70).
@@ -50,14 +52,14 @@ public static class AiEndpoints
         jobs.MapPost("/generate-outreach", async (
             Guid jobId, Guid? candidateProfileId, OpportunityOsDbContext db, ICurrentCandidateProfileProvider profiles,
             IOutreachDraftService outreach, IMatchEngine engine, ILlmProvider llm,
-            IOpportunityPipeline pipeline, CancellationToken ct) =>
+            ILatestOpportunityMatchProjection latest, IOpportunityPipeline pipeline, CancellationToken ct) =>
         {
             var job = await db.JobPostings.FindAsync([jobId], ct);
             if (job is null) return Results.NotFound();
             var profile = await profiles.GetAsync(candidateProfileId, ct);
             if (profile is null) return Results.BadRequest("No candidate profile registered.");
 
-            var match = await GetOrCreateMatch(db, engine, pipeline, job, profile, ct);
+            var match = await GetOrCreateMatch(db, engine, latest, pipeline, job, profile, ct);
             if (match.OverallScore < MinScoreForOutreach)
                 return Results.UnprocessableEntity(
                     $"Match score {match.OverallScore} is below the minimum of {MinScoreForOutreach}; no outreach generated.");
@@ -79,14 +81,15 @@ public static class AiEndpoints
         // CV tailoring suggestions (advisory; never mutates the CV).
         jobs.MapPost("/suggest-cv-tailoring", async (
             Guid jobId, Guid? candidateProfileId, OpportunityOsDbContext db, ICurrentCandidateProfileProvider profiles,
-            ICvTailoringSuggestionService cv, IMatchEngine engine, IOpportunityPipeline pipeline, CancellationToken ct) =>
+            ICvTailoringSuggestionService cv, IMatchEngine engine,
+            ILatestOpportunityMatchProjection latest, IOpportunityPipeline pipeline, CancellationToken ct) =>
         {
             var job = await db.JobPostings.FindAsync([jobId], ct);
             if (job is null) return Results.NotFound();
             var profile = await profiles.GetAsync(candidateProfileId, ct);
             if (profile is null) return Results.BadRequest("No candidate profile registered.");
 
-            var match = await GetOrCreateMatch(db, engine, pipeline, job, profile, ct);
+            var match = await GetOrCreateMatch(db, engine, latest, pipeline, job, profile, ct);
             var suggestion = await cv.SuggestAsync(profile, job, match, ct);
             return Results.Ok(suggestion.ToResponse());
         });
@@ -113,8 +116,8 @@ public static class AiEndpoints
 
     /// <summary>Latest persisted match for the (job, profile), or a freshly computed+persisted heuristic one.</summary>
     private static async Task<OpportunityMatch> GetOrCreateMatch(
-        OpportunityOsDbContext db, IMatchEngine engine, IOpportunityPipeline pipeline,
-        JobPosting job, CandidateProfile profile, CancellationToken ct)
+        OpportunityOsDbContext db, IMatchEngine engine, ILatestOpportunityMatchProjection latest,
+        IOpportunityPipeline pipeline, JobPosting job, CandidateProfile profile, CancellationToken ct)
     {
         var existing = await db.OpportunityMatches
             .Where(m => m.JobPostingId == job.Id && m.CandidateProfileId == profile.Id)
@@ -124,6 +127,7 @@ public static class AiEndpoints
 
         var match = engine.Evaluate(profile, job).ToEntity(job.Id, profile.Id);
         db.OpportunityMatches.Add(match);
+        await latest.UpsertAsync(match, ct);
         await db.SaveChangesAsync(ct);
         await pipeline.EnsureForMatchAsync(match, ct);
         return match;

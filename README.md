@@ -605,6 +605,17 @@ curl "localhost:5077/api/debug/job/{jobId}/profile-scores"
 use `allProfiles=true` (idealmente com `take`/`onlyWithoutCurrentEngineVersion`) após mudar o
 **motor** ou seedar perfis novos; sem parâmetros, reprocessa apenas o default.
 
+**Projeção `LatestOpportunityMatch` (performance):** `OpportunityMatch` é append-only, então o feed
+e o digest leem a tabela‑cache `latest_opportunity_matches` (último match por `JobPostingId +
+CandidateProfileId`), filtrável por perfil + score **no banco** — em vez de carregar todos os
+matches em memória. Ela é mantida em sincronia a cada match criado e pode ser reconstruída:
+
+```bash
+# Reconstrói a projeção a partir dos matches existentes (idempotente; roda também no startup)
+curl -X POST "localhost:5077/api/jobs/rebuild-latest-matches"
+# -> { "processedPairs": ..., "created": ..., "updated": ..., "skipped": ... }
+```
+
 > Fase atual: **multi-perfil sem auth**. As próximas fases (Auth com `AppUser`/Identity e
 > depois SaaS/Tenant/billing) plugam em cima do `ICurrentCandidateProfileProvider` e do
 > `CandidateProfileId` já presentes nas entidades por perfil.

@@ -70,7 +70,7 @@ public sealed class FirehosePipelineIntegrationTests
 
         // 2) Promote -> JobPosting + Match + SourceOccurrence.
         var promo = new RawCandidatePromotionService(
-            new EfFirehoseStore(db), new EfDiscoveryStore(db), new JobFingerprintService(),
+            new EfFirehoseStore(db), new EfDiscoveryStore(db, new EfLatestOpportunityMatchProjection(db, NullLogger<EfLatestOpportunityMatchProjection>.Instance)), new JobFingerprintService(),
             normalizer, new HeuristicMatchEngine(normalizer), NullLogger<RawCandidatePromotionService>.Instance);
         var result = await promo.PromoteBatchAsync(new PromoteBatchRequest(50, 50, true), CancellationToken.None);
 
@@ -94,7 +94,7 @@ public sealed class FirehosePipelineIntegrationTests
             NullLogger<FirehoseService>.Instance);
         await firehose.QuickSearchAsync(new QuickSearchRequest("vaga", 20, true), CancellationToken.None);
 
-        var promo = new RawCandidatePromotionService(new EfFirehoseStore(db), new EfDiscoveryStore(db),
+        var promo = new RawCandidatePromotionService(new EfFirehoseStore(db), new EfDiscoveryStore(db, new EfLatestOpportunityMatchProjection(db, NullLogger<EfLatestOpportunityMatchProjection>.Instance)),
             new JobFingerprintService(), normalizer, new HeuristicMatchEngine(normalizer),
             NullLogger<RawCandidatePromotionService>.Instance);
 

@@ -91,6 +91,7 @@ Todas com `Id` Guid e setters privados (encapsulamento). Tabelas snake_case; lis
 | `Company` | companies | Name, WebsiteUrl, CareersUrl, LinkedInUrl, Industry, Country, Priority, Source, Tags | `Update`, `MarkScanned`, `SetCareersUrl`, `SetWebsiteUrl`, `AddTag`, `RaisePriorityTo` (sobe sem rebaixar), `MarkSourceOnly` (rebaixa denylist a Low + source-only/noisy-source/do-not-promote) |
 | `JobPosting` | job_postings | CompanyId, ExternalId, **SourceProvider**, Title, Location, WorkMode, Seniority, Language, AbsoluteUrl, DescriptionText/Html, ExtractedSkills/Domains, **Status**, PublishedAtUtc, CreatedAtUtc, UpdatedAtUtc | `RefreshFromSource`, `ApplyNormalization`, `MarkAnalyzed`, `Archive`, `MarkExpired` |
 | `OpportunityMatch` | opportunity_matches | JobPostingId, **CandidateProfileId**, OverallScore + 5 subscores, Recommendation, Strengths/Risks/MissingRequirements, **Rationale**, **EngineVersion** | **imutável** e **específico por perfil** — a mesma vaga tem um match por `CandidateProfile`; `EngineVersion` marca a geração (`heuristic-v2`/`llm-fit-v1`) |
+| `LatestOpportunityMatch` | latest_opportunity_matches | JobPostingId, CandidateProfileId, OpportunityMatchId, OverallScore, Recommendation, EngineVersion, MatchCreatedAtUtc, UpdatedAtUtc | **projeção** (cache) do último match por **(JobPostingId + CandidateProfileId)** — única por esse par. Reconstruível dos `OpportunityMatch`. `From`/`UpdateFrom` (só avança no tempo). Lê o feed/digest sem varrer todos os matches (§5.1) |
 | `Opportunity` | opportunities | JobPostingId, **CandidateProfileId**, RecruiterLeadId?, **Status**, NextFollowUpAtUtc, Notes | `AdvanceTo`, `SetStatusManually`, `SetNotes`, `SetFollowUp`, `LinkRecruiter`, `Create(job, profile)` — **única por (JobPostingId + CandidateProfileId)**; a mesma vaga vira oportunidades distintas para perfis distintos |
 | `GeneratedMessage` | generated_messages | JobPostingId, OpportunityMatchId, **CandidateProfileId**, LinkedInMessage, CoverLetter, EmailSubject/Body, CvTailoringNotes, FollowUpMessage, HumanReviewNotes, Status, PromptVersion, ModelName | `SetStatus` — **específica do perfil** (a mesma vaga gera rascunhos diferentes por perfil) |
 | `ExecutionRun` | execution_runs | RunType, Status, Started/Finished, ItemsProcessed/Succeeded/Failed, ErrorMessage | `RecordSuccess`, `RecordFailure`, `Complete`, `Fail`, `Start` |
@@ -228,6 +229,25 @@ triagem), só promovendo a `JobPosting` o que passa pelos filtros. Alimenta a ab
 
 ---
 
+### 5.1 Projeção `LatestOpportunityMatch` (feed/digest eficientes)
+
+`OpportunityMatch` é **append-only**: cada `rescore`/análise LLM cria um match novo. O feed/digest
+precisam do **último por (job, perfil)** — varrer todos os matches em memória não escala com
+`vagas × perfis × versões`. A tabela `latest_opportunity_matches` mantém **uma linha por
+(JobPostingId + CandidateProfileId)** apontando para o match atual.
+
+- **Sincronização:** todo ponto que cria match chama `ILatestOpportunityMatchProjection.UpsertAsync`
+  (impl `EfLatestOpportunityMatchProjection`): auto-score na descoberta (`EfDiscoveryStore.AddMatchAsync`),
+  `POST /api/jobs/{id}/match`, `POST /api/jobs/rescore`, `POST /api/jobs/{id}/ai/analyze` e
+  `GetOrCreateMatch`. `UpsertAsync` **só avança no tempo** (nunca rebaixa para um match mais antigo) e
+  **nunca cruza perfis**. Não chama `SaveChanges` — commita junto com o match.
+- **Leitura:** `/api/matches`, o `EfDigestStore` e o card "Fortes (75+)" do summary filtram
+  `latest_opportunity_matches` por `CandidateProfileId` (+ score) **no banco** e materializam só os
+  matches resultantes (um por vaga). Índices: único (job, profile); (profile, score); (profile, updatedAt).
+- **Backfill/repair:** no startup (quando a projeção está vazia mas há matches) e via
+  `POST /api/jobs/rebuild-latest-matches` (retorna `processedPairs/created/updated/skipped`). É um
+  **cache derivado** — pode ser reconstruído a qualquer momento.
+
 ## 6. Camada de IA (AI Copilot)
 
 `ILlmProvider` selecionado em runtime (`Llm:Provider` = auto|anthropic|openai|fake):
@@ -305,7 +325,7 @@ observadas manualmente (LinkedIn etc.) no radar `Company` para o fluxo atual alc
 
 **Companies** `/api/companies`: `GET /` · `GET /{id}` · `POST /` · `PUT /{id}` · `DELETE /{id}` · `POST /{id}/detect-ats` · `POST /detect-ats-bulk?limit=N` (careers/ATS em lote, §4) · `POST /onboard` · `POST /backfill-websites` · `POST /{id}/discover-website` · `POST /import-csv` · `POST /seed-observed` (seed manual interno, ver §9.1)
 
-**Jobs** `/api/jobs`: `GET /` · `GET /{id}` · `POST /discover` · `POST /search` · `POST /rescore?candidateProfileId=&allProfiles=&take=&minCreatedAtUtc=&engineVersion=&onlyWithoutCurrentEngineVersion=` (re-pontua **por perfil**; default = só 1 perfil, §5) · `POST /{id}/match?candidateProfileId=` · `GET /{id}/match?candidateProfileId=` · `POST /validate-links` · `POST /{id}/archive`
+**Jobs** `/api/jobs`: `GET /` · `GET /{id}` · `POST /discover` · `POST /search` · `POST /rescore?candidateProfileId=&allProfiles=&take=&minCreatedAtUtc=&engineVersion=&onlyWithoutCurrentEngineVersion=` (re-pontua **por perfil**; default = só 1 perfil, §5) · `POST /{id}/match?candidateProfileId=` · `GET /{id}/match?candidateProfileId=` · `POST /rebuild-latest-matches` (reconstrói a projeção `LatestOpportunityMatch`, §5.1) · `POST /validate-links` · `POST /{id}/archive`
 
 **AI Copilot** `/api/jobs/{jobId}/ai` (todos aceitam `?candidateProfileId=`): `POST /analyze` · `POST /generate-outreach` · `POST /suggest-cv-tailoring` — e `POST /api/insights/career`
 
@@ -491,20 +511,22 @@ cd frontend && npm run dev                           # tela em :5173 (proxy → 
   login nem Tenant**. Multi-profile **prepara**, mas **não substitui**, auth/multi-tenancy: a
   próxima fase deve plugar `AppUser`/Identity no `ICurrentCandidateProfileProvider`. A descoberta
   na inicialização auto-pontua só o **perfil default**; os demais dependem de `rescore`.
-- **`/api/matches` precisa da otimização `LatestOpportunityMatch`** (ver §17, débito #1) — com
-  multi-perfil o volume de matches cresce por `vagas × perfis × versões`.
+- **`/api/matches`/digest agora leem a projeção `latest_opportunity_matches`** (não mais todos os
+  matches em memória) — ver §5.1. Falta apenas paginação avançada/cache quando o volume exigir.
 
 ## 17. Débito técnico conhecido (priorizado)
 
-- 🔴 **#1 (PRIORIDADE TÉCNICA) — projeção `LatestOpportunityMatch`.** Hoje `/api/matches` e o
-  digest carregam **todos** os matches e fazem o "latest-per-(job,perfil)" **em memória**. Com
-  multi-perfil isso cresce por `nº vagas × nº perfis × nº versões de score` e degrada rápido.
-  **Recomendado:** uma tabela/projeção `LatestOpportunityMatch` { `JobPostingId`,
-  `CandidateProfileId`, `OpportunityMatchId`, `OverallScore`, `Recommendation`, `EngineVersion`,
-  `CreatedAtUtc`, `UpdatedAtUtc` } com **única por (JobPostingId + CandidateProfileId)**; o
-  `rescore`/auto-score faz **upsert** ao criar um match novo; `/api/matches` e o digest consultam
-  **só a projeção** (filtrável por perfil, paginável no servidor). Deixa o feed estável e previsível.
-- 🟠 **#2 (PRIORIDADE DE PRODUTO) — tracking de RESULTADO** (`ApplicationOutcome` / `ApplicationEvent`
+- ✅ **#1 RESOLVIDO — projeção `LatestOpportunityMatch`.** Existe a tabela
+  `latest_opportunity_matches` { `JobPostingId`, `CandidateProfileId`, `OpportunityMatchId`,
+  `OverallScore`, `Recommendation`, `EngineVersion`, `MatchCreatedAtUtc`, `UpdatedAtUtc` }, **única
+  por (JobPostingId + CandidateProfileId)**. Todo match novo passa por
+  `ILatestOpportunityMatchProjection.UpsertAsync` (auto-score/`/match`/`/rescore`/`/ai/analyze`/
+  promoção); `/api/matches`, o digest e o card "Fortes (75+)" do summary consultam **só a projeção**
+  (filtrável por perfil + score no banco, sem carregar todos os matches). Backfill no startup (quando
+  a projeção está vazia) e via `POST /api/jobs/rebuild-latest-matches`.
+  - **Próximo passo (quando o volume exigir):** paginação avançada no servidor, cache do modelo de
+    aprendizado de feedback e índices adicionais conforme o uso real.
+- 🟠 **#1 (PRIORIDADE DE PRODUTO) — tracking de RESULTADO** (`ApplicationOutcome` / `ApplicationEvent`
   por perfil): `Viewed · DraftCopied · Applied · MessageSent · Replied · InterviewScheduled ·
   InterviewPassed · OfferReceived · Rejected · Archived`. Hoje o sistema só aprende dos **descartes**;
   precisa aprender também do que **gera resposta/entrevista/proposta** — o maior salto de assertividade.

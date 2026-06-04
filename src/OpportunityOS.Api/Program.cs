@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using OpportunityOS.Api.Data;
 using OpportunityOS.Api.Endpoints;
+using OpportunityOS.Application.Projections;
 using OpportunityOS.Infrastructure;
 using OpportunityOS.Infrastructure.Persistence;
 
@@ -18,6 +19,11 @@ using (var scope = app.Services.CreateScope())
     await db.Database.MigrateAsync();
     if (app.Configuration.GetValue("SeedOnStartup", true))
         await DatabaseSeeder.SeedAsync(db);
+
+    // One-time backfill of the LatestOpportunityMatch projection: when it's empty but matches
+    // already exist (e.g. right after this migration), rebuild it from the existing matches.
+    if (!await db.LatestOpportunityMatches.AnyAsync() && await db.OpportunityMatches.AnyAsync())
+        await scope.ServiceProvider.GetRequiredService<ILatestOpportunityMatchProjection>().BackfillAsync(default);
 }
 
 app.MapOpenApi();

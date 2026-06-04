@@ -14,6 +14,7 @@ public sealed class OpportunityOsDbContext : DbContext
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<JobPosting> JobPostings => Set<JobPosting>();
     public DbSet<OpportunityMatch> OpportunityMatches => Set<OpportunityMatch>();
+    public DbSet<LatestOpportunityMatch> LatestOpportunityMatches => Set<LatestOpportunityMatch>();
     public DbSet<ExecutionRun> ExecutionRuns => Set<ExecutionRun>();
     public DbSet<GeneratedMessage> GeneratedMessages => Set<GeneratedMessage>();
     public DbSet<PromptExecutionLog> PromptExecutionLogs => Set<PromptExecutionLog>();
@@ -122,6 +123,23 @@ public sealed class OpportunityOsDbContext : DbContext
             e.HasIndex(x => x.JobPostingId);
             // Latest match for a (job, profile) pair — covers the per-profile feed/digest queries.
             e.HasIndex(x => new { x.JobPostingId, x.CandidateProfileId, x.CreatedAtUtc });
+        });
+
+        b.Entity<LatestOpportunityMatch>(e =>
+        {
+            e.ToTable("latest_opportunity_matches");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Recommendation).HasConversion<int>();
+            e.Property(x => x.EngineVersion).IsRequired();
+            // The projection's identity: exactly one current match per (job, profile).
+            e.HasIndex(x => new { x.JobPostingId, x.CandidateProfileId }).IsUnique();
+            e.HasIndex(x => new { x.CandidateProfileId, x.OverallScore });
+            e.HasIndex(x => new { x.CandidateProfileId, x.UpdatedAtUtc });
+            e.HasIndex(x => x.OpportunityMatchId);
+            // Relationships (the projection points at a job, a profile and the underlying match).
+            e.HasOne<JobPosting>().WithMany().HasForeignKey(x => x.JobPostingId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<CandidateProfile>().WithMany().HasForeignKey(x => x.CandidateProfileId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<OpportunityMatch>().WithMany().HasForeignKey(x => x.OpportunityMatchId).OnDelete(DeleteBehavior.Restrict);
         });
 
         b.Entity<ExecutionRun>(e =>

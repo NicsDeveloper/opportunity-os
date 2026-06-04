@@ -6,6 +6,7 @@ using OpportunityOS.Domain.Enums;
 using OpportunityOS.Application.Normalization;
 using OpportunityOS.Application.Pipeline;
 using OpportunityOS.Application.Profiles;
+using OpportunityOS.Application.Projections;
 using OpportunityOS.Contracts;
 using OpportunityOS.Infrastructure.Persistence;
 
@@ -60,7 +61,7 @@ public static class JobEndpoints
         group.MapPost("/{id:guid}/match", async (
             Guid id, Guid? candidateProfileId, OpportunityOsDbContext db,
             ICurrentCandidateProfileProvider profiles, IJobNormalizer normalizer, IMatchEngine engine,
-            IOpportunityPipeline pipeline, CancellationToken ct) =>
+            ILatestOpportunityMatchProjection latest, IOpportunityPipeline pipeline, CancellationToken ct) =>
         {
             var job = await db.JobPostings.FindAsync([id], ct);
             if (job is null) return Results.NotFound();
@@ -76,6 +77,7 @@ public static class JobEndpoints
             var match = result.ToEntity(job.Id, profile.Id);
             job.MarkAnalyzed();
             db.OpportunityMatches.Add(match);
+            await latest.UpsertAsync(match, ct);
             await db.SaveChangesAsync(ct);
 
             // Auto-create an Opportunity when the score qualifies (score >= 70).
@@ -91,7 +93,8 @@ public static class JobEndpoints
             Guid? candidateProfileId, bool? allProfiles, int? take, string? engineVersion,
             bool? onlyWithoutCurrentEngineVersion, DateTime? minCreatedAtUtc,
             OpportunityOsDbContext db, ICurrentCandidateProfileProvider profiles,
-            IJobNormalizer normalizer, IMatchEngine engine, CancellationToken ct) =>
+            IJobNormalizer normalizer, IMatchEngine engine,
+            ILatestOpportunityMatchProjection projection, CancellationToken ct) =>
         {
             List<CandidateProfile> targets;
             if (allProfiles == true)
@@ -130,6 +133,10 @@ public static class JobEndpoints
                 .GroupBy(m => (m.JobPostingId, m.CandidateProfileId))
                 .ToDictionary(g => g.Key, g => g.OrderByDescending(m => m.CreatedAtUtc).First());
 
+            // Preload the target profiles' projection rows into the unit of work so the per-match
+            // upsert resolves them locally (no per-match round-trip).
+            await db.LatestOpportunityMatches.Where(p => pids.Contains(p.CandidateProfileId)).LoadAsync(ct);
+
             int rescored = 0, changed = 0, skipped = 0;
             foreach (var job in jobs)
             {
@@ -142,7 +149,9 @@ public static class JobEndpoints
                     var result = engine.Evaluate(profile, job);
                     rescored++;
                     if (hasLatest && prev!.OverallScore == result.OverallScore && prev.EngineVersion == version) continue;
-                    db.OpportunityMatches.Add(result.ToEntity(job.Id, profile.Id, version));
+                    var newMatch = result.ToEntity(job.Id, profile.Id, version);
+                    db.OpportunityMatches.Add(newMatch);
+                    await projection.UpsertAsync(newMatch, ct);
                     changed++;
                     run.RecordSuccess();
                 }
@@ -150,6 +159,15 @@ public static class JobEndpoints
             run.Complete();
             await db.SaveChangesAsync(ct);
             return Results.Ok(new { profiles = targets.Count, rescored, changed, skipped });
+        });
+
+        // Rebuild the LatestOpportunityMatch projection from the existing matches (dev/admin repair,
+        // e.g. right after the migration). Idempotent.
+        group.MapPost("/rebuild-latest-matches", async (
+            ILatestOpportunityMatchProjection latest, CancellationToken ct) =>
+        {
+            var r = await latest.BackfillAsync(ct);
+            return Results.Ok(new { processedPairs = r.ProcessedPairs, created = r.Created, updated = r.Updated, skipped = r.Skipped });
         });
 
         // Latest match for a job for the requested (or default) profile.
