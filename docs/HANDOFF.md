@@ -36,14 +36,18 @@ O sistema deixou de ser fixo no perfil do Nícolas: agora pontua oportunidades p
 
 ## 1. O que é
 
-Sistema pessoal de **inteligência de oportunidades de emprego** para um candidato backend
-**.NET/C#** (Nícolas Serrano — Pleno/Sênior, fintech/pagamentos, remoto, inglês B2). Ele:
+Sistema de **inteligência de oportunidades de emprego** que **descobre vagas globalmente** e
+**pontua cada oportunidade contra um `CandidateProfile` selecionado**. O perfil principal (e
+quem valida o produto) é o do Nícolas Serrano — backend **.NET/C#**, Pleno/Sênior,
+fintech/pagamentos, remoto, inglês B2 — mas o motor agora suporta **múltiplos perfis técnicos**
+(Java Backend, Frontend React, Data Engineer). **Fase atual: multi-perfil _pré-auth_** (sem
+login, sem multiusuário real, sem tenant). Ele:
 
-1. **Descobre** vagas continuamente (ATS públicos + sites de carreira + busca web-aberta).
-2. **Pontua** cada vaga contra o perfil do candidato (heurístico + LLM).
-3. **Mostra** numa **única tela viva** as melhores oportunidades, frescas e relevantes.
-4. **Gera** rascunhos de mensagem/e-mail/follow-up (LLM) — sempre para **revisão humana**.
-5. **Acompanha** num pipeline (oportunidades, follow-ups) e pode mandar **digest por e-mail**.
+1. **Descobre** vagas continuamente e **globalmente** (ATS públicos + sites de carreira + busca web-aberta).
+2. **Pontua** cada vaga **por perfil** (heurístico dirigido pelo perfil + LLM sob demanda).
+3. **Mostra** numa **única tela viva** as melhores oportunidades **do perfil selecionado**, frescas e relevantes.
+4. **Gera** rascunhos de mensagem/e-mail/follow-up (LLM) **por perfil** — sempre para **revisão humana**.
+5. **Acompanha** num pipeline por perfil (oportunidades, follow-ups) e manda **digest por e-mail por perfil**.
 
 **Princípios invioláveis (do produto):**
 - Nada é enviado automaticamente. Toda comunicação externa é rascunho para revisão humana.
@@ -83,12 +87,12 @@ Todas com `Id` Guid e setters privados (encapsulamento). Tabelas snake_case; lis
 
 | Entidade | Tabela | Núcleo | Métodos de domínio |
 |---|---|---|---|
-| `CandidateProfile` | candidate_profiles | FullName, Headline, Summary, Location, Seniority, PreferredLanguage, CoreSkills, SecondarySkills, Domains, PreferredRoles/ContractTypes/Locations, Experiences (jsonb) | `Update(...)` |
+| `CandidateProfile` | candidate_profiles | FullName, **DisplayName**, **IsDefault**, Headline, Summary, Location, Seniority, PreferredLanguage, **CoreSkills**, **SecondarySkills**, **ExcludedStacks**, Domains, **PreferredRoles**, **PreferredContractTypes**, **PreferredLocations**, **PreferredWorkModes**, **MinimumScoreToShow**, Experiences (jsonb) | `Update(...)`, `SetDefault(bool)` — perfis **selecionáveis**; `IsDefault` é a âncora de fallback |
 | `Company` | companies | Name, WebsiteUrl, CareersUrl, LinkedInUrl, Industry, Country, Priority, Source, Tags | `Update`, `MarkScanned`, `SetCareersUrl`, `SetWebsiteUrl`, `AddTag`, `RaisePriorityTo` (sobe sem rebaixar), `MarkSourceOnly` (rebaixa denylist a Low + source-only/noisy-source/do-not-promote) |
 | `JobPosting` | job_postings | CompanyId, ExternalId, **SourceProvider**, Title, Location, WorkMode, Seniority, Language, AbsoluteUrl, DescriptionText/Html, ExtractedSkills/Domains, **Status**, PublishedAtUtc, CreatedAtUtc, UpdatedAtUtc | `RefreshFromSource`, `ApplyNormalization`, `MarkAnalyzed`, `Archive`, `MarkExpired` |
-| `OpportunityMatch` | opportunity_matches | JobPostingId, CandidateProfileId, OverallScore + 5 subscores, Recommendation, Strengths/Risks/MissingRequirements, **Rationale** | (imutável após criação) |
-| `Opportunity` | opportunities | JobPostingId (único), RecruiterLeadId?, **Status**, NextFollowUpAtUtc, Notes | `AdvanceTo`, `SetStatusManually`, `SetNotes`, `SetFollowUp`, `LinkRecruiter`, `Create` |
-| `GeneratedMessage` | generated_messages | JobPostingId, OpportunityMatchId, LinkedInMessage, CoverLetter, EmailSubject/Body, CvTailoringNotes, FollowUpMessage, HumanReviewNotes, Status, PromptVersion, ModelName | `SetStatus` |
+| `OpportunityMatch` | opportunity_matches | JobPostingId, **CandidateProfileId**, OverallScore + 5 subscores, Recommendation, Strengths/Risks/MissingRequirements, **Rationale**, **EngineVersion** | **imutável** e **específico por perfil** — a mesma vaga tem um match por `CandidateProfile`; `EngineVersion` marca a geração (`heuristic-v2`/`llm-fit-v1`) |
+| `Opportunity` | opportunities | JobPostingId, **CandidateProfileId**, RecruiterLeadId?, **Status**, NextFollowUpAtUtc, Notes | `AdvanceTo`, `SetStatusManually`, `SetNotes`, `SetFollowUp`, `LinkRecruiter`, `Create(job, profile)` — **única por (JobPostingId + CandidateProfileId)**; a mesma vaga vira oportunidades distintas para perfis distintos |
+| `GeneratedMessage` | generated_messages | JobPostingId, OpportunityMatchId, **CandidateProfileId**, LinkedInMessage, CoverLetter, EmailSubject/Body, CvTailoringNotes, FollowUpMessage, HumanReviewNotes, Status, PromptVersion, ModelName | `SetStatus` — **específica do perfil** (a mesma vaga gera rascunhos diferentes por perfil) |
 | `ExecutionRun` | execution_runs | RunType, Status, Started/Finished, ItemsProcessed/Succeeded/Failed, ErrorMessage | `RecordSuccess`, `RecordFailure`, `Complete`, `Fail`, `Start` |
 | `PromptExecutionLog` | prompt_execution_logs | Service, PromptVersion, ModelName, Success, UsedFallback, RawResponse, JobPostingId? | auditoria de cada chamada LLM |
 | `RecruiterLead` | recruiter_leads | CompanyId, FullName, Source, … | CRUD |
@@ -97,7 +101,7 @@ Todas com `Id` Guid e setters privados (encapsulamento). Tabelas snake_case; lis
 | `SearchCampaign` | search_campaigns | Name, Description, **Status**/**Priority**, BaseKeywords, DailyQueryBudget, LastRunAtUtc | conjuntos de busca salvos (rodáveis) |
 | `SearchQueryExecution` | search_query_executions | SearchCampaignId, Query, **Status**, ResultsCount, StartedAt | auditoria de cada query do Firehose |
 | `JobPostingSourceOccurrence` | job_posting_source_occurrences | JobPostingId, SourceProvider/Name, Url, SeenAtUtc | cada vez que a MESMA vaga aparece em outra fonte (dedup por fingerprint) |
-| `UserFeedback` | user_feedbacks | **Type** (UserFeedbackType), JobPostingId?, RawJobCandidateId?, Reason | feedback do usuário (relevante/ocultar/aplicada/…) — alimenta DiscoveryRank e o mural de aplicações |
+| `UserFeedback` | user_feedbacks | **Type** (UserFeedbackType), JobPostingId?, RawJobCandidateId?, **CandidateProfileId?**, Reason | feedback do usuário (relevante/ocultar/aplicada/…) **por perfil** — feedback de um perfil **não** afeta outro; alimenta DiscoveryRank e o mural de **Applications** (derivadas de feedback Applied/ContactedRecruiter **por perfil**) |
 | `ConsultingCompanyCandidate` | consulting_company_candidates | Name, WebsiteUrl, Country, Source, Signals, **ConsultingConfidenceScore**, **Status** | candidatas do radar de consultorias (antes de virar `Company`) |
 
 `JobPosting` tem propriedades calculadas (não-mapeadas): **`EffectiveDateUtc` = PublishedAtUtc ?? SourceUpdatedAtUtc ?? CreatedAtUtc** (data real de publicação → última atualização da fonte → só por último a descoberta), **`HasSourceDate`** (true quando a data veio da FONTE, não da descoberta — a UI mostra *"publicada há X"* vs *"encontrada há X"*) e **`IsTalentPool`**. Além do núcleo, carrega **qualidade de fonte**: `SourceType`, `SourceName`, `SourceConfidenceScore`, `RequiresManualValidation`, `RealCompanyName`, `OriginalJobUrl`, `NormalizedFingerprint` (`SetSourceQuality`/`RefreshFromSource`).
@@ -290,29 +294,32 @@ observadas manualmente (LinkedIn etc.) no radar `Company` para o fluxo atual alc
 
 **Health:** `GET /`
 
-**CandidateProfile** `/api/candidate-profile`: `GET /` · `GET /{id}` · `POST /` · `PUT /{id}`
+**CandidateProfile** (multi-perfil):
+- `/api/candidate-profiles` (plural): `GET /` (lista) · `GET /{id}` · `POST /` · `PUT /{id}` · `POST /{id}/set-default` (move a âncora padrão).
+- `/api/candidate-profile` (singular, back-compat): `GET /` retorna o perfil **default/atual** · `GET /{id}` · `POST /` · `PUT /{id}`.
+- O `candidateProfileId` é aceito em: `/api/matches`, `/api/jobs/{id}/match`, `/api/jobs/rescore` (+`allProfiles`), `/api/applications` (+`DELETE`), `/api/feedback`, `/api/jobs/{jobId}/ai/{analyze,generate-outreach,suggest-cv-tailoring}`, `/api/digest/{preview,send}`. Ausente ⇒ perfil default.
 
 **Companies** `/api/companies`: `GET /` · `GET /{id}` · `POST /` · `PUT /{id}` · `DELETE /{id}` · `POST /{id}/detect-ats` · `POST /detect-ats-bulk?limit=N` (careers/ATS em lote, §4) · `POST /onboard` · `POST /backfill-websites` · `POST /{id}/discover-website` · `POST /import-csv` · `POST /seed-observed` (seed manual interno, ver §9.1)
 
-**Jobs** `/api/jobs`: `GET /` · `GET /{id}` · `POST /discover` · `POST /search` · `POST /rescore` (re-pontua o acervo c/ o engine atual, §5) · `POST /{id}/match` · `GET /{id}/match` · `POST /validate-links` · `POST /{id}/archive`
+**Jobs** `/api/jobs`: `GET /` · `GET /{id}` · `POST /discover` · `POST /search` · `POST /rescore?candidateProfileId=&allProfiles=&take=&minCreatedAtUtc=&engineVersion=&onlyWithoutCurrentEngineVersion=` (re-pontua **por perfil**; default = só 1 perfil, §5) · `POST /{id}/match?candidateProfileId=` · `GET /{id}/match?candidateProfileId=` · `POST /validate-links` · `POST /{id}/archive`
 
-**AI Copilot** `/api/jobs/{jobId}/ai`: `POST /analyze` · `POST /generate-outreach` · `POST /suggest-cv-tailoring` — e `POST /api/insights/career`
+**AI Copilot** `/api/jobs/{jobId}/ai` (todos aceitam `?candidateProfileId=`): `POST /analyze` · `POST /generate-outreach` · `POST /suggest-cv-tailoring` — e `POST /api/insights/career`
 
-**Opportunities** `/api/opportunities`: `GET /` · `GET /follow-ups` · `GET /{id}` · `PUT /{id}/status` · `PUT /{id}/notes` · `PUT /{id}/follow-up`
+**Opportunities** `/api/opportunities`: `GET /?candidateProfileId=` (filtra por perfil; omitido = todos) · `GET /follow-ups` · `GET /{id}` · `PUT /{id}/status` · `PUT /{id}/notes` · `PUT /{id}/follow-up`
 
 **Recruiters** `/api/recruiters`: `GET /` · `GET /{id}` · `POST /` · `PUT /{id}` · `DELETE /{id}`
 
-**Digest** `/api/digest`: `GET /preview` · `POST /send`
+**Digest** `/api/digest`: `GET /preview?candidateProfileId=` · `POST /send?candidateProfileId=` · `POST /send-all` (um digest por perfil — o que o job diário faz)
+
+**Debug (dev)** `/api/debug`: `GET /job/{jobId}/profile-scores` — score/recomendação/`engineVersion` da MESMA vaga para **cada** perfil (validação de que o motor raciocina diferente por perfil).
 
 **Bacen** `/api/bacen/pix-participants`: `POST /import` · `POST /promote-to-companies` · `GET /` · `GET /{id}`
 
 **Dashboard** (consumidos pela tela): 
 - `GET /api/dashboard/summary` — cards (vagas, fortes 75+, mensagens, follow-ups) já com filtro de frescor/ativo.
-- `GET /api/matches?minScore=&take=&freshDays=&maxAgeDays=&sort=&region=&contract=` — **o feed**. **Pega o ÚLTIMO match por job ANTES do gate de score** (senão um match velho inflado mascara a re-pontuação); só ativos/frescos; oculta Irrelevant/HideSimilar **e** Applied/ContactedRecruiter; esconde internacional se o usuário recusa (§4.1); **dedup** de cópias entre fontes; nome via `BestCompany`. `region`=national/international, `contract`=clt/pj/both/unknown (bucket exato, §12). Descarta publicadas há > `maxAgeDays` (120). `take` clamp 600 (mostra o total real, não um teto). Defaults: minScore 60, freshDays 45.
-- `GET /api/applications` — **mural de aplicações**: oportunidades já marcadas como "já me cadastrei"/apliquei
-  ou contatei recrutador (feedback `Applied`/`ContactedRecruiter`). Ordenado pela data da marcação. Essas vagas
-  **saem do `/api/matches`** (mural principal) para o usuário ir "matando" o que já tratou.
-- `DELETE /api/applications/{jobId}` — **desfazer**: remove o feedback Applied/ContactedRecruiter e a vaga volta ao mural principal.
+- `GET /api/matches?candidateProfileId=&minScore=&take=&freshDays=&maxAgeDays=&sort=&region=&contract=` — **o feed, POR PERFIL**. Resolve o perfil (id explícito → default) e **pega o ÚLTIMO match por (JobPostingId + CandidateProfileId) ANTES do gate de score** — nunca o último match global por job (senão o feed de um perfil seria contaminado pelo score de outro, ou por um match velho inflado). Só ativos/frescos; oculta Irrelevant/HideSimilar **e** Applied/ContactedRecruiter **deste perfil**; esconde internacional se este perfil recusa (§4.1); **dedup**; nome via `BestCompany`. `region`=national/international, `contract`=clt/pj/both/unknown. Descarta publicadas há > `maxAgeDays` (120). `take` clamp 600. Defaults: minScore 60, freshDays 45.
+- `GET /api/applications?candidateProfileId=` — **mural de aplicações DO PERFIL**: vagas marcadas como "já me cadastrei"/apliquei ou contatei recrutador (feedback `Applied`/`ContactedRecruiter` **deste perfil**). Saem do `/api/matches` daquele perfil. O score exibido é o **deste perfil**.
+- `DELETE /api/applications/{jobId}?candidateProfileId=` — **desfazer** (só naquele perfil): remove o feedback Applied/ContactedRecruiter e a vaga volta ao mural principal do perfil.
 - `GET /api/runs?take=` — feed de atividade (ExecutionRuns).
 - `GET /api/messages` — rascunhos gerados.
 
@@ -346,7 +353,8 @@ Irrelevant/HideSimilar **ocultam** do mural; Applied/ContactedRecruiter **movem*
 ## 12. Frontend (uma tela viva)
 
 React + Vite + TS em `frontend/`. **Estética glassmorphism premium**: fundo abstrato pastel (recriado em CSS no `body` — gradientes difusos + dots discretos; trocável por `/assets/opportunity-bg.png`), sidebar/cards/painéis em vidro (`backdrop-filter: blur`). Componentes em `App.tsx`:
-- **Sidebar** — marca, **3 itens** (Oportunidades, Empresas, Aplicações) + grupo discreto **"Sistema"** (Descobertas, Relatórios); card **"Radar ativo"** (sem gráfico: status + última atualização + "N vagas novas hoje"); card do usuário.
+- **Sidebar** — marca, **3 itens** (Oportunidades, Empresas, Aplicações) + grupo discreto **"Sistema"** (Descobertas, Relatórios, **Perfis**); card **"Radar ativo"**; e o **seletor de perfil** (card do usuário): dropdown "Perfil ativo" com os perfis (default marcado ★) + "Gerenciar perfis ›".
+- **Seletor de perfil (multi-perfil)** — a seleção fica em **`localStorage`** (`oos.selectedProfileId`); **não** há estado global de "ativo" no servidor. Trocar o perfil recarrega **matches, applications, summary e digest preview** (cada chamada manda `?candidateProfileId=`) e atualiza a **copy da tela** ("…ao perfil Java Backend"). **Não há login nem `UserId` ainda.** A tela **Perfis** permite criar/editar perfis e mover o `IsDefault`.
 - **OpportunitiesScreen** — header pessoal + "Atualizado há X"; **um feed único e direto** (sem abas) "Oportunidades pra você", ordenado por **aderência**; busca + **Filtros** (Onde: Todas/Brasil/Exterior · Contrato: **Todos/CLT/PJ/Ambos/Não informado** bucket exato · Ordenar: Aderência/Recentes) + **✨ Buscar agora** (painel de progresso amigável → resultado real). **Fit-to-viewport**: mostra só os cards que cabem na tela + paginação fixa (sem scroll); auto-refresh 25s.
 - **OppCard** — empresa + **fonte** (Site oficial / Encontrada na web / Fonte menos confiável) + **data honesta** ("publicada há X" se da fonte, *"encontrada há X"* itálico se só descoberta) + título limpo (`cleanTitle`) + subtítulo + ≤5 tags · resumo curto · **score + rótulo humano** (Abrir primeiro ≥90 / Vale olhar ≥80 / Boa opção ≥75) · ações **Ver vaga · Rascunho · Feito** + **X** (remover, abre painel "por que não serve" que ensina o sistema) + menu "…" (ocultar/irrelevante/empresa errada/detalhes).
 - **Empresas** (busca + "Atualizar busca"), **Aplicações** (mural do que já tratou, "↩ Reabrir"), **Descobertas**, **Relatórios** (métricas vivem aqui, fora do mural principal).
@@ -373,9 +381,10 @@ Cliente HTTP em `api.ts` (proxy `/api`). Sem estado global além de `reload`.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ 0. SEED / PERFIL                                                          │
-│   Startup aplica migrations + seed. Existe 1 CandidateProfile ativo       │
-│   (o mais recente). É contra ele que tudo é pontuado.                     │
+│ 0. SEED / PERFIS                                                          │
+│   Startup aplica migrations + seed. Existem MÚLTIPLOS CandidateProfiles.  │
+│   Cada request resolve o perfil por candidateProfileId; se ausente, usa   │
+│   o IsDefault; se não houver, o mais recente (compat). Sem "ativo" global.│
 └─────────────────────────────────────────────────────────────────────────┘
                                    │
                                    ▼
@@ -394,21 +403,23 @@ Cliente HTTP em `api.ts` (proxy `/api`). Sem estado global além de `reload`.
                                    │  (cada job NOVO/sem match)
                                    ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ 2. PONTUAÇÃO AUTOMÁTICA (na descoberta)                                   │
+│ 2. PONTUAÇÃO AUTOMÁTICA (na descoberta — contra o perfil DEFAULT)         │
 │   • JobNormalizer extrai seniority/workmode/idioma/skills/domínios        │
-│   • HeuristicMatchEngine → OpportunityMatch (score + rationale seco)      │
+│   • HeuristicMatchEngine v2 → OpportunityMatch p/ o perfil default        │
 │   • Se score ≥ 60 e orçamento LLM > 0 (cap 6/run):                        │
 │        IJobUnderstandingService + ICandidateFitAnalysisService →          │
 │        match LLM autoritativo (score + "por que combina" em prosa)        │
 │   • Match score ≥ 70 ⇒ OpportunityPipeline cria Opportunity (Analyzed)    │
+│   • Outros perfis recebem matches via POST /api/jobs/rescore (por perfil  │
+│     ou allProfiles=true) — gera um match por (vaga, perfil).              │
 └─────────────────────────────────────────────────────────────────────────┘
                                    │
                                    ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ 3. FEED (GET /api/matches) — a tela viva                                  │
-│   ÚLTIMO match por job → ENTÃO gate de score (≥60) · não Exp/Arq/TalentP. ·│
-│   fresco · gate técnico (não-backend cai) · esconde intl/declinadas · dedup│
-│   Empresa via BestCompany (nunca host). Ordena por aderência.             │
+│ 3. FEED (GET /api/matches?candidateProfileId=) — a tela viva, POR PERFIL  │
+│   ÚLTIMO match por (JobPostingId + CandidateProfileId) → gate (≥60) ·      │
+│   não Exp/Arq/TalentP. · fresco · gate técnico · esconde intl/declinadas   │
+│   (feedback DESTE perfil) · dedup. Empresa via BestCompany. Ordena por fit.│
 │   UI: feed único, fit-to-viewport (sem scroll) · auto-refresh 25s         │
 │   ValidateLinksJob + feedback "encerrada" marcam Expired → caem do feed   │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -428,10 +439,10 @@ Cliente HTTP em `api.ts` (proxy `/api`). Sem estado global além de `reload`.
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Resumo de uma frase:** *o sistema descobre vagas .NET continuamente (ATS + web aberta),
-enriquece e pontua cada uma (heurístico → LLM) contra o perfil, e exibe as melhores —
-frescas, relevantes, com "por que combina" e mensagem pronta pra copiar — numa única tela,
-sem nunca enviar nada sozinho.*
+**Resumo de uma frase:** *o sistema descobre vagas **globalmente** (ATS + web aberta),
+enriquece e pontua cada uma (heurístico v2 → LLM) **contra o `CandidateProfile` selecionado**,
+e exibe as melhores **daquele perfil** — frescas, relevantes, com "por que combina" e mensagem
+pronta pra copiar — numa única tela, sem nunca enviar nada sozinho.*
 
 ---
 
@@ -471,12 +482,28 @@ cd frontend && npm run dev                           # tela em :5173 (proxy → 
 - **Custo LLM**: auto-análise na descoberta contínua (cap 6/run, gate ≥60). Bounded, mas consome Anthropic.
 - **Google CSE whole-web morreu** (jan/2026); web-aberta hoje é **Serper.dev**.
 - **Datas**: `EffectiveDateUtc` usa publicação/atualização real quando existe; ~as do CareersCrawler (1027) ainda **sem data** (faltou ler `datePosted` do JSON-LD) → mostradas como *"encontrada há X"*.
-- **Sem auth/multiusuário**; migrations no startup.
+- **Multi-perfil _pré-auth_**: o sistema suporta múltiplos `CandidateProfile`, mas o perfil é
+  escolhido por `candidateProfileId` + `localStorage` — **ainda não há isolamento por usuário,
+  login nem Tenant**. Multi-profile **prepara**, mas **não substitui**, auth/multi-tenancy: a
+  próxima fase deve plugar `AppUser`/Identity no `ICurrentCandidateProfileProvider`. A descoberta
+  na inicialização auto-pontua só o **perfil default**; os demais dependem de `rescore`.
+- **`/api/matches` precisa da otimização `LatestOpportunityMatch`** (ver §17, débito #1) — com
+  multi-perfil o volume de matches cresce por `vagas × perfis × versões`.
 
 ## 17. Débito técnico conhecido (priorizado)
 
-- 🟠 **`/api/matches` e o digest carregam TODOS os matches a cada chamada** (latest-per-job em memória). Cresce a cada `rescore` (matches são imutáveis → grava novos). Falta **cache do modelo de aprendizado + paginação no servidor**.
-- 🟠 **Sem tracking de RESULTADO** (aplicou→respondeu→entrevista→oferta). O sistema só aprende dos descartes, não do que **converte**. É o maior salto de assertividade que falta.
+- 🔴 **#1 (PRIORIDADE TÉCNICA) — projeção `LatestOpportunityMatch`.** Hoje `/api/matches` e o
+  digest carregam **todos** os matches e fazem o "latest-per-(job,perfil)" **em memória**. Com
+  multi-perfil isso cresce por `nº vagas × nº perfis × nº versões de score` e degrada rápido.
+  **Recomendado:** uma tabela/projeção `LatestOpportunityMatch` { `JobPostingId`,
+  `CandidateProfileId`, `OpportunityMatchId`, `OverallScore`, `Recommendation`, `EngineVersion`,
+  `CreatedAtUtc`, `UpdatedAtUtc` } com **única por (JobPostingId + CandidateProfileId)**; o
+  `rescore`/auto-score faz **upsert** ao criar um match novo; `/api/matches` e o digest consultam
+  **só a projeção** (filtrável por perfil, paginável no servidor). Deixa o feed estável e previsível.
+- 🟠 **#2 (PRIORIDADE DE PRODUTO) — tracking de RESULTADO** (`ApplicationOutcome` / `ApplicationEvent`
+  por perfil): `Viewed · DraftCopied · Applied · MessageSent · Replied · InterviewScheduled ·
+  InterviewPassed · OfferReceived · Rejected · Archived`. Hoje o sistema só aprende dos **descartes**;
+  precisa aprender também do que **gera resposta/entrevista/proposta** — o maior salto de assertividade.
 - 🟠 **`detect-ats-bulk` não converge**: re-rastreia as ~229 empresas que falham toda rodada (falta tag `no-careers-found`).
 - 🟡 **Resiliência do startup**: a API lança exceção e morre se o Postgres estiver fora (sem retry/espera) — fonte de dor operacional.
 - 🟡 **Endpoints sem teste**: só serviços puros (match engine, FeedbackLearning, classifier) têm teste; a lógica do `/api/matches` (filtros, intl, contrato, dedup, datas) é integração não-coberta.
