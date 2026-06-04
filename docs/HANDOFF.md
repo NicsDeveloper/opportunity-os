@@ -2,7 +2,7 @@
 
 > Documento de transferência para outro agente/dev. Descreve **tudo** que o sistema é,
 > fornece e faz, e o **fluxo lógico** de ponta a ponta. Escrito a partir do código real
-> (não da intenção). Última varredura: branch `feat/opportunity-os`.
+> (não da intenção). Última varredura: branch `feat/multi-profile` (fase multi-perfil).
 
 ---
 
@@ -193,23 +193,32 @@ triagem), só promovendo a `JobPosting` o que passa pelos filtros. Alimenta a ab
 
 ## 5. Match engine (relevância)
 
-### `HeuristicMatchEngine` (sem LLM, transparente)
-`OverallScore = Técnico*0.45 + Domínio*0.20 + Senioridade*0.15 + Localização*0.10 + Idioma*0.10`
+### `HeuristicMatchEngine` v2 (sem LLM, transparente, **dirigido pelo perfil**)
+`OverallScore = Técnico*0.50 + Cargo*0.15 + Senioridade*0.10 + Domínio*0.10 + Localização*0.10 + Idioma*0.05`
 
-- **Técnico**: .NET/C# explícito = base 65 + bônus de stack (cloud/mensageria/dados), -penalidade por linguagens concorrentes; backend sem .NET = ~48; nem backend = baixo. *Técnico domina — .NET é match forte mesmo fora de pagamentos.*
-- **Domínio**: financeiro/pagamentos = 82+; adjacente = 60+; **sem sinal = 50 (bônus, não gate)**.
-- **Senioridade**: Mid/Senior = 90; Lead = 70; Staff/Principal = 50; Junior/Intern = 30; não informado = 65.
-- **Localização**: Remote = 85–95; Hybrid = 65; Onsite = 35; desconhecido = 60.
-- **Idioma**: pt-BR/en = 90; outro = 40.
+> v2 (multi-perfil): o TechnicalFit é calculado contra a **stack do perfil** via
+> `StackTaxonomy` (`Matching/StackTaxonomy.cs`), não mais com viés fixo em .NET. Cada match
+> grava `EngineVersion` (`heuristic-v2` / `llm-fit-v1`). A v1 (.NET-fixa, pesos
+> `0.45/0.20/0.15/0.10/0.10`) foi substituída.
+
+- **Técnico**: famílias do perfil (core/secondary/excluded) vs famílias da vaga. Família **core**
+  presente na vaga = base alta (72 + bônus por skills do perfil citadas); **secondary** = média
+  (~48–68); stack concorrente/desconhecida = baixa; **excluded** = teto 25.
+- **Cargo**: overlap do título com `PreferredRoles`; título citando a stack core do perfil reforça (≥75).
+- **Senioridade**: alvo do perfil (`Seniority`) → compatível 90, ±1 nível 68, distante 35–50; não informado 65.
+- **Domínio**: overlap com `profile.Domains` (bônus, nunca gate; sem sinal = 50).
+- **Localização**: `PreferredWorkModes` do perfil; Remote 88–95, Hybrid 62–80, Onsite 35–80.
+- **Idioma**: `PreferredLanguage`/pt-BR/en = 90; outro = 45.
 - **Recomendação**: ≥90 Strategic · ≥75 Prioritize · ≥60 Apply · ≥40 SaveForLater · senão Ignore.
-- Rationale heurístico é seco: `"Score 68/100 — Técnico 65, Domínio 50, …"`.
-- **GATE TÉCNICO (precisão):** domínio/senioridade/localização/idioma NÃO podem levar uma vaga
-  não-backend ao topo. (a) **Cargo no título** Director/Manager/Consultant/Marketing/Sales/Product
-  Manager **sem** sinal de dev (.net/developer/engenheiro/backend) → técnico = 12. (b) Técnico < 40 →
-  overall **capado em 40** (sai do mural ≥60); técnico < 60 (backend sem .NET) → capado em 70 (nunca "topo").
-  Foi o que tirou "Director, Collections = 73" do topo.
-- **Re-pontuar o acervo:** `POST /api/jobs/rescore` reavalia todos os matches com o engine atual (aplica o
-  gate retroativo). Como `OpportunityMatch` é imutável, grava um match novo só quando o score muda.
+- Rationale heurístico é seco: `"Score 88/100 — Técnico 100, Cargo 85, Senioridade 90, …"`.
+- **GATES:** `Técnico<35 → ≤45`; cargo gestão/negócio sem sinal dev → `≤40`; vaga fora da stack
+  **core** do perfil → `≤70` (nunca topo).
+  (Os gates impedem que domínio/senioridade/localização/idioma levem ao topo uma vaga fora da
+  stack do perfil — ex.: "Director, Collections" numa fintech, ou um cargo Java para um perfil .NET.)
+- **Re-pontuar o acervo:** `POST /api/jobs/rescore` reavalia com o engine atual (gate retroativo). Por
+  padrão só o perfil resolvido/default; `?allProfiles=true` reavalia **todos os perfis** (gera um match por
+  (vaga, perfil)); aceita `?take=` e `?engineVersion=`. Como `OpportunityMatch` é imutável, grava um match
+  novo só quando o score muda — e o `/api/matches` sempre pega o **último por (vaga, perfil)**.
 
 `JobNormalizer` (+ `KnownTerms`) deriva Seniority, WorkMode, Language, Skills, Domains do título/descrição.
 
