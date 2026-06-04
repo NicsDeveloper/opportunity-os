@@ -2,8 +2,10 @@ using System.Net.Http.Headers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using OpportunityOS.Application.AI;
+using OpportunityOS.Application.Auth;
 using OpportunityOS.Application.Bacen;
 using OpportunityOS.Application.Digest;
 using OpportunityOS.Application.Discovery;
@@ -13,6 +15,7 @@ using OpportunityOS.Application.Pipeline;
 using OpportunityOS.Application.Profiles;
 using OpportunityOS.Application.Projections;
 using OpportunityOS.Infrastructure.Ai;
+using OpportunityOS.Infrastructure.Auth;
 using OpportunityOS.Infrastructure.Bacen;
 using OpportunityOS.Infrastructure.Email;
 using OpportunityOS.Infrastructure.Persistence;
@@ -35,6 +38,9 @@ public static class DependencyInjection
 
         services.AddScoped<IJobNormalizer, JobNormalizer>();
         services.AddScoped<IMatchEngine, HeuristicMatchEngine>();
+        // Default to the non-HTTP "system" caller (Worker/design-time); the API replaces this with an
+        // HTTP-backed ICurrentUserContext, so the workspace-scoped profile provider works everywhere.
+        services.TryAddScoped<ICurrentUserContext, SystemUserContext>();
         services.AddScoped<ICurrentCandidateProfileProvider, EfCurrentCandidateProfileProvider>();
         services.AddScoped<ILatestOpportunityMatchProjection, EfLatestOpportunityMatchProjection>();
         services.AddSingleton<ISourceClassifierService, SourceClassifierService>();

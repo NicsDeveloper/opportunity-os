@@ -10,7 +10,7 @@ public static class RecruiterEndpoints
 {
     public static void MapRecruiterEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/recruiters").WithTags("Recruiters");
+        var group = app.MapGroup("/api/recruiters").WithTags("Recruiters").RequireAuthorization("System");
 
         group.MapGet("/", async (OpportunityOsDbContext db, CancellationToken ct) =>
         {

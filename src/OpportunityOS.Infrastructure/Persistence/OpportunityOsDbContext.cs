@@ -1,15 +1,19 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using OpportunityOS.Domain.Entities;
+using OpportunityOS.Infrastructure.Auth;
 
 namespace OpportunityOS.Infrastructure.Persistence;
 
-public sealed class OpportunityOsDbContext : DbContext
+public sealed class OpportunityOsDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
 {
     public OpportunityOsDbContext(DbContextOptions<OpportunityOsDbContext> options) : base(options) { }
 
+    public DbSet<Workspace> Workspaces => Set<Workspace>();
     public DbSet<CandidateProfile> CandidateProfiles => Set<CandidateProfile>();
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<JobPosting> JobPostings => Set<JobPosting>();
@@ -31,7 +35,25 @@ public sealed class OpportunityOsDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        // Identity tables (AspNetUsers/Roles/...). Must run first so our overrides apply on top.
+        base.OnModelCreating(b);
+
         var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+
+        b.Entity<AppUser>(e =>
+        {
+            e.Property(x => x.DisplayName).HasMaxLength(200);
+        });
+
+        b.Entity<Workspace>(e =>
+        {
+            e.ToTable("workspaces");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).IsRequired();
+            // One workspace per user in the MVP.
+            e.HasIndex(x => x.UserId).IsUnique();
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
 
         // Value converters/comparers for List<string> stored as jsonb.
         var stringListConverter = new ValueConverter<List<string>, string>(
@@ -51,6 +73,12 @@ public sealed class OpportunityOsDbContext : DbContext
             e.Property(x => x.IsDefault).HasDefaultValue(false);
             e.Property(x => x.MinimumScoreToShow).HasDefaultValue(60);
             e.HasIndex(x => x.IsDefault);
+            // Workspace ownership — transitional nullable column (see AddAuthWorkspace migration);
+            // the auth seeder backfills it, a later migration tightens it to NOT NULL.
+            e.Property(x => x.WorkspaceId);
+            e.HasIndex(x => x.WorkspaceId);
+            e.HasIndex(x => new { x.WorkspaceId, x.IsDefault });
+            e.HasOne<Workspace>().WithMany().HasForeignKey(x => x.WorkspaceId).OnDelete(DeleteBehavior.Cascade);
             foreach (var prop in new[]
                      {
                          nameof(CandidateProfile.CoreSkills), nameof(CandidateProfile.SecondarySkills),

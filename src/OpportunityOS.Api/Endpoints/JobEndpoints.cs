@@ -16,7 +16,9 @@ public static class JobEndpoints
 {
     public static void MapJobEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/jobs").WithTags("Jobs");
+        // Jobs are GLOBAL data, but discovery/search/rescore are cost-bearing or mutate global state,
+        // so the group requires the "System" policy; the read GETs opt back out via AllowAnonymous.
+        var group = app.MapGroup("/api/jobs").WithTags("Jobs").RequireAuthorization("System");
 
         group.MapGet("/", async (OpportunityOsDbContext db, CancellationToken ct) =>
         {
@@ -24,13 +26,13 @@ public static class JobEndpoints
                 .OrderByDescending(j => j.CreatedAtUtc)
                 .ToListAsync(ct);
             return Results.Ok(jobs.Select(j => j.ToResponse()));
-        });
+        }).AllowAnonymous();
 
         group.MapGet("/{id:guid}", async (Guid id, OpportunityOsDbContext db, CancellationToken ct) =>
         {
             var job = await db.JobPostings.FindAsync([id], ct);
             return job is null ? Results.NotFound() : Results.Ok(job.ToResponse());
-        });
+        }).AllowAnonymous();
 
         // Manual discovery run: pull public postings from ATS providers and persist
         // them (dedup by SourceProvider + ExternalId). Optionally scoped to one company.

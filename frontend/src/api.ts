@@ -1,32 +1,45 @@
 // Thin API client. All calls go through the Vite dev proxy (/api -> backend).
 
+// credentials:"include" sends the auth cookie on every call (through the Vite proxy).
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`/api${path}`, { headers: { Accept: "application/json" } });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  const res = await fetch(`/api${path}`, { headers: { Accept: "application/json" }, credentials: "include" });
+  if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`);
   return res.json() as Promise<T>;
 }
 async function post<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) throw new ApiError(res.status, await errorText(res));
   return (res.status === 204 ? (undefined as T) : (res.json() as Promise<T>));
 }
 async function put<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) throw new ApiError(res.status, await errorText(res));
   return (res.status === 204 ? (undefined as T) : (res.json() as Promise<T>));
 }
 async function del<T>(path: string): Promise<T> {
-  const res = await fetch(`/api${path}`, { method: "DELETE" });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  const res = await fetch(`/api${path}`, { method: "DELETE", credentials: "include" });
+  if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`);
   return (res.status === 204 ? (undefined as T) : (res.json() as Promise<T>));
+}
+
+export class ApiError extends Error {
+  constructor(public status: number, message: string) { super(message); }
+}
+async function errorText(res: Response): Promise<string> {
+  try {
+    const body = await res.json() as { error?: string; details?: string[] };
+    return body?.error ?? (body?.details?.join("; ")) ?? `${res.status} ${res.statusText}`;
+  } catch { return `${res.status} ${res.statusText}`; }
 }
 
 export interface Company {
@@ -135,6 +148,14 @@ export interface ProfileInput {
   preferredWorkModes?: string[]; minimumScoreToShow?: number;
 }
 
+// ---- Auth & Workspace ----
+export interface AuthMe { id: string; email: string; displayName: string; workspaceId: string | null; }
+export interface WorkspaceMe {
+  workspaceId: string; name: string;
+  user: { id: string; email: string; displayName: string };
+  defaultCandidateProfileId: string | null;
+}
+
 // Append &candidateProfileId=… (or ?… when first param) when a profile is selected.
 function pid(profileId?: string, first = false) {
   if (!profileId) return "";
@@ -142,6 +163,19 @@ function pid(profileId?: string, first = false) {
 }
 
 export const api = {
+  // Auth: me() resolves null on 401 so the UI can render the login screen instead of throwing.
+  auth: {
+    me: async (): Promise<AuthMe | null> => {
+      try { return await get<AuthMe>("/auth/me"); }
+      catch (e) { if (e instanceof ApiError && e.status === 401) return null; throw e; }
+    },
+    register: (email: string, password: string, displayName?: string) =>
+      post<AuthMe>("/auth/register", { email, password, displayName }),
+    login: (email: string, password: string) =>
+      post<AuthMe>("/auth/login", { email, password }),
+    logout: () => post<void>("/auth/logout"),
+  },
+  workspaceMe: () => get<WorkspaceMe>("/workspace/me"),
   profile: () => get<Profile>("/candidate-profile"),
   // Multi-profile: list, create, edit, and move the default anchor.
   profiles: () => get<Profile[]>("/candidate-profiles"),

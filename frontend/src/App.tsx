@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./icons";
 import {
-  api, type Application, type BestOpportunity, type Company,
+  api, ApiError, type Application, type AuthMe, type BestOpportunity, type Company,
   type GeneratedMessage, type Profile, type ProfileInput, type Summary,
 } from "./api";
 
@@ -10,7 +10,26 @@ type Section = "oportunidades" | "empresas" | "aplicacoes" | "descobertas" | "re
 // The selected candidate profile lives client-side (localStorage) — no global server "active" state.
 const PROFILE_KEY = "oos.selectedProfileId";
 
+// Top-level auth gate: undefined = checking session, null = logged out, AuthMe = logged in.
 export function App() {
+  const [me, setMe] = useState<AuthMe | null | undefined>(undefined);
+
+  useEffect(() => { api.auth.me().then(setMe).catch(() => setMe(null)); }, []);
+
+  if (me === undefined)
+    return <div className="auth-shell"><div className="auth-card"><div className="auth-brand">Opportunity OS</div><p className="auth-sub">Carregando…</p></div></div>;
+  if (me === null)
+    return <AuthScreen onAuthed={setMe} />;
+
+  const logout = async () => {
+    try { await api.auth.logout(); } catch { /* ignore */ }
+    localStorage.removeItem(PROFILE_KEY);
+    setMe(null);
+  };
+  return <Workspace me={me} onLogout={logout} />;
+}
+
+function Workspace({ me, onLogout }: { me: AuthMe; onLogout: () => void }) {
   const [reload, setReload] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("oportunidades");
@@ -18,6 +37,7 @@ export function App() {
   const profiles = useAsync(api.profiles, [reload]);
 
   const list = profiles.data ?? [];
+  // The persisted selection must belong to THIS user; otherwise fall back to default/first.
   const current = list.find((p) => p.id === selectedProfileId) ?? list.find((p) => p.isDefault) ?? list[0];
 
   const selectProfile = (id: string) => { setSelectedProfileId(id); localStorage.setItem(PROFILE_KEY, id); };
@@ -31,10 +51,15 @@ export function App() {
     return () => clearInterval(id);
   }, []);
 
+  // No profile yet → onboarding (creates the first CandidateProfile, then the feed appears).
+  if (profiles.data && list.length === 0)
+    return <Onboarding displayName={me.displayName} notify={notify} onDone={(id) => { selectProfile(id); refresh(); }} onLogout={onLogout} />;
+
   return (
     <div className="layout">
       <Sidebar section={section} setSection={setSection} reload={reload}
-        profiles={list} current={current} onSelectProfile={selectProfile} />
+        profiles={list} current={current} onSelectProfile={selectProfile}
+        userName={me.displayName} userEmail={me.email} onLogout={onLogout} />
       <main className="main">
         <div className="main-inner">
           {section === "oportunidades" && <OpportunitiesScreen reload={reload} notify={notify} onChanged={refresh} firstName={firstNameOf(current?.fullName)} profileLabel={current?.displayName} profileId={current?.id} />}
@@ -46,6 +71,146 @@ export function App() {
         </div>
       </main>
       {toast && <div className="toast">{toast}</div>}
+    </div>
+  );
+}
+
+/* ============================ auth & onboarding ============================ */
+
+function AuthScreen({ onAuthed }: { onAuthed: (me: AuthMe) => void }) {
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setError(null);
+    if (!email.trim() || !password) { setError("Informe e-mail e senha."); return; }
+    if (mode === "register" && password.length < 8) { setError("A senha precisa de ao menos 8 caracteres."); return; }
+    setBusy(true);
+    try {
+      const me = mode === "login"
+        ? await api.auth.login(email.trim(), password)
+        : await api.auth.register(email.trim(), password, name.trim() || undefined);
+      onAuthed(me);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Não foi possível continuar. Tente novamente.");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="auth-shell">
+      <div className="auth-card">
+        <div className="auth-brand">Opportunity OS</div>
+        <p className="auth-sub">
+          {mode === "login" ? "Entre para ver seu radar de oportunidades." : "Crie sua conta e monte seu radar."}
+        </p>
+        <div className="auth-form" onKeyDown={(e) => { if (e.key === "Enter") submit(); }}>
+          {mode === "register" && (
+            <label className="field"><span className="field-l">Nome</span>
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Como te chamamos" autoFocus /></label>
+          )}
+          <label className="field"><span className="field-l">E-mail</span>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@email.com" autoFocus={mode === "login"} /></label>
+          <label className="field"><span className="field-l">Senha</span>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" /></label>
+          {error && <p className="err">{error}</p>}
+          <button className="btn primary" disabled={busy} onClick={submit}>
+            {busy ? "…" : mode === "login" ? "Entrar" : "Criar conta"}
+          </button>
+        </div>
+        <p className="auth-switch">
+          {mode === "login"
+            ? <>Não tem conta? <button className="link-btn" onClick={() => { setMode("register"); setError(null); }}>Criar conta</button></>
+            : <>Já tem conta? <button className="link-btn" onClick={() => { setMode("login"); setError(null); }}>Entrar</button></>}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+const ONBOARDING_STEPS = [
+  "Quem é você profissionalmente?",
+  "Quais stacks você quer priorizar?",
+  "Que tipo de oportunidade você quer ver?",
+  "Ver oportunidades",
+];
+
+function Onboarding({ displayName, notify, onDone, onLogout }: {
+  displayName: string; notify: (m: string) => void; onDone: (profileId: string) => void; onLogout: () => void;
+}) {
+  const [step, setStep] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState<ProfileInput>({
+    ...EMPTY_FORM, fullName: displayName, displayName: "",
+  });
+  const set = (patch: Partial<ProfileInput>) => setForm((f) => ({ ...f, ...patch }));
+
+  const canNext =
+    step === 0 ? !!(form.displayName?.trim() && form.headline.trim() && form.seniority.trim())
+    : step === 1 ? (form.coreSkills?.length ?? 0) > 0
+    : true;
+
+  const finish = async () => {
+    setBusy(true);
+    try {
+      const created = await api.createProfile({ ...form, fullName: form.fullName || form.displayName || "Meu perfil" });
+      notify("Perfil criado. Buscando oportunidades…");
+      onDone(created.id);
+    } catch (e) {
+      notify("Não foi possível criar o perfil: " + (e instanceof ApiError ? e.message : String(e)));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="auth-shell">
+      <div className="auth-card wide">
+        <div className="auth-brand">Vamos montar seu radar</div>
+        <div className="onb-steps">
+          {ONBOARDING_STEPS.map((_, i) => (
+            <span key={i} className={"onb-dot" + (i === step ? " active" : i < step ? " done" : "")}>{i + 1}</span>
+          ))}
+        </div>
+        <h2 className="onb-title">{ONBOARDING_STEPS[step]}</h2>
+
+        {step === 0 && (
+          <div className="pf-grid">
+            <Field label="Nome do perfil (rótulo)"><input autoFocus value={form.displayName ?? ""} onChange={(e) => set({ displayName: e.target.value })} placeholder="Ex.: Backend .NET" /></Field>
+            <Field label="Cargo desejado / headline"><input value={form.headline} onChange={(e) => set({ headline: e.target.value })} placeholder="Ex.: Desenvolvedor Backend .NET" /></Field>
+            <Field label="Senioridade"><input value={form.seniority} onChange={(e) => set({ seniority: e.target.value })} placeholder="Pleno/Sênior" /></Field>
+          </div>
+        )}
+        {step === 1 && (
+          <div className="pf-grid">
+            <Field label="Principais skills (vírgula)"><input autoFocus value={(form.coreSkills ?? []).join(", ")} onChange={(e) => set({ coreSkills: splitCsv(e.target.value) })} placeholder="C#, .NET, SQL" /></Field>
+            <Field label="Skills secundárias (vírgula)"><input value={(form.secondarySkills ?? []).join(", ")} onChange={(e) => set({ secondarySkills: splitCsv(e.target.value) })} placeholder="Azure, Docker" /></Field>
+            <Field label="Cargos desejados (vírgula)"><input value={(form.preferredRoles ?? []).join(", ")} onChange={(e) => set({ preferredRoles: splitCsv(e.target.value) })} placeholder="Backend, Tech Lead" /></Field>
+          </div>
+        )}
+        {step === 2 && (
+          <div className="pf-grid">
+            <Field label="Localização"><input autoFocus value={form.location} onChange={(e) => set({ location: e.target.value })} placeholder="São Paulo / Remoto" /></Field>
+            <Field label="Modelos de trabalho (vírgula)"><input value={(form.preferredWorkModes ?? []).join(", ")} onChange={(e) => set({ preferredWorkModes: splitCsv(e.target.value) })} placeholder="Remoto, Híbrido" /></Field>
+            <Field label="Idioma"><input value={form.preferredLanguage} onChange={(e) => set({ preferredLanguage: e.target.value })} placeholder="pt-BR" /></Field>
+          </div>
+        )}
+        {step === 3 && (
+          <p className="onb-recap">
+            Tudo pronto, <strong>{form.displayName || displayName}</strong>. Vamos criar seu perfil e mostrar as oportunidades mais aderentes.
+          </p>
+        )}
+
+        <div className="pf-actions">
+          {step > 0 && <button className="btn" onClick={() => setStep(step - 1)} disabled={busy}>‹ Voltar</button>}
+          {step < ONBOARDING_STEPS.length - 1
+            ? <button className="btn primary" onClick={() => setStep(step + 1)} disabled={!canNext}>Continuar ›</button>
+            : <button className="btn primary" onClick={finish} disabled={busy}>{busy ? "Criando…" : "Ver oportunidades"}</button>}
+          <button className="link-btn onb-logout" onClick={onLogout}>Sair</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -63,9 +228,10 @@ const SYS_NAV: { key: Section; label: string; icon: string }[] = [
   { key: "perfis", label: "Perfis", icon: "building" },
 ];
 
-function Sidebar({ section, setSection, reload, profiles, current, onSelectProfile }: {
+function Sidebar({ section, setSection, reload, profiles, current, onSelectProfile, userName, userEmail, onLogout }: {
   section: Section; setSection: (s: Section) => void; reload: number;
   profiles: Profile[]; current?: Profile; onSelectProfile: (id: string) => void;
+  userName: string; userEmail: string; onLogout: () => void;
 }) {
   const runs = useAsync(() => api.runs(3), [reload]);
   const summary = useAsync(() => api.summary(current?.id), [reload, current?.id]);
@@ -115,6 +281,14 @@ function Sidebar({ section, setSection, reload, profiles, current, onSelectProfi
           <div className="rl">{current?.headline ?? "Backend Engineer .NET"}</div>
           <button className="link-btn" onClick={() => setSection("perfis")}>Gerenciar perfis ›</button>
         </div>
+      </div>
+
+      <div className="account">
+        <div className="acc-id">
+          <div className="acc-name">{userName}</div>
+          <div className="acc-email">{userEmail}</div>
+        </div>
+        <button className="link-btn" onClick={onLogout}>Sair</button>
       </div>
     </aside>
   );

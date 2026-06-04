@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using OpportunityOS.Application.Auth;
 using OpportunityOS.Application.Profiles;
 using OpportunityOS.Contracts;
 using OpportunityOS.Domain.Entities;
@@ -12,7 +13,7 @@ public static class FeedbackEndpoints
 {
     public static void MapFeedbackEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/feedback").WithTags("Feedback");
+        var group = app.MapGroup("/api/feedback").WithTags("Feedback").RequireAuthorization();
 
         group.MapPost("/", async (
             FeedbackRequest req, OpportunityOsDbContext db,
@@ -40,10 +41,29 @@ public static class FeedbackEndpoints
             return Results.Created($"/api/feedback/{feedback.Id}", new { feedback.Id, Type = type.ToString(), feedback.CreatedAtUtc });
         });
 
-        group.MapGet("/", async (int? take, OpportunityOsDbContext db, CancellationToken ct) =>
+        // List feedback for THIS workspace. With candidateProfileId, only that (owned) profile's
+        // feedback; otherwise every profile in the caller's workspace. Never another user's.
+        group.MapGet("/", async (
+            int? take, Guid? candidateProfileId, ICurrentUserContext user,
+            ICurrentCandidateProfileProvider profiles, OpportunityOsDbContext db, CancellationToken ct) =>
         {
             var limit = Math.Clamp(take ?? 100, 1, 500);
+
+            List<Guid> profileIds;
+            if (candidateProfileId is not null)
+            {
+                // Throws (→403) if the profile isn't in the caller's workspace.
+                var resolved = await profiles.ResolveIdAsync(candidateProfileId, ct);
+                profileIds = resolved is { } r ? new List<Guid> { r } : new();
+            }
+            else
+            {
+                var ws = await user.GetWorkspaceIdAsync(ct);
+                profileIds = await db.CandidateProfiles.Where(p => p.WorkspaceId == ws).Select(p => p.Id).ToListAsync(ct);
+            }
+
             var items = await db.UserFeedbacks
+                .Where(f => f.CandidateProfileId != null && profileIds.Contains(f.CandidateProfileId!.Value))
                 .OrderByDescending(f => f.CreatedAtUtc).Take(limit)
                 .Select(f => new { f.Id, Type = f.Type.ToString(), f.JobPostingId, f.RawJobCandidateId, f.CandidateProfileId, f.Reason, f.CreatedAtUtc })
                 .ToListAsync(ct);

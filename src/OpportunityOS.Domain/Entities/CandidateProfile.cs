@@ -8,6 +8,12 @@ namespace OpportunityOS.Domain.Entities;
 public sealed class CandidateProfile
 {
     public Guid Id { get; private set; }
+    /// <summary>
+    /// The workspace (user) that owns this profile — the isolation anchor for all per-profile data.
+    /// Transitionally nullable: legacy rows are backfilled by the auth seeder, and a later migration
+    /// will tighten this to NOT NULL once no orphans remain.
+    /// </summary>
+    public Guid? WorkspaceId { get; private set; }
     public string FullName { get; private set; } = string.Empty;
     /// <summary>Short label for the profile selector (e.g. "Java Backend"). Falls back to FullName.</summary>
     public string DisplayName { get; private set; } = string.Empty;
@@ -115,6 +121,13 @@ public sealed class CandidateProfile
         PreferredWorkModes = preferredWorkModes?.ToList() ?? new();
         if (minimumScoreToShow is { } min) MinimumScoreToShow = min;
         Experiences = experiences?.ToList() ?? new();
+        UpdatedAtUtc = DateTime.UtcNow;
+    }
+
+    /// <summary>Attach this profile to its owning workspace (set at creation and during the auth backfill).</summary>
+    public void AssignWorkspace(Guid workspaceId)
+    {
+        WorkspaceId = workspaceId;
         UpdatedAtUtc = DateTime.UtcNow;
     }
 

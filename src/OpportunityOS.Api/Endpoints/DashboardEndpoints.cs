@@ -89,7 +89,7 @@ public static class DashboardEndpoints
             return Results.Ok(new DashboardSummaryResponse(
                 jobs, jobsToday, matches75, matches75Today, messages, messagesToday,
                 emails, emailsToday, pending, nextInDays));
-        }).WithTags("Dashboard");
+        }).WithTags("Dashboard").RequireAuthorization();
 
         // Best opportunities: latest match per job, enriched with job + company.
         // Relevance + FRESHNESS first: stale postings (likely closed/404) are dropped, and
@@ -252,7 +252,7 @@ public static class DashboardEndpoints
                     job.RequiresManualValidation, job.RealCompanyName, job.SourceName, job.HasSourceDate);
             });
             return Results.Ok(result);
-        }).WithTags("Matches");
+        }).WithTags("Matches").RequireAuthorization();
 
         // Applications board: opportunities the user already acted on ("já me cadastrei"/apliquei
         // or contatei recrutador). These leave the main board (above) and live here so the user
@@ -301,7 +301,7 @@ public static class DashboardEndpoints
                 })
                 .ToList();
             return Results.Ok(result);
-        }).WithTags("Matches");
+        }).WithTags("Matches").RequireAuthorization();
 
         // Undo: move an application back to the main board by removing its Applied/ContactedRecruiter feedback.
         app.MapDelete("/api/applications/{jobId:guid}", async (
@@ -318,7 +318,7 @@ public static class DashboardEndpoints
             db.UserFeedbacks.RemoveRange(toRemove);
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
-        }).WithTags("Matches");
+        }).WithTags("Matches").RequireAuthorization();
 
         // Recent execution runs (audit feed).
         app.MapGet("/api/runs", async (int? take, OpportunityOsDbContext db, CancellationToken ct) =>
@@ -331,17 +331,21 @@ public static class DashboardEndpoints
             return Results.Ok(runs.Select(r => new ExecutionRunResponse(
                 r.Id, r.RunType, r.Status.ToString(), r.StartedAtUtc,
                 r.ItemsProcessed, r.ItemsSucceeded, r.ItemsFailed)));
-        }).WithTags("Runs");
+        }).WithTags("Runs").RequireAuthorization("System");
 
-        // Generated messages (drafts).
-        app.MapGet("/api/messages", async (OpportunityOsDbContext db, CancellationToken ct) =>
+        // Generated messages (drafts) — scoped to THIS workspace's profiles.
+        app.MapGet("/api/messages", async (
+            Application.Auth.ICurrentUserContext user, OpportunityOsDbContext db, CancellationToken ct) =>
         {
+            var ws = await user.GetWorkspaceIdAsync(ct);
+            var profileIds = await db.CandidateProfiles.Where(p => p.WorkspaceId == ws).Select(p => p.Id).ToListAsync(ct);
             var msgs = await db.GeneratedMessages
+                .Where(m => profileIds.Contains(m.CandidateProfileId))
                 .OrderByDescending(m => m.CreatedAtUtc)
                 .Take(200)
                 .ToListAsync(ct);
             return Results.Ok(msgs.Select(m => new GeneratedMessageSummary(
                 m.Id, m.JobPostingId, m.EmailSubject, m.Status.ToString(), m.CreatedAtUtc)));
-        }).WithTags("Messages");
+        }).WithTags("Messages").RequireAuthorization();
     }
 }

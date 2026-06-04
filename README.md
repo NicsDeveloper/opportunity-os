@@ -108,6 +108,54 @@ No primeiro start (banco vazio) o sistema cria:
 Desabilite com `"SeedOnStartup": false` em `appsettings.json` ou via env var
 `SeedOnStartup=false`.
 
+## Auth Workspace MVP (login + isolamento por usuário)
+
+O Opportunity OS agora é um **produto logado**. Cada usuário tem um **Workspace** privado que
+agrupa seus dados pessoais (perfis, feedback, rascunhos, aplicações). Dados globais (empresas,
+vagas, descoberta) continuam compartilhados.
+
+**Como funciona**
+- Autenticação: **ASP.NET Core Identity + cookie** (`oos.auth`, HttpOnly; `Secure` só em produção).
+- Ao registrar, cria-se o `AppUser` **e** seu `Workspace` (1 por usuário no MVP).
+- Cada `CandidateProfile` pertence a um `Workspace` (`candidate_profiles.workspace_id`).
+- **Regra de isolamento** (`§19`): toda resolução de perfil passa por
+  `ICurrentCandidateProfileProvider`, agora *workspace-scoped*. Um `candidateProfileId` de outro
+  workspace resulta em **403** (`ForbiddenProfileAccessException`), nunca em vazamento de dados.
+
+**Proteção de endpoints**
+- *Pessoais* (`RequireAuthorization`): `candidate-profile(s)`, `matches`, `applications`,
+  `feedback`, `digest`, `jobs/{id}/ai/*`, `insights/career`, `messages`, `opportunities`,
+  `workspace`, `dashboard/summary`.
+- *Sistema / custo* (`RequireAuthorization("System")` = autenticado no MVP): `jobs/discover`,
+  `jobs/search`, `jobs/rescore`, `discovery/*`, `companies` (mutações), `detect-ats-bulk`,
+  `bacen/*`, `consulting-radar/*`, `debug/*`. Em dev pode-se relaxar com
+  `Dev:OpenSystemEndpoints=true`.
+- *Leitura global anônima*: `GET /api/jobs`, `GET /api/companies`.
+
+**Endpoints de auth/workspace**
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| POST | `/api/auth/register` | Cria usuário + workspace e já loga (cookie) |
+| POST | `/api/auth/login` | Login por e-mail/senha (cookie) |
+| POST | `/api/auth/logout` | Encerra a sessão |
+| GET  | `/api/auth/me` | Usuário atual (`401` se anônimo) |
+| GET  | `/api/workspace/me` | Workspace + `defaultCandidateProfileId` |
+
+**Usuário dev (somente Development ou `Dev:SeedDevUser=true`)**
+No startup, em ambiente de desenvolvimento, um usuário local `dev@local` (senha `Dev:SeedPassword`,
+padrão `dev12345`) é criado, e **todos os perfis pré-auth existentes são vinculados ao workspace
+dele** — assim os dados de hoje continuam visíveis após o login. **Nunca** roda em produção sem a
+flag explícita.
+
+> Estado transitório: `candidate_profiles.workspace_id` é **nullable** nesta migration
+> (`AddAuthWorkspace`) para permitir o backfill pelo seeder. Quando não houver mais NULLs, uma
+> migration futura deve torná-la `NOT NULL`.
+
+**Frontend**: porta de entrada com login/cadastro → onboarding curto (4 passos) que cria o primeiro
+perfil → feed do perfil. O `oos.selectedProfileId` (localStorage) só é usado se pertencer ao
+usuário; senão cai no perfil padrão. Logout limpa a seleção e volta ao login.
+
 ## Endpoints (Fase 1)
 
 | Método | Rota | Descrição |

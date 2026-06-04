@@ -1,5 +1,17 @@
 namespace OpportunityOS.Contracts;
 
+// ---- Auth & Workspace ----
+
+public sealed record RegisterRequest(string Email, string Password, string? DisplayName);
+
+public sealed record LoginRequest(string Email, string Password);
+
+public sealed record AuthUserResponse(Guid Id, string Email, string DisplayName);
+
+public sealed record AuthMeResponse(Guid Id, string Email, string DisplayName, Guid? WorkspaceId);
+
+public sealed record WorkspaceMeResponse(Guid WorkspaceId, string Name, AuthUserResponse User, Guid? DefaultCandidateProfileId);
+
 // ---- Candidate Profile ----
 
 public sealed record CandidateExperienceDto(

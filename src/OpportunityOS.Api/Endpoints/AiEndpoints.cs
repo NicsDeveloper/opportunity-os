@@ -17,7 +17,7 @@ public static class AiEndpoints
 
     public static void MapAiEndpoints(this IEndpointRouteBuilder app)
     {
-        var jobs = app.MapGroup("/api/jobs/{jobId:guid}/ai").WithTags("AI Copilot");
+        var jobs = app.MapGroup("/api/jobs/{jobId:guid}/ai").WithTags("AI Copilot").RequireAuthorization();
 
         // Understand the job (LLM) + score fit for the requested (or default) profile.
         jobs.MapPost("/analyze", async (
@@ -111,7 +111,7 @@ public static class AiEndpoints
 
             var report = await insights.GenerateInsightsAsync(profile, analyzedJobs, ct);
             return Results.Ok(report.ToResponse());
-        }).WithTags("AI Copilot");
+        }).WithTags("AI Copilot").RequireAuthorization();
     }
 
     /// <summary>Latest persisted match for the (job, profile), or a freshly computed+persisted heuristic one.</summary>

@@ -45,6 +45,6 @@ public static class DebugEndpoints
             }).ToList();
 
             return Results.Ok(new { jobId, jobTitle = job.Title, scores });
-        }).WithTags("Debug");
+        }).WithTags("Debug").RequireAuthorization("System");
     }
 }

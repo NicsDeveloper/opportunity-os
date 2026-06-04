@@ -6,7 +6,43 @@
 
 ---
 
-## 0. Atualização — Multi-perfil de candidato (pré-auth)
+## 0. Atualização — Auth Workspace MVP (login + isolamento)
+
+O sistema passou de multi-perfil **pré-auth** para um **produto logado**. Cada usuário tem um
+`Workspace` privado; seus dados pessoais ficam isolados de outros usuários.
+
+- **Auth**: ASP.NET Core Identity + cookie (`AddIdentity<AppUser, IdentityRole<Guid>>`,
+  `ConfigureApplicationCookie`; 401/403 em vez de redirect). `OpportunityOsDbContext` agora é
+  `IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>`. `AppUser` vive em
+  `Infrastructure/Auth`; `Workspace` é entidade de Domínio (guarda só `UserId: Guid`, sem
+  navegação, p/ não acoplar Domínio ao Identity).
+- **Workspace ownership**: `CandidateProfile.WorkspaceId` (nullable transitório — migration
+  `AddAuthWorkspace`; backfill pelo seeder; tornar `NOT NULL` numa migration futura).
+- **Choke point de isolamento**: `EfCurrentCandidateProfileProvider` agora injeta
+  `ICurrentUserContext` (`Application/Auth`, impl. `HttpCurrentUserContext` na API) e filtra por
+  `WorkspaceId`. Um `candidateProfileId` de outro workspace lança
+  `ForbiddenProfileAccessException` → **403** (middleware em `Program.cs`). Como todos os endpoints
+  pessoais já resolviam o perfil por esse provider, o isolamento propaga sem mudar assinaturas.
+  Endpoints que liam o DB direto (`CandidateProfileEndpoints`, `applications`, `opportunities`,
+  `messages`, `feedback` GET) foram escopados explicitamente ao workspace.
+- **Proteção**: grupos pessoais com `RequireAuthorization()`; grupos de **custo/mutação global**
+  (`jobs` discover/search/rescore, `companies` mutações, `discovery/*`, `bacen/*`,
+  `consulting-radar/*`, `debug/*`, `runs`) com `RequireAuthorization("System")`; leituras globais
+  (`GET /api/jobs|companies`) anônimas. Flag dev `Dev:OpenSystemEndpoints`.
+- **Endpoints novos**: `POST /api/auth/{register,login,logout}`, `GET /api/auth/me`,
+  `GET /api/workspace/me`.
+- **Seeder dev**: `AuthSeeder` cria `dev@local` (Development ou `Dev:SeedDevUser=true`), vincula os
+  perfis pré-auth ao workspace dele e garante 1 default; valida que não sobrou `workspace_id` NULL.
+- **Frontend**: gate de auth em `App.tsx` (`/api/auth/me`), telas Login/Cadastro, onboarding de 4
+  passos (cria o 1º perfil), logout e seletor de perfil validado contra o workspace. `api.ts` usa
+  `credentials:"include"`.
+- **Testes**: unit do provider workspace-scoped; integração com cliente autenticado por cookie
+  (`CreateAuthenticatedClientAsync`) + 401/403/isolamento/troca-de-perfil/logout.
+- **Fora de escopo** (adiado): ProductEvent (§26), CompanyWatchlist, billing/freemium, orgs/times.
+
+---
+
+## 0.1 Atualização — Multi-perfil de candidato (pré-auth)
 
 O sistema deixou de ser fixo no perfil do Nícolas: agora pontua oportunidades para
 **múltiplos `CandidateProfile`** (Backend .NET, Java, Frontend React, Data Engineer seedados).
