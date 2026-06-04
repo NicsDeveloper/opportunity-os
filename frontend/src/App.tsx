@@ -380,7 +380,7 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName, profileLabe
   const shown = all.slice(current * pageSize, current * pageSize + pageSize);
   // Reset to page 1 only when the user changes filters/search — never on a background
   // refresh (which would yank the user off the page they're reading).
-  useEffect(() => { setPage(0); }, [region, contract, query, sort]);
+  useEffect(() => { setPage(0); }, [region, contract, query, sort, profileId]);
 
   const runSearch = async () => {
     if (busy) return;
