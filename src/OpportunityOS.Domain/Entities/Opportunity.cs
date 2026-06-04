@@ -14,6 +14,8 @@ public sealed class Opportunity
 
     public Guid Id { get; private set; }
     public Guid JobPostingId { get; private set; }
+    /// <summary>The profile this opportunity belongs to. The same job is a distinct opportunity per profile.</summary>
+    public Guid CandidateProfileId { get; private set; }
     public Guid? RecruiterLeadId { get; private set; }
     public OpportunityStatus Status { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
@@ -23,13 +25,14 @@ public sealed class Opportunity
 
     private Opportunity() { }
 
-    public static Opportunity Create(Guid jobPostingId, OpportunityStatus initial = OpportunityStatus.Analyzed)
+    public static Opportunity Create(Guid jobPostingId, Guid candidateProfileId, OpportunityStatus initial = OpportunityStatus.Analyzed)
     {
         EnsureAutomatic(initial);
         return new Opportunity
         {
             Id = Guid.NewGuid(),
             JobPostingId = jobPostingId,
+            CandidateProfileId = candidateProfileId,
             Status = initial,
             CreatedAtUtc = DateTime.UtcNow
         };

@@ -10,8 +10,9 @@ public sealed class EfOpportunityStore : IOpportunityStore
 
     public EfOpportunityStore(OpportunityOsDbContext db) => _db = db;
 
-    public Task<Opportunity?> FindByJobAsync(Guid jobPostingId, CancellationToken ct) =>
-        _db.Opportunities.FirstOrDefaultAsync(o => o.JobPostingId == jobPostingId, ct);
+    public Task<Opportunity?> FindByJobAsync(Guid jobPostingId, Guid candidateProfileId, CancellationToken ct) =>
+        _db.Opportunities.FirstOrDefaultAsync(
+            o => o.JobPostingId == jobPostingId && o.CandidateProfileId == candidateProfileId, ct);
 
     public async Task AddAsync(Opportunity opportunity, CancellationToken ct) =>
         await _db.Opportunities.AddAsync(opportunity, ct);

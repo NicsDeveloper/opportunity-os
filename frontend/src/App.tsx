@@ -37,9 +37,9 @@ export function App() {
         profiles={list} current={current} onSelectProfile={selectProfile} />
       <main className="main">
         <div className="main-inner">
-          {section === "oportunidades" && <OpportunitiesScreen reload={reload} notify={notify} onChanged={refresh} firstName={firstNameOf(current?.fullName)} profileLabel={current?.displayName} />}
+          {section === "oportunidades" && <OpportunitiesScreen reload={reload} notify={notify} onChanged={refresh} firstName={firstNameOf(current?.fullName)} profileLabel={current?.displayName} profileId={current?.id} />}
           {section === "empresas" && <CompaniesScreen reload={reload} notify={notify} onChanged={refresh} />}
-          {section === "aplicacoes" && <ApplicationsScreen reload={reload} notify={notify} onChanged={refresh} />}
+          {section === "aplicacoes" && <ApplicationsScreen reload={reload} notify={notify} onChanged={refresh} profileId={current?.id} />}
           {section === "descobertas" && <DiscoverScreen reload={reload} notify={notify} onChanged={refresh} />}
           {section === "relatorios" && <ReportsScreen reload={reload} />}
           {section === "perfis" && <ProfilesScreen reload={reload} notify={notify} onChanged={refresh} selectedId={current?.id} onSelectProfile={selectProfile} />}
@@ -68,7 +68,7 @@ function Sidebar({ section, setSection, reload, profiles, current, onSelectProfi
   profiles: Profile[]; current?: Profile; onSelectProfile: (id: string) => void;
 }) {
   const runs = useAsync(() => api.runs(3), [reload]);
-  const summary = useAsync(api.summary, [reload]);
+  const summary = useAsync(() => api.summary(current?.id), [reload, current?.id]);
   const last = runs.data?.[0];
 
   return (
@@ -162,8 +162,8 @@ function SearchProgress({ prog }: { prog: { step: number; done?: { n: number; u:
   );
 }
 
-function OpportunitiesScreen({ reload, notify, onChanged, firstName, profileLabel }: {
-  reload: number; notify: (m: string) => void; onChanged: () => void; firstName: string; profileLabel?: string;
+function OpportunitiesScreen({ reload, notify, onChanged, firstName, profileLabel, profileId }: {
+  reload: number; notify: (m: string) => void; onChanged: () => void; firstName: string; profileLabel?: string; profileId?: string;
 }) {
   const [region, setRegion] = useState("all");
   const [contract, setContract] = useState("all");
@@ -190,7 +190,7 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName, profileLabe
 
   // One direct feed: the best matches for the profile (learned prefs already applied server-side),
   // ordered by adherence. No tabs — weak sources just sort to the bottom.
-  const opps = useAsync(() => api.qualified(500, region, contract), [reload, region, contract]);
+  const opps = useAsync(() => api.qualified(500, region, contract, profileId), [reload, region, contract, profileId]);
   const last = useAsync(() => api.runs(1), [reload]);
 
   const all = (opps.data ?? [])
@@ -283,7 +283,7 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName, profileLabe
 
       <div className="opplist" ref={listRef}>
         {opps.error && <p className="err">{opps.error}</p>}
-        {shown.map((o) => <OppCard key={o.matchId} o={o} notify={notify} onChanged={onChanged} />)}
+        {shown.map((o) => <OppCard key={o.matchId} o={o} notify={notify} onChanged={onChanged} profileId={profileId} />)}
         {opps.data && all.length === 0 && (
           <div className="empty">
             <p>Nenhuma vaga com esses filtros.</p>
@@ -311,8 +311,8 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName, profileLabe
 }
 
 /* one opportunity — clean 4-column card */
-function OppCard({ o, notify, onChanged }: {
-  o: BestOpportunity; notify: (m: string) => void; onChanged: () => void;
+function OppCard({ o, notify, onChanged, profileId }: {
+  o: BestOpportunity; notify: (m: string) => void; onChanged: () => void; profileId?: string;
 }) {
   const [open, setOpen] = useState(false);        // details (chevron)
   const [draft, setDraft] = useState(false);      // draft panel
@@ -337,7 +337,7 @@ function OppCard({ o, notify, onChanged }: {
   const act = (type: string, kind: "applied" | "hidden", label: string, why?: string) => {
     setMenu(false); setAsking(false);
     setLeaving(true);
-    api.feedback(type, { jobPostingId: o.jobPostingId, reason: why?.trim() || undefined })
+    api.feedback(type, { jobPostingId: o.jobPostingId, reason: why?.trim() || undefined, candidateProfileId: profileId })
       .then(() => {
         if (kind === "applied") notify("Movida pra Aplicações ✅");
         else if (why?.trim()) notify("Anotado — o radar vai aprender 👍");
@@ -349,20 +349,20 @@ function OppCard({ o, notify, onChanged }: {
   const undo = async () => {
     const wasApplied = done?.kind === "applied";
     setDone(null); setLeaving(false);
-    try { await api.unapply(o.jobPostingId); } catch { /* ignore */ }
+    try { await api.unapply(o.jobPostingId, profileId); } catch { /* ignore */ }
     if (wasApplied) onChanged();
   };
 
   const openDraft = async () => {
     if (msg) { setDraft((v) => !v); return; }
     setBusy(true); notify("Gerando rascunho…");
-    try { const m = await api.generateOutreach(o.jobPostingId); setMsg(m); setDraft(true); notify("Rascunho pronto — revise e copie."); onChanged(); }
+    try { const m = await api.generateOutreach(o.jobPostingId, profileId); setMsg(m); setDraft(true); notify("Rascunho pronto — revise e copie."); onChanged(); }
     catch { notify("Não foi possível gerar o rascunho (score abaixo do mínimo?)."); }
     finally { setBusy(false); }
   };
   const analyze = async () => {
     setAnalyzing(true); notify("Analisando aderência…");
-    try { const r = await api.analyze(o.jobPostingId); setWhy(r.match.rationale); setScore(r.match.overallScore); notify("Análise concluída."); onChanged(); }
+    try { const r = await api.analyze(o.jobPostingId, profileId); setWhy(r.match.rationale); setScore(r.match.overallScore); notify("Análise concluída."); onChanged(); }
     catch { notify("Não foi possível analisar agora."); }
     finally { setAnalyzing(false); }
   };
@@ -540,11 +540,11 @@ function CompaniesScreen({ reload, notify, onChanged }: { reload: number; notify
 
 /* ============================ Aplicações ============================ */
 
-function ApplicationsScreen({ reload, notify, onChanged }: { reload: number; notify: (m: string) => void; onChanged: () => void }) {
-  const apps = useAsync(api.applications, [reload]);
+function ApplicationsScreen({ reload, notify, onChanged, profileId }: { reload: number; notify: (m: string) => void; onChanged: () => void; profileId?: string }) {
+  const apps = useAsync(() => api.applications(profileId), [reload, profileId]);
   const all = apps.data ?? [];
   const undo = async (a: Application) => {
-    try { await api.unapply(a.jobPostingId); notify(`Voltou pro mural: ${a.jobTitle}`); onChanged(); }
+    try { await api.unapply(a.jobPostingId, profileId); notify(`Voltou pro mural: ${a.jobTitle}`); onChanged(); }
     catch { notify("Não foi possível desfazer."); }
   };
   return (

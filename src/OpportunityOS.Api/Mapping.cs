@@ -67,7 +67,7 @@ public static class Mapping
 
     public static OpportunityResponse ToResponse(this Opportunity o) =>
         new(o.Id, o.JobPostingId, o.RecruiterLeadId, o.Status.ToString(), o.CreatedAtUtc,
-            o.LastActionAtUtc, o.NextFollowUpAtUtc, o.Notes);
+            o.LastActionAtUtc, o.NextFollowUpAtUtc, o.Notes, o.CandidateProfileId);
 
     public static RecruiterResponse ToResponse(this RecruiterLead r) =>
         new(r.Id, r.CompanyId, r.FullName, r.RoleTitle, r.LinkedInUrl, r.Email,

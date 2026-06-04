@@ -199,7 +199,8 @@ public sealed record OpportunityResponse(
     DateTime CreatedAtUtc,
     DateTime? LastActionAtUtc,
     DateTime? NextFollowUpAtUtc,
-    string? Notes);
+    string? Notes,
+    Guid CandidateProfileId);
 
 public sealed record OpportunityStatusRequest(string Status);
 public sealed record OpportunityNotesRequest(string? Notes);
@@ -406,7 +407,8 @@ public sealed record FeedbackRequest(
     string Type,
     Guid? JobPostingId,
     Guid? RawJobCandidateId,
-    string? Reason);
+    string? Reason,
+    Guid? CandidateProfileId = null);
 
 public sealed record DiscoveryMetricsResponse(
     int RawCandidatesToday,
