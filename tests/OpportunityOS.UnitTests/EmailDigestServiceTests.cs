@@ -17,7 +17,7 @@ public sealed class EmailDigestServiceTests
         var store = new FakeDigestStore(); // empty
         var sender = new FakeEmailSender();
 
-        var result = await Build(store, sender).SendDailyDigestAsync(60, CancellationToken.None);
+        var result = await Build(store, sender).SendDailyDigestAsync(Guid.NewGuid(), 60, CancellationToken.None);
 
         Assert.False(result.Sent);
         Assert.Equal(0, sender.SentCount);
@@ -31,7 +31,7 @@ public sealed class EmailDigestServiceTests
         var store = new FakeDigestStore(new[] { FakeEmailSender.Item(90, "Nubank"), FakeEmailSender.Item(72) });
         var sender = new FakeEmailSender(isConfigured: true);
 
-        var result = await Build(store, sender).SendDailyDigestAsync(60, CancellationToken.None);
+        var result = await Build(store, sender).SendDailyDigestAsync(Guid.NewGuid(), 60, CancellationToken.None);
 
         Assert.True(result.Sent);
         Assert.Equal(2, result.ItemCount);
@@ -46,7 +46,7 @@ public sealed class EmailDigestServiceTests
         var store = new FakeDigestStore(new[] { FakeEmailSender.Item(90) });
         var sender = new FakeEmailSender(isConfigured: false);
 
-        var result = await Build(store, sender).SendDailyDigestAsync(60, CancellationToken.None);
+        var result = await Build(store, sender).SendDailyDigestAsync(Guid.NewGuid(), 60, CancellationToken.None);
 
         Assert.False(result.Sent);
         Assert.Equal(0, sender.SentCount);
@@ -59,7 +59,7 @@ public sealed class EmailDigestServiceTests
         var store = new FakeDigestStore(new[] { FakeEmailSender.Item(90) });
         var sender = new FakeEmailSender(isConfigured: true, throwOnSend: true);
 
-        var result = await Build(store, sender).SendDailyDigestAsync(60, CancellationToken.None);
+        var result = await Build(store, sender).SendDailyDigestAsync(Guid.NewGuid(), 60, CancellationToken.None);
 
         Assert.False(result.Sent);
         Assert.Equal(ExecutionRunStatus.Failed, store.Runs.Single().Status);
@@ -75,7 +75,7 @@ public sealed class EmailDigestServiceTests
         });
         var sender = new FakeEmailSender();
 
-        var preview = await Build(store, sender).BuildPreviewAsync(60, CancellationToken.None);
+        var preview = await Build(store, sender).BuildPreviewAsync(Guid.NewGuid(), 60, CancellationToken.None);
 
         Assert.Equal(2, preview.Total);
         Assert.Equal(1, preview.StrategicCount);
@@ -96,7 +96,7 @@ public sealed class EmailDigestServiceTests
     public async Task Preview_GreetsTheRecipientByFirstName_InSecondPerson()
     {
         var store = new FakeDigestStore(new[] { FakeEmailSender.Item(90) }) { CandidateName = "Nícolas Serrano" };
-        var preview = await Build(store, new FakeEmailSender()).BuildPreviewAsync(60, CancellationToken.None);
+        var preview = await Build(store, new FakeEmailSender()).BuildPreviewAsync(Guid.NewGuid(), 60, CancellationToken.None);
 
         // Markdown keeps accents raw; HTML encodes them but still greets in 2nd person.
         Assert.Contains("Olá, Nícolas!", preview.Markdown);
