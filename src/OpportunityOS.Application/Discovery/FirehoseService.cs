@@ -12,6 +12,8 @@ public interface IFirehoseService
     Task<SearchCampaignResponse?> GetCampaignAsync(Guid id, CancellationToken ct);
     Task<FirehoseRunResponse> QuickSearchAsync(QuickSearchRequest req, CancellationToken ct);
     Task<FirehoseRunResponse> AggressiveSearchAsync(AggressiveSearchRequest req, CancellationToken ct);
+    /// <summary>Targeted sweep: for each company name, run company-specific queries (P2 Bacen / P3 consulting).</summary>
+    Task<FirehoseRunResponse> SweepCompaniesAsync(string runType, IReadOnlyList<string> companyNames, int maxQueriesPerCompany, bool saveRawCandidates, CancellationToken ct);
     Task<IReadOnlyList<RawJobCandidateResponse>> GetRawCandidatesAsync(int take, CancellationToken ct);
 }
 
@@ -136,6 +138,34 @@ public sealed class FirehoseService : IFirehoseService
         stats.BudgetExhausted && run.Status == Domain.Enums.ExecutionRunStatus.Succeeded
             ? "CompletedWithBudgetLimit"
             : run.Status.ToString();
+
+    public async Task<FirehoseRunResponse> SweepCompaniesAsync(
+        string runType, IReadOnlyList<string> companyNames, int maxQueriesPerCompany, bool save, CancellationToken ct)
+    {
+        var run = ExecutionRun.Start(runType);
+        await _store.AddExecutionRunAsync(run, ct);
+        var stats = new RunStats();
+        var perCompany = Math.Clamp(maxQueriesPerCompany, 1, 14);
+
+        foreach (var name in companyNames)
+        {
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            foreach (var query in _expansion.ExpandForCompany(name, perCompany))
+            {
+                await RunQueryAsync(Guid.Empty, query, _budgetOptions.SerperMaxResultsPerQuery, save, run, stats, ct);
+                if (stats.BudgetExhausted) break;
+            }
+            await _store.SaveChangesAsync(ct);
+            if (stats.BudgetExhausted) { _logger.LogInformation("{RunType} stopped: budget exhausted.", runType); break; }
+        }
+
+        run.Complete();
+        await _store.SaveChangesAsync(ct);
+        _logger.LogInformation("{RunType} done: companies={C} queries={Q} new={N} dup={D} errors={E}",
+            runType, companyNames.Count, stats.Queries, stats.New, stats.Duplicates, run.ItemsFailed);
+        return new FirehoseRunResponse(run.Id, Status(run, stats), null,
+            stats.Queries, stats.Results, stats.New, stats.Duplicates, run.ItemsFailed);
+    }
 
     public async Task<IReadOnlyList<RawJobCandidateResponse>> GetRawCandidatesAsync(int take, CancellationToken ct) =>
         (await _store.GetRawCandidatesAsync(Math.Clamp(take, 1, 1000), ct)).Select(ToResponse).ToList();

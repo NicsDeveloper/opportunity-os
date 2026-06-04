@@ -34,8 +34,15 @@ public static class DatabaseSeeder
                 preferredRoles: new[] { "Backend Engineer .NET (Pleno/Sênior)", "Desenvolvedor .NET Pleno", "Senior Backend Engineer", "Software Engineer C#", "Payments Engineer", "Fintech Backend Developer" },
                 preferredContractTypes: new[] { "CLT", "PJ", "Contractor" },
                 preferredLocations: new[] { "Remote", "Brazil", "LATAM", "Global" },
-                experiences: BuildExperiences()));
+                experiences: BuildExperiences(),
+                displayName: "Nícolas — Backend .NET",
+                preferredWorkModes: new[] { "Remote" },
+                isDefault: true));
         }
+
+        // Validation profiles (local only): prove the engine recommends well for other stacks.
+        // Added independently when missing (by DisplayName); never overwrites Nícolas.
+        await EnsureValidationProfilesAsync(db, ct);
 
         // Seed a couple of REAL companies with public Greenhouse boards so the radar
         // is useful on first run (no fictitious data / fake links). Jobs come from
@@ -51,7 +58,95 @@ public static class DatabaseSeeder
                     new[] { "fintech", "payments" }));
         }
 
+        // P14 — seed discovery campaigns (idempotent: only when none exist).
+        if (!await db.SearchCampaigns.AnyAsync(ct))
+        {
+            db.SearchCampaigns.AddRange(
+                new SearchCampaign(".NET Brasil Volume", "Volume .NET/C# no Brasil (web aberta + Gupy + ATS)",
+                    SearchCampaignPriority.Aggressive,
+                    new[] { "desenvolvedor .net", "programador c#", "engenheiro de software .net", "backend c#", ".net developer" },
+                    new[] { "web", "gupy", "ats" }),
+                new SearchCampaign("Consultorias Brasil", "Consultorias/outsourcing que contratam .NET",
+                    SearchCampaignPriority.High,
+                    new[] { "GFT", "Stefanini", "BRQ", "CI&T", "Compass", "FCamara", "TIVIT", "NTT Data", "Accenture", "Capgemini", "IBM", "K2 Partnering", "Act Digital" }),
+                new SearchCampaign("Bacen Financial Institutions", "Instituições financeiras (Bacen) — varredura .NET/Pix",
+                    SearchCampaignPriority.High,
+                    new[] { ".net", "c#", "backend", "Pix", "Open Finance", "payments", "desenvolvedor", "software engineer" }),
+                new SearchCampaign("Fintech Payments", "Fintech/pagamentos .NET",
+                    SearchCampaignPriority.High,
+                    new[] { ".NET payments", "C# fintech", "backend pix", "open finance developer", "banco digital .net", "pagamentos c#" }),
+                new SearchCampaign("International Remote", "Vagas remotas internacionais .NET/C#",
+                    SearchCampaignPriority.Medium,
+                    new[] { "remote .NET developer", "senior C# backend engineer", ".NET contractor LATAM", "C# software engineer remote", "payments engineer .NET" }),
+                new SearchCampaign("LinkedIn Indexed Manual", "LinkedIn indexado — REVISÃO MANUAL (sem scrape/login/automação)",
+                    SearchCampaignPriority.Low,
+                    new[] { "site:linkedin.com/jobs/view \".NET\" \"remoto\"", "site:linkedin.com/jobs/view \"C#\" \"Brazil\"", "site:linkedin.com/jobs/view \"backend .NET\" \"remote\"" }));
+        }
+
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Seeds Java/React/Data validation profiles (idempotent by DisplayName). These exist only to
+    /// prove the heuristic engine generalizes beyond .NET; they are never marked default.
+    /// </summary>
+    private static async Task EnsureValidationProfilesAsync(OpportunityOsDbContext db, CancellationToken ct)
+    {
+        var existing = await db.CandidateProfiles.Select(p => p.DisplayName).ToListAsync(ct);
+        var present = existing.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var candidates = new[]
+        {
+            new CandidateProfile(
+                fullName: "Java Backend Dev",
+                headline: "Backend Engineer | Java • Spring Boot | Microservices • Kafka • AWS",
+                summary: "Backend engineer focado em Java/Spring Boot, microsserviços, mensageria e cloud.",
+                location: "Brasil (Remoto)",
+                seniority: "Pleno/Sênior",
+                preferredLanguage: "pt-BR",
+                coreSkills: new[] { "Java", "Spring Boot", "Spring", "Kafka", "AWS", "PostgreSQL", "Microservices" },
+                secondarySkills: new[] { "Hibernate", "Docker", "Kubernetes", "JUnit", "Redis" },
+                domains: new[] { "Fintech", "Banking", "Enterprise" },
+                preferredRoles: new[] { "Java Backend Engineer", "Senior Java Developer", "Backend Engineer Java/Spring" },
+                preferredContractTypes: new[] { "CLT", "PJ" },
+                preferredLocations: new[] { "Remote", "Brazil", "LATAM" },
+                displayName: "Java Backend",
+                preferredWorkModes: new[] { "Remote" }),
+            new CandidateProfile(
+                fullName: "Frontend React Dev",
+                headline: "Frontend Engineer | React • TypeScript • Next.js • Design Systems",
+                summary: "Frontend engineer focado em React/TypeScript, Next.js e design systems para produtos SaaS.",
+                location: "Brasil (Remoto)",
+                seniority: "Pleno",
+                preferredLanguage: "pt-BR",
+                coreSkills: new[] { "React", "TypeScript", "Next.js", "CSS", "Design System", "Testing Library" },
+                secondarySkills: new[] { "JavaScript", "Redux", "Tailwind", "Jest", "Storybook" },
+                domains: new[] { "SaaS", "Product" },
+                preferredRoles: new[] { "Frontend Engineer", "React Developer", "Frontend React" },
+                preferredContractTypes: new[] { "CLT", "PJ" },
+                preferredLocations: new[] { "Remote", "Brazil" },
+                displayName: "Frontend React",
+                preferredWorkModes: new[] { "Remote" }),
+            new CandidateProfile(
+                fullName: "Data Engineer",
+                headline: "Data Engineer | Python • SQL • Airflow • Spark • AWS Glue • Databricks",
+                summary: "Data engineer focado em pipelines de dados, ETL e analytics com Python/Spark e cloud.",
+                location: "Brasil (Remoto)",
+                seniority: "Pleno/Sênior",
+                preferredLanguage: "pt-BR",
+                coreSkills: new[] { "Python", "SQL", "Airflow", "Spark", "AWS Glue", "Athena", "Databricks" },
+                secondarySkills: new[] { "dbt", "Redshift", "Snowflake", "Kafka", "Pandas" },
+                domains: new[] { "Data", "Analytics", "Finance" },
+                preferredRoles: new[] { "Data Engineer", "Senior Data Engineer", "Analytics Engineer" },
+                preferredContractTypes: new[] { "CLT", "PJ" },
+                preferredLocations: new[] { "Remote", "Brazil", "LATAM" },
+                displayName: "Data Engineer",
+                preferredWorkModes: new[] { "Remote" }),
+        };
+
+        foreach (var profile in candidates)
+            if (!present.Contains(profile.DisplayName))
+                db.CandidateProfiles.Add(profile);
     }
 
     /// <summary>Real career history (from the candidate's CV) — feeds the AI fit analysis.</summary>

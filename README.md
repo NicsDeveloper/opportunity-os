@@ -1,8 +1,15 @@
 # Opportunity OS
 
-Sistema pessoal de inteligência de oportunidades profissionais: mapeia empresas-alvo,
-descobre vagas públicas, mede aderência ao perfil do candidato, gera abordagens
-revisáveis e envia um digest por e-mail para **revisão humana**.
+Sistema de inteligência de oportunidades profissionais que **descobre vagas globalmente** e
+**pontua cada oportunidade contra um `CandidateProfile` selecionado**. O perfil principal
+continua sendo o do Nícolas (backend **.NET/C#**), mas o motor agora suporta **múltiplos
+perfis técnicos** (Java Backend, Frontend React, Data Engineer). Mapeia empresas-alvo,
+mede aderência **por perfil**, gera abordagens revisáveis e envia um digest por e-mail para
+**revisão humana**.
+
+> **Fase atual: multi-perfil _pré-auth_.** Ainda **não** há login, multiusuário real nem
+> tenant — o perfil é escolhido por `candidateProfileId` (lembrado em `localStorage`). É uma
+> preparação técnica para validar se o motor generaliza antes de auth/multi-tenancy.
 
 > **Não** automatiza LinkedIn, **não** faz scraping logado, **não** aplica para vagas e
 > **não** envia mensagens sem revisão humana. É um copiloto de carreira, não um robô de spam.
@@ -106,7 +113,7 @@ Desabilite com `"SeedOnStartup": false` em `appsettings.json` ou via env var
 | Método | Rota | Descrição |
 |--------|------|-----------|
 | GET    | `/`  | Health check |
-| GET    | `/api/candidate-profile` | Perfil ativo (mais recente) |
+| GET    | `/api/candidate-profile` | Perfil **default/atual** (back-compat). Multi-perfil: ver `/api/candidate-profiles` na seção "Multi-perfil" |
 | GET    | `/api/candidate-profile/{id}` | Perfil por id |
 | POST   | `/api/candidate-profile` | Cria perfil |
 | PUT    | `/api/candidate-profile/{id}` | Atualiza perfil (mantém `UpdatedAtUtc`) |
@@ -146,7 +153,7 @@ Desabilite com `"SeedOnStartup": false` em `appsettings.json` ou via env var
 ### Exemplo: rodar análise manual
 
 ```bash
-# Pega uma vaga e roda o match contra o perfil ativo
+# Pega uma vaga e roda o match contra um perfil (default se candidateProfileId for omitido)
 curl -X POST http://localhost:5000/api/jobs/{jobId}/match
 ```
 
@@ -220,8 +227,9 @@ Além dos ATS providers, o sistema descobre vagas de forma **contínua** e **mai
   > um `cx` **escopado a sites**; para web-aberta de verdade, use o Serper.
 
 - **Auto-score na descoberta** — todo job recém-descoberto (qualquer provider) é pontuado
-  na hora contra o perfil ativo pelo **match engine heurístico** (sem LLM, barato), criando
-  um `OpportunityMatch`. É isso que faz a vaga **aparecer na tela** sem passo manual. Jobs
+  na hora contra o **perfil default** pelo **match engine heurístico** (sem LLM, barato), criando
+  um `OpportunityMatch`. É isso que faz a vaga **aparecer na tela** sem passo manual. Os demais
+  perfis recebem matches via `POST /api/jobs/rescore` (por perfil ou `allProfiles=true`). Jobs
   antigos sem match são pontuados quando reencontrados (backfill). Falha de score nunca
   interrompe a descoberta.
 
@@ -293,7 +301,89 @@ de agregador **nunca** vira empresa sem evidência; sem empresa clara → "empre
 **Dedup semântica (`IJobFingerprintService` + `JobPostingSourceOccurrence`)** — fingerprint
 estável (título+empresa+localização+senioridade+skills+hash da descrição). A mesma vaga em fontes
 diferentes é marcada `Duplicate` (continua visível como ocorrência, não some do volume); a melhor
-fonte fica como principal na promoção (futuro). `RawJobCandidate.NormalizedFingerprint` indexado.
+fonte fica como principal na promoção. `RawJobCandidate.NormalizedFingerprint` indexado.
+
+**Promoção (`IRawCandidatePromotionService`)** — a ponte Firehose → fluxo qualificado:
+`POST /api/discovery/raw-candidates/{id}/promote` e `POST /api/discovery/promote-batch`. Cria
+`JobPosting` (com fingerprint + qualidade de fonte) só quando há **empresa confirmada** (agregador
+sem empresa não vira Company); dedup por fingerprint vira `JobPostingSourceOccurrence` na vaga
+existente (melhor fonte como principal); pontua heurístico para já aparecer no feed. Sem LLM.
+
+**Ranking (`IDiscoveryRankService`)** — dois scores: `FitScore` (relevância) e `DiscoveryRank`
+(Fit·0.50 + SourceConfidence·0.20 + Freshness·0.15 + CompanyPriority·0.10 + Feedback·0.05).
+`GET /api/matches?sort=rank` ordena pelo DiscoveryRank (base do Qualified view).
+
+**Feedback + métricas** — `POST /api/feedback` (`UserFeedback`: relevante/irrelevante/empresa
+errada/duplicada/já apliquei/…) persistido para métricas. `GET /api/discovery/metrics` (volume
+hoje/semana, queries, promovidas, taxa de dedup, confiança/fit médios, acionáveis, por fonte) e
+`GET /api/discovery/provider-quality` (por provider: queries, brutos, promovidos, dup-rate, confiança).
+
+**IA depois da triagem (P10)** — o Firehose **nunca** usa LLM. A análise LLM automática só roda
+na descoberta qualificada e só quando: heurística ≥ 65 **e** `SourceConfidence` ≥ 40 **e** dentro
+do **budget diário de LLM** (`DiscoveryBudget:LlmDailyAutoAnalyses`, cost-center "LlmAuto" no
+`QueryBudgetManager`) **e** sob o teto por run. O resto fica sob demanda (`/ai/analyze`,
+"Analisar com IA" = user-requested), com os prompts sempre auditados em `PromptExecutionLog`.
+
+**3 telas (P8)** — Action Today (Fit≥75, acionáveis), Qualified (`sort=rank` por DiscoveryRank),
+Firehose (RawJobCandidate com `SourceBadge` "Empresa X via Fonte Y" + métricas + Promover + feedback).
+
+**Bacen Financial Sweep (P2)** — usa instituições financeiras promovidas (Source=Bacen) como
+empresas-alvo de varredura de vagas .NET/C#. `GET /api/discovery/bacen-financial-sweep/preview`
+(quantas por prioridade, queries estimadas, custo) e `POST /api/discovery/bacen-financial-sweep`
+(`minimumPriority` default High, exclui cooperativas por padrão). Sem LLM; Bacen é fonte de
+empresas, não de vagas. Reusa `SweepCompaniesAsync` (queries por empresa, budget-guarded).
+
+**Novos providers (P13)** — por decisão da própria spec ("só depois da base"), os platforms
+extras (Workday, Teamtailor, Recruitee, Workable, Breezy, Programathor, GeekHunter, Coodesh,
+Remotar, APInfo, Trampos) são alcançados **via Firehose** (filtros `site:` em `QueryExpansionService`)
+e classificados pelo `SourceClassifier` (ATS hosts conhecidos). Parsers dedicados por plataforma
+(`IJobSourceProvider`) ficam para depois, guiados pelo Provider Quality Dashboard (P12) — cada um
+exigindo SourceConfidence, dedup, rate-limit, fixture e métricas.
+
+**Consulting Radar (P3)** — descobre consultorias/software houses automaticamente
+(`ConsultingCompanyCandidate`): roda queries de consultoria, deriva candidatos do host, pontua por
+sinais explicáveis (`ConsultingSignals`: +consultoria/+outsourcing/+transformação/+carreiras/
++.NET/−SaaS/−sem-site…) e semeia uma lista conhecida (GFT, Stefanini, CI&T, Zup…). Promove a
+Company (Source=SearchDiscovery, tags consulting/outsourcing/software-house, prioridade por
+confiança) **só com confiança ≥ 70**. Endpoints `/api/consulting-radar/*`.
+
+### Descoberta automática (Worker)
+
+O Worker mantém o Firehose se enchendo sozinho (B1), tudo budget-guarded:
+- **`firehose-sweep`** (`Jobs:FirehoseCron`, default `0 */4 * * *`) — busca ampla periódica.
+- **`promote-candidates`** (`Jobs:PromotionCron`, default `30 */4 * * *`) — promove candidatos com
+  empresa confirmada para o feed qualificado (heurístico, sem LLM).
+- **`bacen-financial-sweep`** e **`consulting-radar`** — varreduras caras, **opt-in** via
+  `FeatureFlags:EnableBacenSweepJob` / `EnableConsultingRadarJob` (off por padrão), crons próprios.
+
+Quando o budget diário esgota, a varredura para com `CompletedWithBudgetLimit` — nunca estoura a cota.
+
+## Empresas observadas no LinkedIn (seed interno do radar)
+
+**Objetivo:** aumentar a cobertura do radar com empresas que o usuário **observou manualmente**
+no LinkedIn (consultorias, fintechs, marketplaces remotos, software houses). **Não é integração
+com LinkedIn, não é feature de usuário, não é lista de candidaturas** — é só um seed interno que
+alimenta a entidade `Company` existente para o fluxo atual alcançar (Company → Website Discovery →
+Career Page → ATS Detection → Job Discovery).
+
+- **`ObservedCompaniesSeed`** (Infrastructure) — lista classificada (financeira/consultoria/
+  marketplace/produto) com prioridade e tags. Idempotente: **não duplica** (dedup por nome
+  normalizado, ignorando sufixos Inc./Ltd/LTDA/S.A./Oficial/Brasil), **não sobrescreve**
+  WebsiteUrl/CareersUrl já preenchidos, só **mescla tags** e **eleva** prioridade (nunca rebaixa).
+  Marca `needs-website-discovery`/`needs-ats-detection` quando faltam. Tags globais:
+  `observed-linkedin`, `manual-radar-seed`. Registra `ExecutionRun` (`ObservedCompaniesSeed`).
+- **Como rodar:** `POST /api/companies/seed-observed` (comando dev interno; retorna o resumo).
+  Depois, o fluxo existente descobre site/ATS: `POST /api/companies/backfill-websites`,
+  `POST /api/companies/{id}/discover-website`, `POST /api/companies/{id}/detect-ats`,
+  `POST /api/companies/onboard`, e então o Job Discovery busca vagas nessas empresas.
+- **Limitações honestas:** o seed só prepara o radar — não busca vagas na mesma transação;
+  agregadores (Indeed/Glassdoor/SimplyHired/Jobgether/…) **não** entram como empresa estratégica;
+  a descoberta de site é heurística (acerta a maioria das marcas conhecidas, erra domínios
+  atípicos); ATS costuma estar em `/careers`, então quem fecha o ciclo é o crawler no job discovery.
+- **Denylist:** job boards/agregadores (Indeed, Glassdoor, SimplyHired, Remotejobs, Jobbol, LinkedIn Jobs,
+  Code Vagas, JobJá, Dev Life, Netvagas, Vagas PJ) e perfis pessoais/recrutadores **nunca** viram Company
+  contratante. Se já existirem no banco, são rebaixados para `Low` com `source-only`/`noisy-source`/`do-not-promote`.
+- **Regra inviolável:** o sistema **nunca** acessa/raspa/loga no LinkedIn, nem aplica para vagas.
 
 ## AI Copilot Layer (Fase 3)
 
@@ -446,16 +536,92 @@ O dev server faz proxy de `/api` para a API (sem CORS em dev). Se a API estiver 
 outra porta (ex.: `5000` no docker compose), use
 `VITE_API_TARGET=http://localhost:5000 npm run dev`.
 
-## Match Engine (heurístico, v1)
+## Multi-perfil de candidato (entidades globais vs por perfil)
 
-Sem LLM nesta fase — o score é **transparente e explicável** (ver
-`src/OpportunityOS.Application/Matching/KnownTerms.cs`).
+O sistema pontua oportunidades para **vários perfis de candidato** (ex.: Backend .NET,
+Java, Frontend React, Data Engineer). A descoberta continua **global** — uma vaga **não** é
+duplicada por perfil; o que muda por perfil é o **score, o feedback, a oportunidade, o
+rascunho e a aplicação**.
+
+| Global (uma vez para todos) | Por perfil (`CandidateProfileId`) |
+|-----------------------------|-----------------------------------|
+| `Company`, `JobPosting`, `RawJobCandidate` | `OpportunityMatch` |
+| `SearchCampaign`, `SearchQueryExecution` | `Opportunity` |
+| `JobPostingSourceOccurrence` | `GeneratedMessage` |
+| `BacenInstitution`, `ConsultingCompanyCandidate` | `UserFeedback` / Applications |
+
+**Resolução do perfil atual** — `ICurrentCandidateProfileProvider`
+(`src/OpportunityOS.Application/Profiles/`): `id explícito → IsDefault → mais recente`. Não
+há estado global mutável de “perfil ativo”; a seleção vai **explícita** em cada request
+(`?candidateProfileId=…`) e o front lembra a escolha em `localStorage`. Isso prepara o
+caminho para auth/multi-tenancy: o mesmo ponto passa a resolver pelo usuário autenticado.
+
+**Criar / alternar perfil**
+
+```bash
+# Listar perfis
+curl localhost:5077/api/candidate-profiles
+
+# Criar um perfil
+curl -X POST localhost:5077/api/candidate-profiles -H "Content-Type: application/json" -d '{
+  "fullName":"Java Dev","displayName":"Java Backend","headline":"Backend Java/Spring",
+  "summary":"...","location":"Brasil","seniority":"Pleno/Sênior","preferredLanguage":"pt-BR",
+  "coreSkills":["Java","Spring Boot","Kafka","AWS","PostgreSQL"]
+}'
+
+# Mover a âncora padrão (fallback de compatibilidade)
+curl -X POST localhost:5077/api/candidate-profiles/{id}/set-default
+```
+
+No frontend, o seletor no topo da sidebar troca o perfil; o feed, as aplicações e a copy
+recarregam para o perfil escolhido.
+
+**Rodar o match por perfil**
+
+```bash
+# Feed de um perfil específico
+curl "localhost:5077/api/matches?candidateProfileId={id}&minScore=60"
+
+# Re-pontuar — modos (seguro por padrão: só 1 perfil)
+curl -X POST "localhost:5077/api/jobs/rescore?candidateProfileId={id}"   # só esse perfil
+curl -X POST "localhost:5077/api/jobs/rescore"                            # só o perfil default
+curl -X POST "localhost:5077/api/jobs/rescore?allProfiles=true"           # todos os perfis (pesado)
+
+# Parâmetros opcionais de custo/controle:
+#   take=500                          → limita o nº de vagas (mais recentes primeiro)
+#   minCreatedAtUtc=2026-05-01        → só vagas descobertas a partir da data
+#   engineVersion=heuristic-v2        → tag gravada nos matches produzidos
+#   onlyWithoutCurrentEngineVersion=true → pula (vaga,perfil) cujo último match já é dessa versão
+curl -X POST "localhost:5077/api/jobs/rescore?allProfiles=true&take=1000&onlyWithoutCurrentEngineVersion=true"
+
+# Match sob demanda de uma vaga para um perfil
+curl -X POST "localhost:5077/api/jobs/{jobId}/match?candidateProfileId={id}"
+
+# Validação (dev): comparar o score da MESMA vaga entre todos os perfis
+curl "localhost:5077/api/debug/job/{jobId}/profile-scores"
+```
+
+**Quando usar cada modo de rescore:** use `candidateProfileId` ao ajustar/criar **um** perfil;
+use `allProfiles=true` (idealmente com `take`/`onlyWithoutCurrentEngineVersion`) após mudar o
+**motor** ou seedar perfis novos; sem parâmetros, reprocessa apenas o default.
+
+> Fase atual: **multi-perfil sem auth**. As próximas fases (Auth com `AppUser`/Identity e
+> depois SaaS/Tenant/billing) plugam em cima do `ICurrentCandidateProfileProvider` e do
+> `CandidateProfileId` já presentes nas entidades por perfil.
+
+## Match Engine (heurístico, v2 — dirigido pelo perfil)
+
+Sem LLM nesta fase — o score é **transparente e explicável**. As famílias de stack ficam em
+`src/OpportunityOS.Application/Matching/StackTaxonomy.cs` e o motor em
+`HeuristicMatchEngine.cs`. O **TechnicalFit** compara a vaga com a stack do **perfil**
+(core/secondary/excluded), em vez de um viés fixo em .NET.
 
 ```
-OverallScore = Técnico*0.35 + Domínio*0.25 + Senioridade*0.15 + Localização*0.15 + Idioma*0.10
+OverallScore = Técnico*0.50 + Cargo*0.15 + Senioridade*0.10 + Domínio*0.10 + Localização*0.10 + Idioma*0.05
 ```
 
-Faixas de recomendação:
+Gates: `Técnico < 35 → ≤ 45`; cargo de gestão/negócio sem sinal técnico → `≤ 40`; vaga fora
+da stack core do perfil → `≤ 70`. Faixas de recomendação:
 
 | Score | Recomendação |
 |-------|--------------|

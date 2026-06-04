@@ -84,4 +84,20 @@ public sealed class Company
     {
         if (!string.IsNullOrWhiteSpace(tag) && !Tags.Contains(tag)) Tags.Add(tag);
     }
+
+    /// <summary>Raise priority toward <paramref name="priority"/>; never downgrades an existing one.</summary>
+    public void RaisePriorityTo(CompanyPriority priority)
+    {
+        if ((int)priority > (int)Priority) Priority = priority;
+    }
+
+    /// <summary>Demote a denylisted entry (job board / aggregator / personal profile) to a
+    /// low-priority, do-not-promote source so it is never used as a primary discovery target.</summary>
+    public void MarkSourceOnly()
+    {
+        Priority = CompanyPriority.Low;
+        AddTag("source-only");
+        AddTag("noisy-source");
+        AddTag("do-not-promote");
+    }
 }

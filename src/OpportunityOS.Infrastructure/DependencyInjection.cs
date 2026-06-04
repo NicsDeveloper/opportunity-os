@@ -10,6 +10,7 @@ using OpportunityOS.Application.Discovery;
 using OpportunityOS.Application.Matching;
 using OpportunityOS.Application.Normalization;
 using OpportunityOS.Application.Pipeline;
+using OpportunityOS.Application.Profiles;
 using OpportunityOS.Infrastructure.Ai;
 using OpportunityOS.Infrastructure.Bacen;
 using OpportunityOS.Infrastructure.Email;
@@ -33,9 +34,12 @@ public static class DependencyInjection
 
         services.AddScoped<IJobNormalizer, JobNormalizer>();
         services.AddScoped<IMatchEngine, HeuristicMatchEngine>();
+        services.AddScoped<ICurrentCandidateProfileProvider, EfCurrentCandidateProfileProvider>();
         services.AddSingleton<ISourceClassifierService, SourceClassifierService>();
         services.AddSingleton<ICompanyNameResolver, CompanyNameResolver>();
         services.AddSingleton<IJobFingerprintService, JobFingerprintService>();
+        services.AddSingleton<IDiscoveryRankService, DiscoveryRankService>();
+        services.AddSingleton<IFeedbackLearningService, FeedbackLearningService>();
 
         // Link validation (HEAD-check -> expire dead postings), used by API + Worker.
         services.AddHttpClient<IJobLinkValidator, JobLinkValidator>(ConfigureClient);
@@ -57,6 +61,10 @@ public static class DependencyInjection
         services.AddSingleton<IQueryBudgetManager, QueryBudgetManager>();
         services.AddScoped<IFirehoseStore, EfFirehoseStore>();
         services.AddScoped<IFirehoseService, FirehoseService>();
+        services.AddScoped<IRawCandidatePromotionService, RawCandidatePromotionService>();
+        services.AddScoped<IConsultingStore, EfConsultingStore>();
+        services.AddScoped<IConsultingRadarService, ConsultingRadarService>();
+        services.AddScoped<IOriginalJobResolver, OriginalJobResolver>();
 
         services.AddScoped<IOpportunityStore, EfOpportunityStore>();
         services.AddScoped<IOpportunityPipeline, OpportunityPipeline>();

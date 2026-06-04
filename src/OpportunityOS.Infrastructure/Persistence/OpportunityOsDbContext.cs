@@ -25,6 +25,8 @@ public sealed class OpportunityOsDbContext : DbContext
     public DbSet<SearchQueryExecution> SearchQueryExecutions => Set<SearchQueryExecution>();
     public DbSet<RawJobCandidate> RawJobCandidates => Set<RawJobCandidate>();
     public DbSet<JobPostingSourceOccurrence> JobPostingSourceOccurrences => Set<JobPostingSourceOccurrence>();
+    public DbSet<UserFeedback> UserFeedbacks => Set<UserFeedback>();
+    public DbSet<ConsultingCompanyCandidate> ConsultingCompanyCandidates => Set<ConsultingCompanyCandidate>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -45,11 +47,15 @@ public sealed class OpportunityOsDbContext : DbContext
             e.ToTable("candidate_profiles");
             e.HasKey(x => x.Id);
             e.Property(x => x.FullName).IsRequired();
+            e.Property(x => x.IsDefault).HasDefaultValue(false);
+            e.Property(x => x.MinimumScoreToShow).HasDefaultValue(60);
+            e.HasIndex(x => x.IsDefault);
             foreach (var prop in new[]
                      {
                          nameof(CandidateProfile.CoreSkills), nameof(CandidateProfile.SecondarySkills),
-                         nameof(CandidateProfile.Domains), nameof(CandidateProfile.PreferredRoles),
-                         nameof(CandidateProfile.PreferredContractTypes), nameof(CandidateProfile.PreferredLocations)
+                         nameof(CandidateProfile.ExcludedStacks), nameof(CandidateProfile.Domains),
+                         nameof(CandidateProfile.PreferredRoles), nameof(CandidateProfile.PreferredContractTypes),
+                         nameof(CandidateProfile.PreferredLocations), nameof(CandidateProfile.PreferredWorkModes)
                      })
             {
                 e.Property<List<string>>(prop)
@@ -91,6 +97,7 @@ public sealed class OpportunityOsDbContext : DbContext
             e.HasKey(x => x.Id);
             e.Property(x => x.Status).HasConversion<int>();
             e.Property(x => x.SourceType).HasConversion<int>();
+            e.HasIndex(x => x.NormalizedFingerprint);
             e.Property(x => x.ExtractedSkills).HasConversion(stringListConverter).HasColumnType("jsonb")
                 .Metadata.SetValueComparer(stringListComparer);
             e.Property(x => x.ExtractedDomains).HasConversion(stringListConverter).HasColumnType("jsonb")
@@ -113,6 +120,8 @@ public sealed class OpportunityOsDbContext : DbContext
                 .Metadata.SetValueComparer(stringListComparer);
             e.HasIndex(x => x.OverallScore);
             e.HasIndex(x => x.JobPostingId);
+            // Latest match for a (job, profile) pair — covers the per-profile feed/digest queries.
+            e.HasIndex(x => new { x.JobPostingId, x.CandidateProfileId, x.CreatedAtUtc });
         });
 
         b.Entity<ExecutionRun>(e =>
@@ -132,6 +141,9 @@ public sealed class OpportunityOsDbContext : DbContext
             e.Property(x => x.Status).HasConversion<int>();
             e.HasIndex(x => x.JobPostingId);
             e.HasIndex(x => x.OpportunityMatchId);
+            e.HasIndex(x => x.CandidateProfileId);
+            // Digest fetches this profile's drafts for a set of jobs.
+            e.HasIndex(x => new { x.CandidateProfileId, x.JobPostingId });
         });
 
         b.Entity<PromptExecutionLog>(e =>
@@ -151,7 +163,9 @@ public sealed class OpportunityOsDbContext : DbContext
             e.HasKey(x => x.Id);
             e.Property(x => x.Status).HasConversion<int>();
             e.HasIndex(x => x.Status);
-            e.HasIndex(x => x.JobPostingId).IsUnique();
+            // One opportunity per (job, profile): the same job is a distinct opportunity per profile.
+            e.HasIndex(x => new { x.JobPostingId, x.CandidateProfileId }).IsUnique();
+            e.HasIndex(x => x.CandidateProfileId);
             e.HasIndex(x => x.NextFollowUpAtUtc);
         });
 
@@ -219,6 +233,7 @@ public sealed class OpportunityOsDbContext : DbContext
             e.Property(x => x.DiscoveredUrl).IsRequired();
             e.Property(x => x.Status).HasConversion<int>();
             e.Property(x => x.SourceType).HasConversion<int>();
+            e.Property(x => x.VerificationStatus).HasConversion<int>();
             e.HasIndex(x => x.DiscoveredUrl);
             e.HasIndex(x => x.Status);
             e.HasIndex(x => x.DiscoveredAtUtc);
@@ -233,6 +248,32 @@ public sealed class OpportunityOsDbContext : DbContext
             e.Property(x => x.SourceType).HasConversion<int>();
             e.HasIndex(x => x.JobPostingId);
             e.HasIndex(x => x.Url);
+        });
+
+        b.Entity<UserFeedback>(e =>
+        {
+            e.ToTable("user_feedbacks");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Type).HasConversion<int>();
+            e.HasIndex(x => x.JobPostingId);
+            e.HasIndex(x => x.RawJobCandidateId);
+            e.HasIndex(x => x.Type);
+            e.HasIndex(x => x.CandidateProfileId);
+            // Per-profile hide/applied lookups on the board and applications.
+            e.HasIndex(x => new { x.CandidateProfileId, x.JobPostingId, x.Type });
+        });
+
+        b.Entity<ConsultingCompanyCandidate>(e =>
+        {
+            e.ToTable("consulting_company_candidates");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).IsRequired();
+            e.Property(x => x.Status).HasConversion<int>();
+            e.Property(x => x.Signals).HasConversion(stringListConverter).HasColumnType("jsonb")
+                .Metadata.SetValueComparer(stringListComparer);
+            e.HasIndex(x => x.Name);
+            e.HasIndex(x => x.Status);
+            e.HasIndex(x => x.ConsultingConfidenceScore);
         });
     }
 }

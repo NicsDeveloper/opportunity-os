@@ -54,6 +54,37 @@ public sealed class RecurringJobScheduler : IHostedService
             validateCron);
         _logger.LogInformation("Scheduled recurring job 'validate-links' with cron {Cron}", validateCron);
 
+        // Firehose: broad discovery fills the candidate pool by itself (budget-guarded).
+        var firehoseCron = _config.GetValue<string>("Jobs:FirehoseCron") ?? "0 */4 * * *";
+        _recurring.AddOrUpdate<FirehoseSweepJob>(
+            "firehose-sweep", job => job.RunAsync(CancellationToken.None), firehoseCron);
+        _logger.LogInformation("Scheduled recurring job 'firehose-sweep' with cron {Cron}", firehoseCron);
+
+        // Promote promising candidates (with confirmed company) into the qualified feed.
+        var promotionCron = _config.GetValue<string>("Jobs:PromotionCron") ?? "30 */4 * * *";
+        _recurring.AddOrUpdate<PromoteCandidatesJob>(
+            "promote-candidates", job => job.RunAsync(CancellationToken.None), promotionCron);
+        _logger.LogInformation("Scheduled recurring job 'promote-candidates' with cron {Cron}", promotionCron);
+
+        // Cost-heavy sweeps: opt-in via feature flags (off by default).
+        if (_config.GetValue("FeatureFlags:EnableBacenSweepJob", false))
+        {
+            var bacenCron = _config.GetValue<string>("Jobs:BacenSweepCron") ?? "0 6 * * 1";
+            _recurring.AddOrUpdate<BacenFinancialSweepJob>(
+                "bacen-financial-sweep", job => job.RunAsync(CancellationToken.None), bacenCron);
+            _logger.LogInformation("Scheduled recurring job 'bacen-financial-sweep' with cron {Cron}", bacenCron);
+        }
+        else _recurring.RemoveIfExists("bacen-financial-sweep");
+
+        if (_config.GetValue("FeatureFlags:EnableConsultingRadarJob", false))
+        {
+            var consultingCron = _config.GetValue<string>("Jobs:ConsultingRadarCron") ?? "0 7 * * 2";
+            _recurring.AddOrUpdate<ConsultingRadarJob>(
+                "consulting-radar", job => job.RunAsync(CancellationToken.None), consultingCron);
+            _logger.LogInformation("Scheduled recurring job 'consulting-radar' with cron {Cron}", consultingCron);
+        }
+        else _recurring.RemoveIfExists("consulting-radar");
+
         var digestCron = _config.GetValue<string>("Jobs:DailyDigestCron") ?? "0 9 * * *";
         _recurring.AddOrUpdate<SendDailyDigestJob>(
             "send-daily-digest",

@@ -11,6 +11,13 @@ public sealed class SourceClassifierTests
     [InlineData("https://boards.greenhouse.io/stone/jobs/123", "OfficialAts", 90, false)]
     [InlineData("https://acme.gupy.io/jobs/9", "OfficialAts", 80, false)]
     [InlineData("https://programathor.com.br/jobs-net", "JobBoard", 70, false)]
+    // Recrutei é ATS (antes era classificado como agregador, errado):
+    [InlineData("https://empresa.recrutei.com.br/vaga/123", "OfficialAts", 90, false)]
+    // Plataformas adicionadas a pedido — boards confiáveis:
+    [InlineData("https://www.infojobs.com.br/vaga-de-net.aspx", "JobBoard", 70, false)]
+    [InlineData("https://intera.io/vagas/dev-net", "JobBoard", 70, false)]
+    [InlineData("https://www.michaelpage.com.br/job/dev-net", "JobBoard", 70, false)]
+    [InlineData("https://www.vagas.com.br/vagas-de-net", "JobBoard", 70, false)]
     public void OfficialAndBoards_GetHighConfidence_NoManualReview(string url, string type, int conf, bool manual)
     {
         var r = _svc.Classify(url, "Dev .NET", "snippet");

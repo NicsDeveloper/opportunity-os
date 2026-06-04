@@ -25,7 +25,8 @@ public static class Mapping
     public static CandidateProfileResponse ToResponse(this CandidateProfile p) =>
         new(p.Id, p.FullName, p.Headline, p.Summary, p.Location, p.Seniority, p.PreferredLanguage,
             p.CoreSkills, p.SecondarySkills, p.Domains, p.PreferredRoles, p.PreferredContractTypes,
-            p.PreferredLocations, p.Experiences.Select(ToDto).ToList(), p.CreatedAtUtc, p.UpdatedAtUtc);
+            p.PreferredLocations, p.Experiences.Select(ToDto).ToList(), p.CreatedAtUtc, p.UpdatedAtUtc,
+            p.DisplayName, p.IsDefault, p.ExcludedStacks, p.PreferredWorkModes, p.MinimumScoreToShow);
 
     public static CompanyResponse ToResponse(this Company c) =>
         new(c.Id, c.Name, c.WebsiteUrl, c.CareersUrl, c.LinkedInUrl, c.Industry, c.Country,
@@ -41,10 +42,11 @@ public static class Mapping
             m.SeniorityScore, m.LocationScore, m.LanguageScore, m.Recommendation.ToString(),
             m.Strengths, m.Risks, m.MissingRequirements, m.Rationale, m.CreatedAtUtc);
 
-    public static OpportunityMatch ToEntity(this MatchResult r, Guid jobId, Guid profileId) =>
+    public static OpportunityMatch ToEntity(this MatchResult r, Guid jobId, Guid profileId,
+        string engineVersion = HeuristicMatchEngine.Version) =>
         new(jobId, profileId, r.OverallScore, r.TechnicalScore, r.DomainScore, r.SeniorityScore,
             r.LocationScore, r.LanguageScore, r.Recommendation, r.Strengths, r.Risks,
-            r.MissingRequirements, r.Rationale);
+            r.MissingRequirements, r.Rationale, engineVersion);
 
     public static JobAnalysisResponse ToResponse(this JobAnalysisResult a) =>
         new(a.RequiredSkills, a.NiceToHaveSkills, a.Domains, a.Seniority, a.WorkMode, a.Language,
@@ -65,7 +67,7 @@ public static class Mapping
 
     public static OpportunityResponse ToResponse(this Opportunity o) =>
         new(o.Id, o.JobPostingId, o.RecruiterLeadId, o.Status.ToString(), o.CreatedAtUtc,
-            o.LastActionAtUtc, o.NextFollowUpAtUtc, o.Notes);
+            o.LastActionAtUtc, o.NextFollowUpAtUtc, o.Notes, o.CandidateProfileId);
 
     public static RecruiterResponse ToResponse(this RecruiterLead r) =>
         new(r.Id, r.CompanyId, r.FullName, r.RoleTitle, r.LinkedInUrl, r.Email,

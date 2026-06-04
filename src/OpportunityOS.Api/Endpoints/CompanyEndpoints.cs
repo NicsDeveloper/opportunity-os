@@ -14,6 +14,11 @@ public static class CompanyEndpoints
     {
         var group = app.MapGroup("/api/companies").WithTags("Companies");
 
+        // Internal dev command: seed companies observed manually on LinkedIn into the radar
+        // (no new feature/entity; reuses Company + the existing discovery flow). Idempotent.
+        group.MapPost("/seed-observed", async (OpportunityOsDbContext db, CancellationToken ct) =>
+            Results.Ok(await ObservedCompaniesSeed.RunAsync(db, ct)));
+
         // Strategic companies first (the spec wants them scanned first).
         group.MapGet("/", async (OpportunityOsDbContext db, CancellationToken ct) =>
         {
@@ -73,14 +78,40 @@ public static class CompanyEndpoints
             if (company is null) return Results.NotFound();
 
             var r = await detector.DetectAsync(company, ct);
-            if (r.Detected && !string.IsNullOrWhiteSpace(r.BoardUrl))
-            {
-                company.SetCareersUrl(r.BoardUrl!);
-                if (r.Ats is not null) company.AddTag(r.Ats.ToLowerInvariant());
-                await db.SaveChangesAsync(ct);
-            }
+            if (ApplyDetection(company, r) != "none") await db.SaveChangesAsync(ct);
             return Results.Ok(new AtsDetectionResponse(
                 r.Detected, r.Ats, r.BoardUrl, r.Token, r.CareersPageUrl, r.ProviderSupported));
+        });
+
+        // Bulk careers/ATS discovery (the real bottleneck): crawl every company that has a website
+        // but no careers/ATS yet, save the ATS board when found — otherwise the careers page so the
+        // generic crawler can mine it. Bounded by limit; run in batches. Registers an ExecutionRun.
+        group.MapPost("/detect-ats-bulk", async (
+            int? limit, OpportunityOsDbContext db, IAtsDetector detector, CancellationToken ct) =>
+        {
+            var max = Math.Clamp(limit ?? 40, 1, 200);
+            var run = ExecutionRun.Start("DetectAtsBulk");
+            await db.ExecutionRuns.AddAsync(run, ct);
+
+            var targets = await db.Companies
+                .Where(c => c.WebsiteUrl != null && c.WebsiteUrl != "" && (c.CareersUrl == null || c.CareersUrl == ""))
+                .OrderByDescending(c => c.Priority).ThenBy(c => c.LastScannedAtUtc)
+                .Take(max).ToListAsync(ct);
+
+            int boards = 0, careers = 0, errors = 0;
+            foreach (var c in targets)
+            {
+                try
+                {
+                    var cat = ApplyDetection(c, await detector.DetectAsync(c, ct));
+                    if (cat == "board") boards++; else if (cat == "careers") careers++;
+                    run.RecordSuccess();
+                }
+                catch (Exception ex) { errors++; run.RecordFailure($"{c.Name}: {ex.Message}"); }
+            }
+            run.Complete();
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new { processed = targets.Count, boardsFound = boards, careersFound = careers, errors });
         });
 
         // Onboard companies missing a board: find ATS board (CSE-ATS or heuristic) — chains the funnel.
@@ -149,5 +180,26 @@ public static class CompanyEndpoints
             await db.SaveChangesAsync(ct);
             return Results.Ok(new CsvImportResponse(created));
         });
+    }
+
+    /// <summary>Persist a detection result on a company: prefer the ATS board (enables the good
+    /// providers); otherwise save the discovered careers page so the generic crawler can mine it.
+    /// Returns "board" | "careers" | "none".</summary>
+    private static string ApplyDetection(Company company, AtsDetectionResult r)
+    {
+        if (r.Detected && !string.IsNullOrWhiteSpace(r.BoardUrl))
+        {
+            company.SetCareersUrl(r.BoardUrl!);
+            if (r.Ats is not null) company.AddTag(r.Ats.ToLowerInvariant());
+            company.AddTag("ats-detected");
+            return "board";
+        }
+        if (!string.IsNullOrWhiteSpace(r.CareersPageUrl))
+        {
+            company.SetCareersUrl(r.CareersPageUrl!);
+            company.AddTag("careers-page");
+            return "careers";
+        }
+        return "none";
     }
 }

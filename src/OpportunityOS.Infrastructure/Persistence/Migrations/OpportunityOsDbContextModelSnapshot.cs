@@ -98,7 +98,15 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("Domains")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("ExcludedStacks")
                         .IsRequired()
                         .HasColumnType("jsonb");
 
@@ -114,9 +122,19 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<bool>("IsDefault")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("Location")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int>("MinimumScoreToShow")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(60);
 
                     b.Property<string>("PreferredContractTypes")
                         .IsRequired()
@@ -131,6 +149,10 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                         .HasColumnType("jsonb");
 
                     b.Property<string>("PreferredRoles")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("PreferredWorkModes")
                         .IsRequired()
                         .HasColumnType("jsonb");
 
@@ -150,6 +172,8 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("IsDefault");
 
                     b.ToTable("candidate_profiles", (string)null);
                 });
@@ -204,6 +228,57 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                     b.ToTable("companies", (string)null);
                 });
 
+            modelBuilder.Entity("OpportunityOS.Domain.Entities.ConsultingCompanyCandidate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ConsultingConfidenceScore")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Country")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LinkedInCompanyUrl")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("PromotedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Signals")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("WebsiteUrl")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConsultingConfidenceScore");
+
+                    b.HasIndex("Name");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("consulting_company_candidates", (string)null);
+                });
+
             modelBuilder.Entity("OpportunityOS.Domain.Entities.ExecutionRun", b =>
                 {
                     b.Property<Guid>("Id")
@@ -248,6 +323,9 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CandidateProfileId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("CoverLetter")
@@ -300,9 +378,13 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CandidateProfileId");
+
                     b.HasIndex("JobPostingId");
 
                     b.HasIndex("OpportunityMatchId");
+
+                    b.HasIndex("CandidateProfileId", "JobPostingId");
 
                     b.ToTable("generated_messages", (string)null);
                 });
@@ -349,6 +431,9 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("Location")
+                        .HasColumnType("text");
+
+                    b.Property<string>("NormalizedFingerprint")
                         .HasColumnType("text");
 
                     b.Property<string>("OriginalJobUrl")
@@ -398,6 +483,8 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CompanyId");
+
+                    b.HasIndex("NormalizedFingerprint");
 
                     b.HasIndex("Status");
 
@@ -452,6 +539,9 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid>("CandidateProfileId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -475,12 +565,14 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("JobPostingId")
-                        .IsUnique();
+                    b.HasIndex("CandidateProfileId");
 
                     b.HasIndex("NextFollowUpAtUtc");
 
                     b.HasIndex("Status");
+
+                    b.HasIndex("JobPostingId", "CandidateProfileId")
+                        .IsUnique();
 
                     b.ToTable("opportunities", (string)null);
                 });
@@ -499,6 +591,10 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("DomainScore")
                         .HasColumnType("integer");
+
+                    b.Property<string>("EngineVersion")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.Property<Guid>("JobPostingId")
                         .HasColumnType("uuid");
@@ -542,6 +638,8 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                     b.HasIndex("JobPostingId");
 
                     b.HasIndex("OverallScore");
+
+                    b.HasIndex("JobPostingId", "CandidateProfileId", "CreatedAtUtc");
 
                     b.ToTable("opportunity_matches", (string)null);
                 });
@@ -666,6 +764,9 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int>("VerificationStatus")
+                        .HasColumnType("integer");
 
                     b.Property<string>("WorkMode")
                         .HasColumnType("text");
@@ -844,6 +945,45 @@ namespace OpportunityOS.Infrastructure.Persistence.Migrations
                     b.HasIndex("Category");
 
                     b.ToTable("search_query_templates", (string)null);
+                });
+
+            modelBuilder.Entity("OpportunityOS.Domain.Entities.UserFeedback", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CandidateProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("JobPostingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("RawJobCandidateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CandidateProfileId");
+
+                    b.HasIndex("JobPostingId");
+
+                    b.HasIndex("RawJobCandidateId");
+
+                    b.HasIndex("Type");
+
+                    b.HasIndex("CandidateProfileId", "JobPostingId", "Type");
+
+                    b.ToTable("user_feedbacks", (string)null);
                 });
 #pragma warning restore 612, 618
         }

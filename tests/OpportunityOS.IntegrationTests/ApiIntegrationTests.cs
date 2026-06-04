@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using OpportunityOS.Contracts;
@@ -317,5 +318,191 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
         // The latest match is now retrievable.
         var latest = await client.GetFromJsonAsync<MatchResponse>($"/api/jobs/{jobId}/match");
         Assert.Equal(match.Id, latest!.Id);
+    }
+
+    // ---- Multi-profile: matches/opportunities/feedback/applications are per CandidateProfile ----
+
+    private async Task<Guid> CreateProfile(string fullName, params string[] coreSkills)
+    {
+        var client = _factory.CreateClient();
+        var resp = await client.PostAsJsonAsync("/api/candidate-profile", new CandidateProfileRequest(
+            fullName, "headline", "summary", "Brasil", "Pleno/Sênior", "pt-BR",
+            CoreSkills: coreSkills.ToList(), SecondarySkills: null, Domains: null, PreferredRoles: null,
+            PreferredContractTypes: null, PreferredLocations: null, Experiences: null));
+        var p = await resp.Content.ReadFromJsonAsync<CandidateProfileResponse>();
+        return p!.Id;
+    }
+
+    [DbFact]
+    public async Task SameJob_TwoProfiles_ProduceDistinctMatchesAndOpportunities()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        var dotnet = await CreateProfile("DotNet Dev", ".NET", "C#", "ASP.NET Core", "AWS", "Kafka");
+        var react = await CreateProfile("React Dev", "React", "TypeScript", "Next.js", "CSS");
+        var jobId = await SeedJob(
+            "Senior Backend Engineer (.NET / Payments)",
+            "Build payments and PIX systems with .NET, C#, ASP.NET Core, Kafka and AWS. Remote, Brazil. Fintech.");
+
+        var mDot = await (await client.PostAsync($"/api/jobs/{jobId}/match?candidateProfileId={dotnet}", null))
+            .Content.ReadFromJsonAsync<MatchResponse>();
+        var mReact = await (await client.PostAsync($"/api/jobs/{jobId}/match?candidateProfileId={react}", null))
+            .Content.ReadFromJsonAsync<MatchResponse>();
+
+        // Same job, different stacks -> different scores, one OpportunityMatch each.
+        Assert.Equal(dotnet, mDot!.CandidateProfileId);
+        Assert.Equal(react, mReact!.CandidateProfileId);
+        Assert.True(mDot.OverallScore > mReact.OverallScore,
+            $".NET ({mDot.OverallScore}) should beat React ({mReact.OverallScore}) on a .NET job");
+        Assert.True(mDot.OverallScore >= 70, $"Expected .NET >= 70 but was {mDot.OverallScore}");
+
+        // GET match is scoped per profile.
+        var getDot = await client.GetFromJsonAsync<MatchResponse>($"/api/jobs/{jobId}/match?candidateProfileId={dotnet}");
+        var getReact = await client.GetFromJsonAsync<MatchResponse>($"/api/jobs/{jobId}/match?candidateProfileId={react}");
+        Assert.Equal(dotnet, getDot!.CandidateProfileId);
+        Assert.Equal(react, getReact!.CandidateProfileId);
+
+        // Opportunity is per (job, profile): the .NET match (>=70) created one for .NET only.
+        var oppsDot = await client.GetFromJsonAsync<List<OpportunityResponse>>($"/api/opportunities?candidateProfileId={dotnet}");
+        Assert.Single(oppsDot!);
+        Assert.Equal(dotnet, oppsDot![0].CandidateProfileId);
+
+        // Re-matching the same (job, profile) must NOT create a duplicate opportunity.
+        await client.PostAsync($"/api/jobs/{jobId}/match?candidateProfileId={dotnet}", null);
+        var oppsDot2 = await client.GetFromJsonAsync<List<OpportunityResponse>>($"/api/opportunities?candidateProfileId={dotnet}");
+        Assert.Single(oppsDot2!);
+    }
+
+    [DbFact]
+    public async Task Feedback_HidesJob_OnlyForThatProfile()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        // Two .NET profiles so the same job is strong for BOTH boards.
+        var a = await CreateProfile("Dev A", ".NET", "C#", "ASP.NET Core", "AWS");
+        var b = await CreateProfile("Dev B", ".NET", "C#", "ASP.NET Core", "AWS");
+        var jobId = await SeedJob(
+            "Senior Backend Engineer (.NET)",
+            "Backend with .NET, C#, ASP.NET Core, AWS, Kafka. Remote, Brazil.");
+        await client.PostAsync($"/api/jobs/{jobId}/match?candidateProfileId={a}", null);
+        await client.PostAsync($"/api/jobs/{jobId}/match?candidateProfileId={b}", null);
+
+        // Both boards show the job before any feedback.
+        Assert.Contains(await Matches(client, a), m => m.JobPostingId == jobId);
+        Assert.Contains(await Matches(client, b), m => m.JobPostingId == jobId);
+
+        // Profile A marks it irrelevant -> hidden for A, still visible for B.
+        await client.PostAsJsonAsync("/api/feedback", new FeedbackRequest(
+            "Irrelevant", jobId, null, "stack diferente", a));
+
+        Assert.DoesNotContain(await Matches(client, a), m => m.JobPostingId == jobId);
+        Assert.Contains(await Matches(client, b), m => m.JobPostingId == jobId);
+    }
+
+    [DbFact]
+    public async Task Applications_AreScopedPerProfile()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        var a = await CreateProfile("Dev A", ".NET", "C#", "AWS");
+        var b = await CreateProfile("Dev B", ".NET", "C#", "AWS");
+        var jobId = await SeedJob("Senior Backend (.NET)", "Backend .NET, C#, AWS. Remote, Brazil.");
+
+        // Profile A applied; B did not.
+        await client.PostAsJsonAsync("/api/feedback", new FeedbackRequest("Applied", jobId, null, null, a));
+
+        var appsA = await client.GetFromJsonAsync<List<ApplicationResponse>>($"/api/applications?candidateProfileId={a}");
+        var appsB = await client.GetFromJsonAsync<List<ApplicationResponse>>($"/api/applications?candidateProfileId={b}");
+        Assert.Single(appsA!);
+        Assert.Equal(jobId, appsA![0].JobPostingId);
+        Assert.Empty(appsB!);
+    }
+
+    [DbFact]
+    public async Task MatchesWithoutProfile_FallBackToDefault()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        // One profile, made default via the plural set-default endpoint.
+        var only = await CreateProfile("Only Dev", ".NET", "C#", "AWS");
+        await client.PostAsync($"/api/candidate-profiles/{only}/set-default", null);
+        var jobId = await SeedJob("Senior Backend (.NET)", "Backend .NET, C#, AWS. Remote, Brazil.");
+        await client.PostAsync($"/api/jobs/{jobId}/match?candidateProfileId={only}", null);
+
+        // No candidateProfileId -> default profile's board (back-compat with the single-profile flow).
+        var def = await client.GetFromJsonAsync<List<BestOpportunityResponse>>("/api/matches?minScore=0&take=50");
+        Assert.Contains(def!, m => m.JobPostingId == jobId);
+    }
+
+    private static async Task<List<BestOpportunityResponse>> Matches(HttpClient client, Guid profileId) =>
+        await client.GetFromJsonAsync<List<BestOpportunityResponse>>(
+            $"/api/matches?minScore=0&take=200&candidateProfileId={profileId}") ?? new();
+
+    [DbFact]
+    public async Task Rescore_SingleProfile_DoesNotMatchOthers_AllProfiles_Does()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        var a = await CreateProfile("Dev A", ".NET", "C#", "AWS");
+        var b = await CreateProfile("Dev B", "Java", "Spring Boot", "AWS");
+        await SeedJob("Senior Backend (.NET)", "Backend .NET, C#, AWS. Remote, Brazil.");
+
+        // Default rescore targets ONE profile (A here, passed explicitly) -> no matches for B.
+        var r1 = await client.PostAsync($"/api/jobs/rescore?candidateProfileId={a}", null);
+        r1.EnsureSuccessStatusCode();
+        Assert.NotEmpty(await Matches(client, a));
+        Assert.Empty(await Matches(client, b));
+
+        // allProfiles fans out -> B now has matches too.
+        var r2 = await client.PostAsync("/api/jobs/rescore?allProfiles=true", null);
+        r2.EnsureSuccessStatusCode();
+        Assert.NotEmpty(await Matches(client, b));
+    }
+
+    [DbFact]
+    public async Task GeneratedMessage_IsTiedToTheProfile_ItWasDraftedFor()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        var a = await CreateProfile("Dev A", ".NET", "C#", "ASP.NET Core", "AWS", "Kafka");
+        var jobId = await SeedJob(
+            "Senior Backend Engineer (.NET / Payments)",
+            "Build payments with .NET, C#, ASP.NET Core, Kafka, AWS. Remote, Brazil. Fintech.");
+
+        var outreach = await client.PostAsync($"/api/jobs/{jobId}/ai/generate-outreach?candidateProfileId={a}", null);
+        outreach.EnsureSuccessStatusCode();
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<Infrastructure.Persistence.OpportunityOsDbContext>();
+        var msg = await db.GeneratedMessages.SingleAsync(m => m.JobPostingId == jobId);
+        Assert.Equal(a, msg.CandidateProfileId);
+    }
+
+    [DbFact]
+    public async Task DebugProfileScores_ShowsDistinctScoresPerProfile()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        var dotnet = await CreateProfile("DotNet Dev", ".NET", "C#", "ASP.NET Core", "AWS");
+        var react = await CreateProfile("React Dev", "React", "TypeScript", "Next.js");
+        var jobId = await SeedJob(
+            "Senior Backend Engineer (.NET / Payments)",
+            "Build payments with .NET, C#, ASP.NET Core, Kafka, AWS. Remote, Brazil. Fintech.");
+        await client.PostAsync($"/api/jobs/{jobId}/match?candidateProfileId={dotnet}", null);
+        await client.PostAsync($"/api/jobs/{jobId}/match?candidateProfileId={react}", null);
+
+        var doc = await client.GetFromJsonAsync<JsonElement>($"/api/debug/job/{jobId}/profile-scores");
+        var scores = doc.GetProperty("scores").EnumerateArray()
+            .ToDictionary(e => e.GetProperty("candidateProfile").GetString()!,
+                          e => e.GetProperty("score").GetInt32());
+        Assert.True(scores["DotNet Dev"] > scores["React Dev"],
+            $".NET ({scores["DotNet Dev"]}) should beat React ({scores["React Dev"]}) on a .NET job");
     }
 }

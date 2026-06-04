@@ -45,7 +45,7 @@ public sealed class EfDiscoveryStore : IDiscoveryStore
         await _db.ExecutionRuns.AddAsync(run, ct);
 
     public Task<CandidateProfile?> GetActiveProfileAsync(CancellationToken ct) =>
-        _db.CandidateProfiles.OrderByDescending(p => p.CreatedAtUtc).FirstOrDefaultAsync(ct);
+        _db.CandidateProfiles.OrderByDescending(p => p.IsDefault).ThenByDescending(p => p.CreatedAtUtc).FirstOrDefaultAsync(ct);
 
     public Task<bool> JobHasMatchAsync(Guid jobPostingId, CancellationToken ct) =>
         _db.OpportunityMatches.AnyAsync(m => m.JobPostingId == jobPostingId, ct);

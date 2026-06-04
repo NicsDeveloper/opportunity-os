@@ -23,7 +23,12 @@ public sealed record CandidateProfileRequest(
     List<string>? PreferredRoles,
     List<string>? PreferredContractTypes,
     List<string>? PreferredLocations,
-    List<CandidateExperienceDto>? Experiences);
+    List<CandidateExperienceDto>? Experiences,
+    // Multi-profile fields (optional for back-compat with existing callers/tests).
+    string? DisplayName = null,
+    List<string>? ExcludedStacks = null,
+    List<string>? PreferredWorkModes = null,
+    int? MinimumScoreToShow = null);
 
 public sealed record CandidateProfileResponse(
     Guid Id,
@@ -41,7 +46,12 @@ public sealed record CandidateProfileResponse(
     List<string> PreferredLocations,
     List<CandidateExperienceDto> Experiences,
     DateTime CreatedAtUtc,
-    DateTime UpdatedAtUtc);
+    DateTime UpdatedAtUtc,
+    string DisplayName,
+    bool IsDefault,
+    List<string> ExcludedStacks,
+    List<string> PreferredWorkModes,
+    int MinimumScoreToShow);
 
 // ---- Company ----
 
@@ -161,7 +171,16 @@ public sealed record DashboardSummaryResponse(
 public sealed record BestOpportunityResponse(
     Guid MatchId, Guid JobPostingId, string JobTitle, string CompanyName,
     List<string> Skills, int OverallScore, string Recommendation, string JobUrl,
-    string? CompanyWebsiteUrl, DateTime PostedAtUtc, string Rationale);
+    string? CompanyWebsiteUrl, DateTime PostedAtUtc, string Rationale,
+    int DiscoveryRank, string SourceType, int SourceConfidenceScore,
+    bool RequiresManualValidation, string? RealCompanyName, string? SourceName,
+    bool DatePrecise);
+
+// One opportunity the user already acted on (applications board).
+public sealed record ApplicationResponse(
+    Guid JobPostingId, string JobTitle, string CompanyName, string JobUrl,
+    string? CompanyWebsiteUrl, int OverallScore, string Action,
+    DateTime AppliedAtUtc, DateTime PostedAtUtc);
 
 public sealed record ExecutionRunResponse(
     Guid Id, string RunType, string Status, DateTime StartedAtUtc,
@@ -180,7 +199,8 @@ public sealed record OpportunityResponse(
     DateTime CreatedAtUtc,
     DateTime? LastActionAtUtc,
     DateTime? NextFollowUpAtUtc,
-    string? Notes);
+    string? Notes,
+    Guid CandidateProfileId);
 
 public sealed record OpportunityStatusRequest(string Status);
 public sealed record OpportunityNotesRequest(string? Notes);
@@ -361,3 +381,82 @@ public sealed record RawJobCandidateResponse(
     bool RequiresManualValidation,
     Guid? SearchCampaignId,
     string? Query);
+
+// ---- Firehose promotion (RawJobCandidate -> JobPosting) ----
+
+public sealed record PromoteBatchRequest(
+    int? MaxCandidates,
+    int? MinSourceConfidence,
+    bool? RequireRealCompany);
+
+public sealed record PromotionResultResponse(
+    bool Promoted,
+    Guid? JobPostingId,
+    bool WasDuplicate,
+    string Reason);
+
+public sealed record BatchPromotionResponse(
+    int Considered,
+    int Promoted,
+    int Duplicates,
+    int Skipped);
+
+// ---- Feedback + metrics (P11/P16/P12) ----
+
+public sealed record FeedbackRequest(
+    string Type,
+    Guid? JobPostingId,
+    Guid? RawJobCandidateId,
+    string? Reason,
+    Guid? CandidateProfileId = null);
+
+public sealed record DiscoveryMetricsResponse(
+    int RawCandidatesToday,
+    int RawCandidatesThisWeek,
+    int QueriesToday,
+    int JobsPromotedToday,
+    double DeduplicationRate,
+    int AverageSourceConfidence,
+    int AverageFitScore,
+    int ActionableOpportunities,
+    int WeakSources,
+    int RelevantFeedback,
+    int IrrelevantFeedback,
+    Dictionary<string, int> BySourceType);
+
+public sealed record ProviderQualityResponse(
+    string Provider,
+    int QueriesExecuted,
+    int RawCandidates,
+    int PromotedJobs,
+    double DuplicateRate,
+    int AverageSourceConfidence);
+
+// ---- Bacen Financial Sweep (P2) ----
+
+public sealed record BacenSweepRequest(
+    string? MinimumPriority,
+    int? MaxCompanies,
+    int? MaxQueriesPerCompany,
+    bool? IncludeCooperatives,
+    bool? SaveRawCandidates);
+
+public sealed record BacenSweepPreviewResponse(
+    int Companies, int Strategic, int High, int Medium, int Low,
+    int EstimatedQueries, int EstimatedBudgetCost);
+
+// ---- Consulting Radar (P3) ----
+
+public sealed record ConsultingDiscoverRequest(int? MaxQueries, bool? IncludeSeeds);
+
+public sealed record ConsultingDiscoverResponse(
+    Guid ExecutionRunId, string Status, int QueriesExecuted, int CandidatesFound, int Duplicates);
+
+public sealed record ConsultingCandidateResponse(
+    Guid Id, string Name, string? WebsiteUrl, string? LinkedInCompanyUrl, string Country,
+    string Source, List<string> Signals, int ConsultingConfidenceScore, string Status,
+    DateTime CreatedAtUtc, DateTime? PromotedAtUtc);
+
+public sealed record PromoteConsultingBatchRequest(int? MinConfidence, int? Max);
+
+public sealed record ConsultingPromotionResponse(int Considered, int Promoted, int Skipped);

@@ -106,27 +106,43 @@ public sealed partial class CompanyNameResolver : ICompanyNameResolver
         try { var u = new Uri(url); host = u.Host.Replace("www.", "", StringComparison.OrdinalIgnoreCase); path = u.AbsolutePath; }
         catch { return null; }
 
-        // boards.greenhouse.io/<company>/..., jobs.lever.co/<handle>/..., jobs.ashbyhq.com/<board>
+        // Platforms that encode the company as the first path segment:
+        //   boards.greenhouse.io/<company>, jobs.lever.co/<handle>, jobs.quickin.io/<company>/jobs/<id>, ...
         var pathToken = path.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
-        if (host.Contains("greenhouse.io") || host.Contains("lever.co") || host.Contains("ashbyhq.com") || host.Contains("smartrecruiters.com"))
-            return string.IsNullOrWhiteSpace(pathToken) ? null : Clean(pathToken);
+        string[] pathSlugHosts = { "greenhouse.io", "lever.co", "ashbyhq.com", "smartrecruiters.com",
+            "quickin.io", "kenoby.com", "jobconvo.com", "99jobs.com" };
+        if (pathSlugHosts.Any(h => host.Contains(h, StringComparison.OrdinalIgnoreCase)))
+            return string.IsNullOrWhiteSpace(pathToken) || pathToken is "jobs" or "vagas" or "job" ? null : Clean(pathToken);
 
-        // <company>.gupy.io / <tenant>.myworkdayjobs.com -> subdomain.
-        if (host.Contains("gupy.io") || host.Contains("myworkdayjobs.com") || host.Contains("workdayjobs.com"))
+        // <company>.gupy.io / <tenant>.myworkdayjobs.com / <company>.{solides|abler|pandape|recrutei}... -> subdomain.
+        if (host.Contains("gupy.io") || host.Contains("myworkdayjobs.com") || host.Contains("workdayjobs.com")
+            || host.Contains("solides.com.br") || host.Contains("abler.com.br") || host.Contains("pandape.com")
+            || host.Contains("recrutei.com.br"))
         {
             var sub = host.Split('.').FirstOrDefault();
-            return string.IsNullOrWhiteSpace(sub) || sub is "jobs" or "boards" ? null : Clean(sub);
+            return string.IsNullOrWhiteSpace(sub) || sub is "jobs" or "boards" or "app" or "vagas" or "carreiras" ? null : Clean(sub);
         }
 
-        // Generic: second-level domain (acme.com -> Acme). Skip obvious non-companies.
+        // Generic: second-level domain (acme.com -> Acme). Skip obvious non-companies and
+        // generic words (B8): never label "Services"/"Jobs"/"Careers" as the company.
         var parts = host.Split('.', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length >= 2)
         {
             var label = parts[^2];
-            if (label.Length >= 3 && !IsSourceWord(label)) return Clean(label);
+            if (label.Length >= 3 && !IsSourceWord(label) && !IsGenericLabel(label)) return Clean(label);
         }
         return null;
     }
+
+    private static readonly string[] GenericLabels =
+    {
+        "services", "service", "jobs", "job", "careers", "career", "vagas", "vaga", "api", "remote",
+        "remotejobs", "talent", "talents", "work", "works", "hire", "hiring", "app", "apps", "portal",
+        "recruit", "recruiting", "emprego", "empregos", "trampos", "site", "home", "cloud", "web", "tech",
+    };
+
+    private static bool IsGenericLabel(string s) =>
+        GenericLabels.Any(g => string.Equals(g, s, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsSourceWord(string s) =>
         SourceWords.Any(w => s.Contains(w, StringComparison.OrdinalIgnoreCase));

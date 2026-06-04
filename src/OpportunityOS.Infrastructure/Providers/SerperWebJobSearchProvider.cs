@@ -1,7 +1,9 @@
+using System.Globalization;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using OpportunityOS.Application.Discovery;
 
@@ -111,7 +113,8 @@ public sealed class SerperWebJobSearchProvider : IJobSearchProvider
                         ExternalId: Hash(link), Title: Trim(title, 140), CompanyName: CompanyFromHost(uri.Host),
                         Location: null, Department: null, DescriptionHtml: null,
                         DescriptionText: GetString(item, "snippet") ?? title, AbsoluteUrl: link,
-                        SourceProvider: "SerperWeb", PublishedAtUtc: null, UpdatedAtUtc: null, Language: "pt-BR");
+                        SourceProvider: "SerperWeb", PublishedAtUtc: ParseResultDate(GetString(item, "date")),
+                        UpdatedAtUtc: null, Language: "pt-BR");
                 }
                 _logger.LogInformation("Serper '{Term}': kept {Kept} job link(s)", term, kept);
             }
@@ -132,6 +135,29 @@ public sealed class SerperWebJobSearchProvider : IJobSearchProvider
 
     private static string? GetString(JsonElement el, string prop) =>
         el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    // Serper organic results carry a "date" — absolute ("Apr 15, 2026", "2026-04-15") or
+    // relative ("2 days ago" / "há 3 dias"). Parse it into a real publish date when we can.
+    private static DateTime? ParseResultDate(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return null;
+        s = s.Trim();
+        if (DateTime.TryParse(s, CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var abs))
+            return abs <= DateTime.UtcNow.AddDays(1) ? abs : null;
+
+        var m = Regex.Match(s, @"(\d+)\s*(hour|hora|day|dia|week|semana|month|m[eê]s|mes|year|ano)",
+            RegexOptions.IgnoreCase);
+        if (!m.Success) return null;
+        var n = int.Parse(m.Groups[1].Value);
+        var u = m.Groups[2].Value.ToLowerInvariant();
+        var now = DateTime.UtcNow;
+        if (u.StartsWith("hour") || u.StartsWith("hora")) return now.AddHours(-n);
+        if (u.StartsWith("day") || u.StartsWith("dia")) return now.AddDays(-n);
+        if (u.StartsWith("week") || u.StartsWith("semana")) return now.AddDays(-7 * n);
+        if (u.StartsWith("year") || u.StartsWith("ano")) return now.AddYears(-n);
+        return now.AddMonths(-n); // month variants
+    }
 
     private static string Trim(string s, int max) => s.Length <= max ? s : s[..max];
 

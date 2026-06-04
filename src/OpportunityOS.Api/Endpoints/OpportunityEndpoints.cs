@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using OpportunityOS.Application.Profiles;
 using OpportunityOS.Contracts;
 using OpportunityOS.Domain.Enums;
 using OpportunityOS.Infrastructure.Persistence;
@@ -11,9 +12,14 @@ public static class OpportunityEndpoints
     {
         var group = app.MapGroup("/api/opportunities").WithTags("Opportunities");
 
-        group.MapGet("/", async (OpportunityOsDbContext db, CancellationToken ct) =>
+        // Optionally scope the pipeline board to a profile (defaults to all profiles when omitted).
+        group.MapGet("/", async (
+            Guid? candidateProfileId, OpportunityOsDbContext db,
+            ICurrentCandidateProfileProvider profiles, CancellationToken ct) =>
         {
+            Guid? profileId = candidateProfileId is null ? null : await profiles.ResolveIdAsync(candidateProfileId, ct);
             var items = await db.Opportunities
+                .Where(o => profileId == null || o.CandidateProfileId == profileId.Value)
                 .OrderByDescending(o => o.CreatedAtUtc)
                 .ToListAsync(ct);
             return Results.Ok(items.Select(o => o.ToResponse()));

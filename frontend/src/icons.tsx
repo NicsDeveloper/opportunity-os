@@ -16,6 +16,17 @@ const P: Record<string, string> = {
   doc: "M6 2h9l5 5v15H6zM14 2v6h6",
   bell: "M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0",
   gear: "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19 12l2 1-2 4-2-1a7 7 0 0 1-2 1l-1 2H10l-1-2a7 7 0 0 1-2-1l-2 1-2-4 2-1a7 7 0 0 1 0-2L1 9l2-4 2 1a7 7 0 0 1 2-1l1-2h4l1 2a7 7 0 0 1 2 1l2-1 2 4-2 1a7 7 0 0 1 0 2z",
+  shield: "M12 3l8 3v6c0 4-3 7-8 9-5-2-8-5-8-9V6z",
+  check: "M20 6L9 17l-5-5",
+  chevron: "M6 9l6 6 6-6",
+  more: "M12 5h.01M12 12h.01M12 19h.01",
+  filter: "M3 5h18M6 12h12M10 19h4",
+  external: "M10 4H5v15h15v-5M14 4h6v6M20 4l-8 8",
+  edit: "M4 20h4L18 10l-4-4L4 16z M14 6l4 4",
+  copy: "M9 9h11v11H9zM5 15H4V4h11v1",
+  refresh: "M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6",
+  bookmark: "M6 3h12v18l-6-4-6 4z",
+  close: "M6 6l12 12M18 6L6 18",
 };
 
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {

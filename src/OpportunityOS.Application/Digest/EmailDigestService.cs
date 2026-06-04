@@ -5,8 +5,12 @@ namespace OpportunityOS.Application.Digest;
 
 public interface IEmailDigestService
 {
-    Task<DigestPreview> BuildPreviewAsync(int minScore, CancellationToken ct);
-    Task<DigestSendResult> SendDailyDigestAsync(int minScore, CancellationToken ct);
+    /// <summary>Render (without sending) the digest for a specific profile.</summary>
+    Task<DigestPreview> BuildPreviewAsync(Guid candidateProfileId, int minScore, CancellationToken ct);
+    /// <summary>Build and send the digest for a specific profile.</summary>
+    Task<DigestSendResult> SendDailyDigestAsync(Guid candidateProfileId, int minScore, CancellationToken ct);
+    /// <summary>Send a digest for every profile (using each profile's MinimumScoreToShow).</summary>
+    Task<IReadOnlyList<DigestSendResult>> SendAllAsync(CancellationToken ct);
 }
 
 /// <summary>
@@ -29,18 +33,27 @@ public sealed class EmailDigestService : IEmailDigestService
         _logger = logger;
     }
 
-    public async Task<DigestPreview> BuildPreviewAsync(int minScore, CancellationToken ct)
+    public async Task<DigestPreview> BuildPreviewAsync(Guid candidateProfileId, int minScore, CancellationToken ct)
     {
-        var items = await _store.GetDigestItemsAsync(minScore, ct);
-        var name = await _store.GetCandidateNameAsync(ct);
+        var items = await _store.GetDigestItemsAsync(candidateProfileId, minScore, ct);
+        var name = await _store.GetCandidateNameAsync(candidateProfileId, ct);
         return DigestRenderer.Render(items, name);
     }
 
-    public async Task<DigestSendResult> SendDailyDigestAsync(int minScore, CancellationToken ct)
+    public async Task<IReadOnlyList<DigestSendResult>> SendAllAsync(CancellationToken ct)
+    {
+        var profiles = await _store.GetProfilesAsync(ct);
+        var results = new List<DigestSendResult>(profiles.Count);
+        foreach (var p in profiles)
+            results.Add(await SendDailyDigestAsync(p.Id, p.MinimumScoreToShow, ct));
+        return results;
+    }
+
+    public async Task<DigestSendResult> SendDailyDigestAsync(Guid candidateProfileId, int minScore, CancellationToken ct)
     {
         var run = ExecutionRun.Start("SendDailyDigest");
-        var items = await _store.GetDigestItemsAsync(minScore, ct);
-        var candidateName = await _store.GetCandidateNameAsync(ct);
+        var items = await _store.GetDigestItemsAsync(candidateProfileId, minScore, ct);
+        var candidateName = await _store.GetCandidateNameAsync(candidateProfileId, ct);
 
         // No relevant opportunities: record the run without error and don't send.
         if (items.Count == 0)

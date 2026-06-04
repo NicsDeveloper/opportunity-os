@@ -21,5 +21,12 @@ public interface IFirehoseStore
     Task<IReadOnlyList<RawJobCandidate>> GetRawCandidatesAsync(int take, CancellationToken ct);
     Task<int> CountRawCandidatesAsync(DateTime? sinceUtc, CancellationToken ct);
 
+    // ---- Promotion (RawJobCandidate -> JobPosting) ----
+    Task<RawJobCandidate?> GetRawCandidateAsync(Guid id, CancellationToken ct);
+    /// <summary>Candidates eligible for promotion: not yet promoted/rejected, optionally with a real company.</summary>
+    Task<IReadOnlyList<RawJobCandidate>> GetPromotableAsync(int minSourceConfidence, bool requireRealCompany, int take, CancellationToken ct);
+    Task<JobPosting?> FindJobByFingerprintAsync(string fingerprint, CancellationToken ct);
+    Task AddSourceOccurrenceAsync(JobPostingSourceOccurrence occurrence, CancellationToken ct);
+
     Task SaveChangesAsync(CancellationToken ct);
 }

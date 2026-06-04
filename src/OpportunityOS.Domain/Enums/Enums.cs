@@ -15,7 +15,16 @@ public enum CompanySource
     SearchEngine = 3,
     PublicRegistry = 4,
     AtsDiscovery = 5,
-    Bacen = 6
+    Bacen = 6,
+    SearchDiscovery = 7
+}
+
+public enum ConsultingCompanyCandidateStatus
+{
+    Candidate = 1,
+    PromotedToCompany = 2,
+    Rejected = 3,
+    Duplicate = 4
 }
 
 public enum JobPostingStatus
@@ -121,4 +130,28 @@ public enum RawJobCandidateStatus
     PromotedToJobPosting = 5,
     Rejected = 6,
     Expired = 7
+}
+
+public enum JobVerificationStatus
+{
+    Unverified = 1,
+    AggregatorOnly = 2,
+    LikelyOriginal = 3,
+    VerifiedOriginal = 4,
+    OfficialAts = 5,
+    Expired = 6
+}
+
+public enum UserFeedbackType
+{
+    Relevant = 1,
+    Irrelevant = 2,
+    HideSimilar = 3,
+    BadCompanyDetection = 4,
+    BadScore = 5,
+    Duplicate = 6,
+    Expired = 7,
+    InterestingCompany = 8,
+    Applied = 9,
+    ContactedRecruiter = 10
 }

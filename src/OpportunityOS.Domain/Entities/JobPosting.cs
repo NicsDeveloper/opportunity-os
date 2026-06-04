@@ -35,6 +35,7 @@ public sealed class JobPosting
     public string? SourceName { get; private set; }
     public string? RealCompanyName { get; private set; }
     public string? OriginalJobUrl { get; private set; }
+    public string? NormalizedFingerprint { get; private set; }
 
     private JobPosting() { }
 
@@ -125,6 +126,8 @@ public sealed class JobPosting
         UpdatedAtUtc = DateTime.UtcNow;
     }
 
+    public void SetFingerprint(string fingerprint) => NormalizedFingerprint = fingerprint;
+
     public void SetSourceQuality(
         SourceType sourceType, string? sourceName, int sourceConfidenceScore,
         bool requiresManualValidation, string? realCompanyName = null, string? originalJobUrl = null)
@@ -144,8 +147,13 @@ public sealed class JobPosting
         UpdatedAtUtc = DateTime.UtcNow;
     }
 
-    /// <summary>Best-known posting date for freshness (published, else discovered).</summary>
-    public DateTime EffectiveDateUtc => PublishedAtUtc ?? CreatedAtUtc;
+    /// <summary>Best-known posting date for freshness: real publish date, else the source's
+    /// last-updated date, else (only as a last resort) when WE discovered it.</summary>
+    public DateTime EffectiveDateUtc => PublishedAtUtc ?? SourceUpdatedAtUtc ?? CreatedAtUtc;
+
+    /// <summary>True when the date above comes from the SOURCE (published/updated), not just from
+    /// when we discovered it — lets the UI say "publicada há X" honestly vs "encontrada há X".</summary>
+    public bool HasSourceDate => PublishedAtUtc is not null || SourceUpdatedAtUtc is not null;
 
     /// <summary>Talent-pool / evergreen entries (not a real, datable vacancy) — often 404.</summary>
     public bool IsTalentPool =>
