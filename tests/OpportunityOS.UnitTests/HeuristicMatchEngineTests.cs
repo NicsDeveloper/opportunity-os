@@ -1,5 +1,6 @@
 using OpportunityOS.Application.Matching;
 using OpportunityOS.Application.Normalization;
+using OpportunityOS.Domain.Entities;
 using OpportunityOS.Domain.Enums;
 using Xunit;
 
@@ -173,6 +174,34 @@ public sealed class HeuristicMatchEngineTests
 
         // Remote + senior must NOT lift a role with no technical adherence into the board.
         Assert.True(result.OverallScore <= 45, $"Expected <= 45 (gated) but was {result.OverallScore}");
+    }
+
+    [Fact]
+    public void ExcludedStack_StronglyPenalizesAnOtherwiseCoreMatch()
+    {
+        var engine = CreateEngine();
+        // A React job that also mentions PHP. For a React profile it's a core match…
+        var job = TestData.Job(
+            title: "Fullstack Developer (React / PHP)",
+            description: "React, TypeScript and Next.js frontend on a PHP / Laravel backend. Remote, Brazil.",
+            location: "Remote - Brazil", language: "en");
+
+        var baseProfile = new CandidateProfile(
+            "React Dev", "Frontend", "x", "Brasil", "Pleno/Sênior", "pt-BR",
+            coreSkills: new[] { "React", "TypeScript", "Next.js", "CSS" },
+            preferredWorkModes: new[] { "Remote" });
+        var excludesPhp = new CandidateProfile(
+            "React Dev (no PHP)", "Frontend", "x", "Brasil", "Pleno/Sênior", "pt-BR",
+            coreSkills: new[] { "React", "TypeScript", "Next.js", "CSS" },
+            preferredWorkModes: new[] { "Remote" },
+            excludedStacks: new[] { "PHP" });
+
+        var baseScore = engine.Evaluate(baseProfile, job).OverallScore;
+        var excludedScore = engine.Evaluate(excludesPhp, job).OverallScore;
+
+        // …but excluding PHP must drag the same job down hard.
+        Assert.True(excludedScore <= baseScore - 20,
+            $"Expected excluded ({excludedScore}) to be >=20 below base ({baseScore})");
     }
 
     [Fact]

@@ -120,8 +120,8 @@ public sealed class OpportunityOsDbContext : DbContext
                 .Metadata.SetValueComparer(stringListComparer);
             e.HasIndex(x => x.OverallScore);
             e.HasIndex(x => x.JobPostingId);
-            // Per-profile matches: fetch the latest match for a (job, profile) pair.
-            e.HasIndex(x => new { x.JobPostingId, x.CandidateProfileId });
+            // Latest match for a (job, profile) pair — covers the per-profile feed/digest queries.
+            e.HasIndex(x => new { x.JobPostingId, x.CandidateProfileId, x.CreatedAtUtc });
         });
 
         b.Entity<ExecutionRun>(e =>
@@ -142,6 +142,8 @@ public sealed class OpportunityOsDbContext : DbContext
             e.HasIndex(x => x.JobPostingId);
             e.HasIndex(x => x.OpportunityMatchId);
             e.HasIndex(x => x.CandidateProfileId);
+            // Digest fetches this profile's drafts for a set of jobs.
+            e.HasIndex(x => new { x.CandidateProfileId, x.JobPostingId });
         });
 
         b.Entity<PromptExecutionLog>(e =>
@@ -257,6 +259,8 @@ public sealed class OpportunityOsDbContext : DbContext
             e.HasIndex(x => x.RawJobCandidateId);
             e.HasIndex(x => x.Type);
             e.HasIndex(x => x.CandidateProfileId);
+            // Per-profile hide/applied lookups on the board and applications.
+            e.HasIndex(x => new { x.CandidateProfileId, x.JobPostingId, x.Type });
         });
 
         b.Entity<ConsultingCompanyCandidate>(e =>

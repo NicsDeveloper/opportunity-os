@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using OpportunityOS.Contracts;
@@ -440,4 +441,68 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     private static async Task<List<BestOpportunityResponse>> Matches(HttpClient client, Guid profileId) =>
         await client.GetFromJsonAsync<List<BestOpportunityResponse>>(
             $"/api/matches?minScore=0&take=200&candidateProfileId={profileId}") ?? new();
+
+    [DbFact]
+    public async Task Rescore_SingleProfile_DoesNotMatchOthers_AllProfiles_Does()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        var a = await CreateProfile("Dev A", ".NET", "C#", "AWS");
+        var b = await CreateProfile("Dev B", "Java", "Spring Boot", "AWS");
+        await SeedJob("Senior Backend (.NET)", "Backend .NET, C#, AWS. Remote, Brazil.");
+
+        // Default rescore targets ONE profile (A here, passed explicitly) -> no matches for B.
+        var r1 = await client.PostAsync($"/api/jobs/rescore?candidateProfileId={a}", null);
+        r1.EnsureSuccessStatusCode();
+        Assert.NotEmpty(await Matches(client, a));
+        Assert.Empty(await Matches(client, b));
+
+        // allProfiles fans out -> B now has matches too.
+        var r2 = await client.PostAsync("/api/jobs/rescore?allProfiles=true", null);
+        r2.EnsureSuccessStatusCode();
+        Assert.NotEmpty(await Matches(client, b));
+    }
+
+    [DbFact]
+    public async Task GeneratedMessage_IsTiedToTheProfile_ItWasDraftedFor()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        var a = await CreateProfile("Dev A", ".NET", "C#", "ASP.NET Core", "AWS", "Kafka");
+        var jobId = await SeedJob(
+            "Senior Backend Engineer (.NET / Payments)",
+            "Build payments with .NET, C#, ASP.NET Core, Kafka, AWS. Remote, Brazil. Fintech.");
+
+        var outreach = await client.PostAsync($"/api/jobs/{jobId}/ai/generate-outreach?candidateProfileId={a}", null);
+        outreach.EnsureSuccessStatusCode();
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<Infrastructure.Persistence.OpportunityOsDbContext>();
+        var msg = await db.GeneratedMessages.SingleAsync(m => m.JobPostingId == jobId);
+        Assert.Equal(a, msg.CandidateProfileId);
+    }
+
+    [DbFact]
+    public async Task DebugProfileScores_ShowsDistinctScoresPerProfile()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = _factory.CreateClient();
+
+        var dotnet = await CreateProfile("DotNet Dev", ".NET", "C#", "ASP.NET Core", "AWS");
+        var react = await CreateProfile("React Dev", "React", "TypeScript", "Next.js");
+        var jobId = await SeedJob(
+            "Senior Backend Engineer (.NET / Payments)",
+            "Build payments with .NET, C#, ASP.NET Core, Kafka, AWS. Remote, Brazil. Fintech.");
+        await client.PostAsync($"/api/jobs/{jobId}/match?candidateProfileId={dotnet}", null);
+        await client.PostAsync($"/api/jobs/{jobId}/match?candidateProfileId={react}", null);
+
+        var doc = await client.GetFromJsonAsync<JsonElement>($"/api/debug/job/{jobId}/profile-scores");
+        var scores = doc.GetProperty("scores").EnumerateArray()
+            .ToDictionary(e => e.GetProperty("candidateProfile").GetString()!,
+                          e => e.GetProperty("score").GetInt32());
+        Assert.True(scores["DotNet Dev"] > scores["React Dev"],
+            $".NET ({scores["DotNet Dev"]}) should beat React ({scores["React Dev"]}) on a .NET job");
+    }
 }

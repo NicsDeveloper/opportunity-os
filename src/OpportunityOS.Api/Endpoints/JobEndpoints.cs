@@ -89,6 +89,7 @@ public static class JobEndpoints
         // set; engineVersion tags the produced matches. Writes a fresh match only when the score changed.
         group.MapPost("/rescore", async (
             Guid? candidateProfileId, bool? allProfiles, int? take, string? engineVersion,
+            bool? onlyWithoutCurrentEngineVersion, DateTime? minCreatedAtUtc,
             OpportunityOsDbContext db, ICurrentCandidateProfileProvider profiles,
             IJobNormalizer normalizer, IMatchEngine engine, CancellationToken ct) =>
         {
@@ -105,37 +106,42 @@ public static class JobEndpoints
             }
             if (targets.Count == 0) return Results.BadRequest("No candidate profile registered.");
             var version = string.IsNullOrWhiteSpace(engineVersion) ? HeuristicMatchEngine.Version : engineVersion!;
+            var skipCurrent = onlyWithoutCurrentEngineVersion == true;
 
             var run = ExecutionRun.Start("RescoreMatches");
             await db.ExecutionRuns.AddAsync(run, ct);
 
             var jobsQuery = db.JobPostings
-                .Where(j => j.Status != JobPostingStatus.Expired && j.Status != JobPostingStatus.Archived)
-                .OrderByDescending(j => j.CreatedAtUtc);
+                .Where(j => j.Status != JobPostingStatus.Expired && j.Status != JobPostingStatus.Archived);
+            if (minCreatedAtUtc is { } since) jobsQuery = jobsQuery.Where(j => j.CreatedAtUtc >= since);
+            var orderedJobs = jobsQuery.OrderByDescending(j => j.CreatedAtUtc);
             var jobs = take is { } t
-                ? await jobsQuery.Take(Math.Clamp(t, 1, 100000)).ToListAsync(ct)
-                : await jobsQuery.ToListAsync(ct);
+                ? await orderedJobs.Take(Math.Clamp(t, 1, 100000)).ToListAsync(ct)
+                : await orderedJobs.ToListAsync(ct);
 
-            // Latest score per (job, profile) so we skip unchanged ones.
+            // Latest match per (job, profile): its score (skip unchanged) and engine version
+            // (skip already-current when onlyWithoutCurrentEngineVersion=true).
             var pids = targets.Select(p => p.Id).ToList();
             var existing = await db.OpportunityMatches
                 .Where(m => pids.Contains(m.CandidateProfileId))
-                .Select(m => new { m.JobPostingId, m.CandidateProfileId, m.OverallScore, m.CreatedAtUtc })
+                .Select(m => new { m.JobPostingId, m.CandidateProfileId, m.OverallScore, m.EngineVersion, m.CreatedAtUtc })
                 .ToListAsync(ct);
             var latest = existing
                 .GroupBy(m => (m.JobPostingId, m.CandidateProfileId))
-                .ToDictionary(g => g.Key, g => g.OrderByDescending(m => m.CreatedAtUtc).First().OverallScore);
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(m => m.CreatedAtUtc).First());
 
-            int rescored = 0, changed = 0;
+            int rescored = 0, changed = 0, skipped = 0;
             foreach (var job in jobs)
             {
                 var norm = normalizer.Normalize(job);
                 job.ApplyNormalization(norm.Seniority, norm.WorkMode, norm.Language, norm.Skills, norm.Domains);
                 foreach (var profile in targets)
                 {
+                    var hasLatest = latest.TryGetValue((job.Id, profile.Id), out var prev);
+                    if (skipCurrent && hasLatest && prev!.EngineVersion == version) { skipped++; continue; }
                     var result = engine.Evaluate(profile, job);
                     rescored++;
-                    if (latest.TryGetValue((job.Id, profile.Id), out var prev) && prev == result.OverallScore) continue;
+                    if (hasLatest && prev!.OverallScore == result.OverallScore && prev.EngineVersion == version) continue;
                     db.OpportunityMatches.Add(result.ToEntity(job.Id, profile.Id, version));
                     changed++;
                     run.RecordSuccess();
@@ -143,7 +149,7 @@ public static class JobEndpoints
             }
             run.Complete();
             await db.SaveChangesAsync(ct);
-            return Results.Ok(new { profiles = targets.Count, rescored, changed });
+            return Results.Ok(new { profiles = targets.Count, rescored, changed, skipped });
         });
 
         // Latest match for a job for the requested (or default) profile.

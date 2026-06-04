@@ -287,9 +287,12 @@ public static class DashboardEndpoints
             var jobs = await db.JobPostings.Where(j => jobIds.Contains(j.Id)).ToDictionaryAsync(j => j.Id, ct);
             var companyIds = jobs.Values.Select(j => j.CompanyId).Distinct().ToList();
             var companies = await db.Companies.Where(c => companyIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
-            var matches = await db.OpportunityMatches.Where(m => jobIds.Contains(m.JobPostingId)).ToListAsync(ct);
+            // Score shown is THIS profile's score for the job (not another profile's match).
+            var matches = await db.OpportunityMatches
+                .Where(m => jobIds.Contains(m.JobPostingId) && m.CandidateProfileId == profileId.Value)
+                .ToListAsync(ct);
             var scoreByJob = matches.GroupBy(m => m.JobPostingId)
-                .ToDictionary(g => g.Key, g => g.Max(m => m.OverallScore));
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(m => m.CreatedAtUtc).First().OverallScore);
 
             var result = byJob
                 .Where(f => jobs.ContainsKey(f.JobPostingId!.Value))
