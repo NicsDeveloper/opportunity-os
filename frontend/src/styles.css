@@ -352,8 +352,8 @@ button { font-family: inherit; }
 
 /* ---- multi-profile: selector + Perfis screen ---- */
 .uc-label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .6; margin-bottom: 4px; }
-.profile-select { width: 100%; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line, #2a2f3a);
-  background: var(--panel, #161a22); color: inherit; font-size: 13px; font-weight: 600; }
+.profile-select { width: 100%; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border-strong, #e2e8f0);
+  background: #fff; color: var(--ink); font-size: 13px; font-weight: 600; }
 .profiles-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin: 16px 0; }
 .profile-card.active { outline: 2px solid var(--accent, #5b8cff); }
 .pc-top { display: flex; gap: 10px; align-items: center; }
@@ -367,8 +367,8 @@ button { font-family: inherit; }
 .pf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin: 14px 0; }
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field-l { font-size: 12px; opacity: .7; }
-.field input { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line, #2a2f3a);
-  background: var(--panel, #11151c); color: inherit; font-size: 13px; }
+.field input { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-strong, #e2e8f0);
+  background: #fff; color: var(--ink); font-size: 13px; }
 .pf-actions { display: flex; gap: 10px; align-items: center; }
 
 /* ---- auth & onboarding (light theme, consistent with the app) ---- */
