@@ -582,7 +582,7 @@ function OppCard({ o, notify, onChanged, profileId }: {
         {/* col 2 — fit reason */}
         <div className="c-reason">
           <div className={"adh " + adh.tone}><span className="adh-dot" /> {adh.label}</div>
-          <p className="reason">{friendlyReason(o, score)}</p>
+          <p className="reason">{friendlyReason(o)}</p>
         </div>
 
         {/* col 3 — score */}
@@ -1157,11 +1157,10 @@ function sourceLabel(t?: string): { text: string; cls: string; good?: boolean; w
 function isWeakSource(o: BestOpportunity) {
   return o.sourceType === "Aggregator" || (o.sourceConfidenceScore ?? 0) < 40;
 }
-function friendlyReason(o: BestOpportunity, score: number) {
-  const fin = o.skills.some((s) => /fintech|pagament|banc|financ|payments|pix|cr[ée]dito/i.test(s))
-    || /fintech|pagament|financ|banc|cr[ée]dito/i.test(o.jobTitle);
-  const lead = score >= 70 ? "Forte match" : "Boa opção";
-  return `${lead} com .NET/C# e ${fin ? "backend financeiro" : "backend"}.`;
+// Truthful, profile-agnostic one-liner: reflects the JOB's real stack (not a hardcoded ".NET/C#").
+function friendlyReason(o: BestOpportunity) {
+  const top = (o.skills ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 4);
+  return top.length ? `Combina pela stack: ${top.join(", ")}.` : "Veja os detalhes da aderência ao seu perfil.";
 }
 function actionLabel(a: string) { return a === "ContactedRecruiter" ? "contatei recrutador" : "cadastrei/apliquei"; }
 function priorityLabel(p: string) {

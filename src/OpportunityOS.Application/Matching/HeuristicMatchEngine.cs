@@ -38,8 +38,8 @@ public sealed class HeuristicMatchEngine : IMatchEngine
         var risks = new List<string>();
         var missing = new List<string>();
 
-        var tech = ScoreTechnical(profile, sig, jobFamilies, titleLower, titleHasCore, haystack, strengths, risks, missing,
-            out var managerial, out var coreHit);
+        var tech = ScoreTechnical(profile, sig, jobFamilies, titleFamilies, titleLower, titleHasCore, haystack,
+            strengths, risks, missing, out var managerial, out var coreHit);
         var role = ScoreRole(profile, job.Title, titleLower, titleHasCore, strengths, risks);
         var seniority = ScoreSeniority(profile, norm.Seniority, strengths, risks);
         var domain = ScoreDomain(profile, haystack, strengths);
@@ -79,7 +79,7 @@ public sealed class HeuristicMatchEngine : IMatchEngine
 
     private static int ScoreTechnical(
         CandidateProfile profile, ProfileStackSignature sig, HashSet<StackFamily> jobFamilies,
-        string titleLower, bool titleHasCore, string haystack,
+        HashSet<StackFamily> titleFamilies, string titleLower, bool titleHasCore, string haystack,
         List<string> strengths, List<string> risks, List<string> missing,
         out bool managerial, out bool coreHit)
     {
@@ -103,13 +103,26 @@ public sealed class HeuristicMatchEngine : IMatchEngine
         // How many of the candidate's own skills (core + secondary) literally appear in the posting.
         var supporting = CountSkillOverlap(profile, haystack);
 
+        // The TITLE is the strongest signal of the role's PRIMARY stack. If the title names a stack
+        // family that isn't the candidate's core (e.g. "C# Developer" for a Java profile), the role's
+        // primary stack is foreign — a body mention of the core stack is incidental, not a core hit.
+        var titleDeclaresForeignCore = sig.Core.Count > 0 && titleFamilies.Count > 0
+            && !titleFamilies.Overlaps(sig.Core);
+
         int score;
-        if (coreFamilies.Count > 0)
+        if (coreFamilies.Count > 0 && !titleDeclaresForeignCore)
         {
             coreHit = true;
             score = 72 + Math.Min(supporting * 6, 28);
             strengths.Add($"Stack principal do perfil presente na vaga ({FamilyLabels(coreFamilies)})");
             if (supporting > 2) strengths.Add("Várias skills do perfil citadas na vaga");
+        }
+        else if (coreFamilies.Count > 0 && titleDeclaresForeignCore)
+        {
+            // Primary stack of the role differs from the candidate's core; their core appears only in the body.
+            score = 50 + Math.Min(supporting * 5, 18);
+            risks.Add($"Stack principal da vaga é outra ({FamilyLabels(titleFamilies.ToList())}); seu core aparece só como secundário");
+            missing.Add("A vaga não é primariamente da sua stack principal");
         }
         else if (secondaryFamilies.Count > 0)
         {
