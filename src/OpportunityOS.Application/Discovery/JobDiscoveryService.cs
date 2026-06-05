@@ -20,6 +20,13 @@ public interface IJobDiscoveryService
     /// <summary>Discover jobs for one company (when <paramref name="companyId"/> is set) or all.</summary>
     Task<DiscoveryResult> DiscoverAsync(Guid? companyId, CancellationToken ct);
 
+    /// <summary>
+    /// Sweep every registered company (highest priority first), optionally capped to
+    /// <paramref name="maxCompanies"/>. Honors cancellation between companies, so callers can
+    /// time-box the run (admin "rodar varredura por N segundos").
+    /// </summary>
+    Task<DiscoveryResult> DiscoverAllAsync(int? maxCompanies, CancellationToken ct);
+
     /// <summary>Discover jobs by keyword across search providers (e.g. Gupy); auto-creates companies.</summary>
     Task<DiscoveryResult> SearchAsync(IReadOnlyCollection<string> keywords, CancellationToken ct);
 }
@@ -128,7 +135,13 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
             run.Id, run.Status.ToString(), companies.Count, providersInvoked, newJobs, updatedJobs, run.ItemsFailed);
     }
 
-    public async Task<DiscoveryResult> DiscoverAsync(Guid? companyId, CancellationToken ct)
+    public Task<DiscoveryResult> DiscoverAsync(Guid? companyId, CancellationToken ct) =>
+        DiscoverInternalAsync(companyId, maxCompanies: null, ct);
+
+    public Task<DiscoveryResult> DiscoverAllAsync(int? maxCompanies, CancellationToken ct) =>
+        DiscoverInternalAsync(companyId: null, maxCompanies, ct);
+
+    private async Task<DiscoveryResult> DiscoverInternalAsync(Guid? companyId, int? maxCompanies, CancellationToken ct)
     {
         var run = ExecutionRun.Start("DiscoverJobs");
         await _store.AddExecutionRunAsync(run, ct);
@@ -136,6 +149,8 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
         var companies = companyId is { } id
             ? await GetSingleCompany(id, ct)
             : await _store.GetCompaniesByPriorityAsync(ct);
+        if (maxCompanies is { } cap && cap > 0 && companies.Count > cap)
+            companies = companies.Take(cap).ToList();
 
         int newJobs = 0, updatedJobs = 0, providersInvoked = 0;
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -145,6 +160,8 @@ public sealed class JobDiscoveryService : IJobDiscoveryService
 
         foreach (var company in companies)
         {
+            // Time-box / cancellation: stop cleanly between companies.
+            if (ct.IsCancellationRequested) break;
             var providers = _providers.Where(p => p.CanHandle(company)).ToList();
             _logger.LogInformation("CompanyScanStarted {Company} (providers: {Count})", company.Name, providers.Count);
 

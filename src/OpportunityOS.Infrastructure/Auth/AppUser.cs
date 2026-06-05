@@ -11,6 +11,8 @@ namespace OpportunityOS.Infrastructure.Auth;
 public sealed class AppUser : IdentityUser<Guid>
 {
     public string DisplayName { get; set; } = string.Empty;
+    /// <summary>Operational admin: may access the admin panel and trigger sweeps / system actions.</summary>
+    public bool IsAdmin { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime? LastLoginAtUtc { get; set; }

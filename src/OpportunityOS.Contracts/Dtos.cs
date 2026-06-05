@@ -8,7 +8,9 @@ public sealed record LoginRequest(string Email, string Password);
 
 public sealed record AuthUserResponse(Guid Id, string Email, string DisplayName);
 
-public sealed record AuthMeResponse(Guid Id, string Email, string DisplayName, Guid? WorkspaceId);
+public sealed record AuthMeResponse(Guid Id, string Email, string DisplayName, Guid? WorkspaceId, bool IsAdmin);
+
+public sealed record AdminSweepRequest(int? MaxCompanies, int? MaxDurationSeconds);
 
 public sealed record WorkspaceMeResponse(Guid WorkspaceId, string Name, AuthUserResponse User, Guid? DefaultCandidateProfileId);
 

@@ -43,7 +43,7 @@ public static class AuthEndpoints
             await db.SaveChangesAsync(ct);
 
             await signIn.SignInAsync(user, isPersistent: true);
-            return Results.Ok(new AuthMeResponse(user.Id, user.Email!, user.DisplayName, workspace.Id));
+            return Results.Ok(new AuthMeResponse(user.Id, user.Email!, user.DisplayName, workspace.Id, user.IsAdmin));
         }).AllowAnonymous();
 
         // Login: cookie sign-in via SignInManager.
@@ -65,7 +65,7 @@ public static class AuthEndpoints
             await db.SaveChangesAsync(ct);
 
             var workspaceId = await db.Workspaces.Where(w => w.UserId == user.Id).Select(w => (Guid?)w.Id).FirstOrDefaultAsync(ct);
-            return Results.Ok(new AuthMeResponse(user.Id, user.Email!, user.DisplayName, workspaceId));
+            return Results.Ok(new AuthMeResponse(user.Id, user.Email!, user.DisplayName, workspaceId, user.IsAdmin));
         }).AllowAnonymous();
 
         // Logout: clear the cookie.
@@ -86,7 +86,7 @@ public static class AuthEndpoints
             if (user is null) return Results.Json(new { error = "Not authenticated." }, statusCode: StatusCodes.Status401Unauthorized);
 
             var workspaceId = await current.GetWorkspaceIdAsync(ct);
-            return Results.Ok(new AuthMeResponse(user.Id, user.Email!, user.DisplayName, workspaceId));
+            return Results.Ok(new AuthMeResponse(user.Id, user.Email!, user.DisplayName, workspaceId, user.IsAdmin));
         }).RequireAuthorization();
     }
 }

@@ -149,7 +149,15 @@ export interface ProfileInput {
 }
 
 // ---- Auth & Workspace ----
-export interface AuthMe { id: string; email: string; displayName: string; workspaceId: string | null; }
+export interface AuthMe { id: string; email: string; displayName: string; workspaceId: string | null; isAdmin: boolean; }
+export interface AdminRun {
+  id: string; runType: string; status: string; startedAtUtc: string; finishedAtUtc: string | null;
+  itemsProcessed: number; itemsSucceeded: number; itemsFailed: number;
+}
+export interface AdminOverview {
+  companies: number; scannable: number; jobs: number; matches: number;
+  runs: AdminRun[]; recurring: { name: string; cron: string; desc: string }[];
+}
 export interface WorkspaceMe {
   workspaceId: string; name: string;
   user: { id: string; email: string; displayName: string };
@@ -176,6 +184,12 @@ export const api = {
     logout: () => post<void>("/auth/logout"),
   },
   workspaceMe: () => get<WorkspaceMe>("/workspace/me"),
+  admin: {
+    overview: () => get<AdminOverview>("/admin/overview"),
+    sweep: (maxCompanies?: number, maxDurationSeconds?: number) =>
+      post<{ started: boolean; maxCompanies: number | null; maxDurationSeconds: number }>(
+        "/admin/sweep", { maxCompanies, maxDurationSeconds }),
+  },
   profile: () => get<Profile>("/candidate-profile"),
   // Multi-profile: list, create, edit, and move the default anchor.
   profiles: () => get<Profile[]>("/candidate-profiles"),

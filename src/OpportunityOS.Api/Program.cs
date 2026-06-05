@@ -31,6 +31,7 @@ builder.Services.AddIdentity<AppUser, IdentityRole<Guid>>(options =>
         options.User.RequireUniqueEmail = true;
     })
     .AddEntityFrameworkStores<OpportunityOsDbContext>()
+    .AddClaimsPrincipalFactory<AdminClaimsPrincipalFactory>()
     .AddDefaultTokenProviders();
 
 builder.Services.ConfigureApplicationCookie(options =>
@@ -59,6 +60,8 @@ builder.Services.AddAuthorization(options =>
         if (openSystem) policy.RequireAssertion(_ => true);
         else policy.RequireAuthenticatedUser();
     });
+    // Operational admin panel + actions (sweeps, system controls).
+    options.AddPolicy("Admin", policy => policy.RequireClaim(AdminClaimsPrincipalFactory.AdminClaim, "true"));
 });
 
 var app = builder.Build();
@@ -107,6 +110,7 @@ app.MapGet("/", () => Results.Ok(new { service = "Opportunity OS", status = "ok"
 
 app.MapAuthEndpoints();
 app.MapWorkspaceEndpoints();
+app.MapAdminEndpoints();
 app.MapCandidateProfileEndpoints();
 app.MapCompanyEndpoints();
 app.MapJobEndpoints();

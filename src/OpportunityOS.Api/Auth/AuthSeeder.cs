@@ -49,6 +49,14 @@ public static class AuthSeeder
             logger.LogInformation("AuthSeeder created dev user {Email}.", DevEmail);
         }
 
+        // The local dev user is the operational admin (admin panel access).
+        if (!user.IsAdmin)
+        {
+            user.IsAdmin = true;
+            await users.UpdateAsync(user);
+            logger.LogInformation("AuthSeeder promoted {Email} to admin.", DevEmail);
+        }
+
         // 2. Ensure the dev user has a workspace.
         var workspace = await db.Workspaces.FirstOrDefaultAsync(w => w.UserId == user.Id);
         if (workspace is null)

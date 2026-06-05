@@ -5,7 +5,7 @@ import {
   type GeneratedMessage, type Profile, type ProfileInput, type Summary,
 } from "./api";
 
-type Section = "oportunidades" | "empresas" | "aplicacoes" | "descobertas" | "relatorios" | "perfis";
+type Section = "oportunidades" | "empresas" | "aplicacoes" | "descobertas" | "relatorios" | "perfis" | "admin";
 
 // The selected candidate profile lives client-side (localStorage) — no global server "active" state.
 const PROFILE_KEY = "oos.selectedProfileId";
@@ -59,7 +59,7 @@ function Workspace({ me, onLogout }: { me: AuthMe; onLogout: () => void }) {
     <div className="layout">
       <Sidebar section={section} setSection={setSection} reload={reload}
         profiles={list} current={current} onSelectProfile={selectProfile}
-        userName={me.displayName} userEmail={me.email} onLogout={onLogout} />
+        userName={me.displayName} userEmail={me.email} isAdmin={me.isAdmin} onLogout={onLogout} />
       <main className="main">
         <div className="main-inner">
           {section === "oportunidades" && <OpportunitiesScreen reload={reload} notify={notify} onChanged={refresh} firstName={firstNameOf(current?.fullName)} profileLabel={current?.displayName} profileId={current?.id} />}
@@ -68,6 +68,7 @@ function Workspace({ me, onLogout }: { me: AuthMe; onLogout: () => void }) {
           {section === "descobertas" && <DiscoverScreen reload={reload} notify={notify} onChanged={refresh} />}
           {section === "relatorios" && <ReportsScreen reload={reload} profileId={current?.id} />}
           {section === "perfis" && <ProfilesScreen reload={reload} notify={notify} onChanged={refresh} selectedId={current?.id} onSelectProfile={selectProfile} />}
+          {section === "admin" && me.isAdmin && <AdminScreen reload={reload} notify={notify} onChanged={refresh} />}
         </div>
       </main>
       {toast && <div className="toast">{toast}</div>}
@@ -228,10 +229,10 @@ const SYS_NAV: { key: Section; label: string; icon: string }[] = [
   { key: "perfis", label: "Perfis", icon: "building" },
 ];
 
-function Sidebar({ section, setSection, reload, profiles, current, onSelectProfile, userName, userEmail, onLogout }: {
+function Sidebar({ section, setSection, reload, profiles, current, onSelectProfile, userName, userEmail, isAdmin, onLogout }: {
   section: Section; setSection: (s: Section) => void; reload: number;
   profiles: Profile[]; current?: Profile; onSelectProfile: (id: string) => void;
-  userName: string; userEmail: string; onLogout: () => void;
+  userName: string; userEmail: string; isAdmin: boolean; onLogout: () => void;
 }) {
   const runs = useAsync(() => api.runs(3), [reload]);
   const summary = useAsync(() => api.summary(current?.id), [reload, current?.id]);
@@ -265,6 +266,11 @@ function Sidebar({ section, setSection, reload, profiles, current, onSelectProfi
             <Icon name={n.icon} size={16} /> {n.label}
           </button>
         ))}
+        {isAdmin && (
+          <button className={"nav-item small" + (section === "admin" ? " active" : "")} onClick={() => setSection("admin")}>
+            <Icon name="bolt" size={16} /> Operação
+          </button>
+        )}
       </nav>
 
       <div className="usercard">
@@ -972,6 +978,91 @@ function ProfilesScreen({ reload, notify, onChanged, selectedId, onSelectProfile
           </div>
         </div>
       )}
+    </>
+  );
+}
+
+/* ============================ admin (operação) ============================ */
+
+function AdminScreen({ reload, notify, onChanged }: {
+  reload: number; notify: (m: string) => void; onChanged: () => void;
+}) {
+  const ov = useAsync(() => api.admin.overview(), [reload]);
+  const [maxCompanies, setMaxCompanies] = useState(50);
+  const [seconds, setSeconds] = useState(120);
+  const [busy, setBusy] = useState(false);
+  const data = ov.data;
+
+  const runSweep = async () => {
+    setBusy(true);
+    try {
+      await api.admin.sweep(maxCompanies || undefined, seconds);
+      notify(`Varredura iniciada (até ${maxCompanies || "todas"} empresas, máx ${seconds}s).`);
+      window.setTimeout(onChanged, 2000);
+    } catch (e) { notify("Falha ao iniciar varredura: " + String(e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <header className="hdr">
+        <div>
+          <h1>Operação</h1>
+          <p className="hdr-sub">Painel do administrador — captura de vagas e status do radar.</p>
+        </div>
+        <div className="hdr-right"><button className="btn sm" onClick={onChanged}>Atualizar</button></div>
+      </header>
+
+      {ov.error && <p className="err">{ov.error}</p>}
+
+      <div className="admin-cards">
+        <div className="card admin-stat"><div className="as-n">{data?.companies ?? "—"}</div><div className="as-l">Empresas cadastradas</div></div>
+        <div className="card admin-stat"><div className="as-n">{data?.scannable ?? "—"}</div><div className="as-l">Com careers (varreável)</div></div>
+        <div className="card admin-stat"><div className="as-n">{data?.jobs ?? "—"}</div><div className="as-l">Vagas capturadas</div></div>
+        <div className="card admin-stat"><div className="as-n">{data?.matches ?? "—"}</div><div className="as-l">Matches</div></div>
+      </div>
+
+      <div className="card admin-sweep">
+        <h2>Rodar varredura agora</h2>
+        <p className="hdr-sub">Varre as empresas cadastradas (prioridade primeiro), em segundo plano. Limite por nº de empresas e/ou tempo.</p>
+        <div className="pf-grid">
+          <Field label="Máx. empresas (0 = todas)">
+            <input type="number" min={0} value={maxCompanies} onChange={(e) => setMaxCompanies(Math.max(0, Number(e.target.value) || 0))} />
+          </Field>
+          <Field label="Tempo máximo (segundos)">
+            <input type="number" min={5} max={1800} value={seconds} onChange={(e) => setSeconds(Math.min(1800, Math.max(5, Number(e.target.value) || 120)))} />
+          </Field>
+        </div>
+        <div className="pf-actions">
+          <button className="btn primary" disabled={busy} onClick={runSweep}>{busy ? "Iniciando…" : "▶ Rodar varredura"}</button>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>Captura contínua (Worker)</h2>
+        <p className="hdr-sub">Jobs recorrentes que mantêm a captura rodando enquanto o Worker está ativo.</p>
+        <table className="admin-table">
+          <thead><tr><th>Job</th><th>Cron</th><th>O que faz</th></tr></thead>
+          <tbody>{(data?.recurring ?? []).map((r) => (
+            <tr key={r.name}><td>{r.name}</td><td><code>{r.cron}</code></td><td>{r.desc}</td></tr>
+          ))}</tbody>
+        </table>
+      </div>
+
+      <div className="card">
+        <h2>Execuções recentes</h2>
+        <table className="admin-table">
+          <thead><tr><th>Tipo</th><th>Status</th><th>Proc.</th><th>OK</th><th>Erros</th><th>Início</th></tr></thead>
+          <tbody>{(data?.runs ?? []).map((r) => (
+            <tr key={r.id}>
+              <td>{r.runType}</td>
+              <td><span className={"run-status " + r.status.toLowerCase()}>{r.status}</span></td>
+              <td>{r.itemsProcessed}</td><td>{r.itemsSucceeded}</td><td>{r.itemsFailed}</td>
+              <td>{ago(r.startedAtUtc)}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
     </>
   );
 }
