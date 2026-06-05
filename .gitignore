@@ -14,6 +14,11 @@ artifacts/
 # Rider / VS Code
 .vscode/
 
+# Frontend (Vite/npm)
+node_modules/
+.vite/
+frontend/dist/
+
 # Secrets / local config
 appsettings.*.local.json
 *.env
