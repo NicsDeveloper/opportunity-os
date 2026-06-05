@@ -6,7 +6,41 @@
 
 ---
 
-## 0. Atualização — Auth Workspace MVP (login + isolamento)
+## 0. Atualização — Admin panel + correção de relevância
+
+Última leva (branch `feat/auth-workspace`). Dois temas:
+
+**Painel de operação (admin)**
+- **Papel admin de verdade**: `AppUser.IsAdmin` (migration `AddIsAdmin`); `AdminClaimsPrincipalFactory`
+  injeta a claim `is_admin` no cookie; policy **`Admin`** = `RequireClaim("is_admin","true")`.
+  O seeder promove `dev@local` a admin (Development/flag). `GET /api/auth/me` agora retorna `isAdmin`.
+- **Endpoints** (`RequireAuthorization("Admin")`): `GET /api/admin/overview` (contagens, crons dos jobs
+  recorrentes, execuções recentes) e `POST /api/admin/sweep` (`maxCompanies`, `maxDurationSeconds`) —
+  dispara uma varredura **em segundo plano** (escopo próprio de DI + CTS de timeout) via
+  `IJobDiscoveryService.DiscoverAllAsync(maxCompanies)`. Não-admin → 403.
+- **Varredura limitada**: `JobDiscoveryService.DiscoverAllAsync(maxCompanies)` varre todas as empresas
+  (prioridade primeiro), com cap por nº de empresas e **break por cancelamento** entre empresas
+  (permite time-box). A captura contínua segue no Worker (`continuous-discovery` */15).
+- **Frontend**: aba **"Operação"** só para admin (gate por `me.isAdmin`) — cards de status, agenda dos
+  jobs e form de varredura (máx. empresas / tempo máx.).
+
+**Correção de relevância (credibilidade do score)** — `Application/Matching`:
+- **Bug do substring**: `StackTaxonomy` casava tokens por substring, então `"java"` casava com
+  `"javascript"` (e `"go"` com `"google"`). Uma vaga C#/.NET que citava JavaScript era marcada como
+  família **Java** → técnico 100 num perfil Java. Agora o match é por **fronteira de palavra** (regex
+  com lookarounds alfanuméricos).
+- **Título como stack primária**: se o **título** declara uma família que não é o core do perfil
+  (ex.: "C# Developer" para perfil Java), uma menção do core só no corpo deixa de ser "core hit"
+  (demovida a secundária). Efeito: vaga C# pura caiu de **94 → 45** num perfil Java; vagas C#/.NET
+  passam a ~53–68, não 90+. Vaga que pede Java no próprio título continua alta (legítimo).
+- **Justificativa do card**: `friendlyReason` não é mais hardcoded em ".NET/C#"; reflete a stack real
+  da vaga (`o.skills`).
+- Regressão coberta em `StackTaxonomyTests` (`java` ≠ `javascript`; perfil Java em vaga C# < 60).
+  Após o fix, re-pontuar (`POST /api/jobs/rescore?allProfiles=true`) para corrigir matches já gravados.
+
+---
+
+## 0.0 Atualização — Auth Workspace MVP (login + isolamento)
 
 O sistema passou de multi-perfil **pré-auth** para um **produto logado**. Cada usuário tem um
 `Workspace` privado; seus dados pessoais ficam isolados de outros usuários.
@@ -247,6 +281,9 @@ triagem), só promovendo a `JobPosting` o que passa pelos filtros. Alimenta a ab
 - **Técnico**: famílias do perfil (core/secondary/excluded) vs famílias da vaga. Família **core**
   presente na vaga = base alta (72 + bônus por skills do perfil citadas); **secondary** = média
   (~48–68); stack concorrente/desconhecida = baixa; **excluded** = teto 25.
+  - Detecção de família é por **fronteira de palavra** (não substring): `"java"` não casa
+    `"javascript"`. E se o **título** declara uma família ≠ core do perfil, uma menção do core só no
+    corpo NÃO conta como core hit (vaga "C# Developer" não vira top match de um perfil Java). Ver §0.
 - **Cargo**: overlap do título com `PreferredRoles`; título citando a stack core do perfil reforça (≥75).
 - **Senioridade**: alvo do perfil (`Seniority`) → compatível 90, ±1 nível 68, distante 35–50; não informado 65.
 - **Domínio**: overlap com `profile.Domains` (bônus, nunca gate; sem sinal = 50).

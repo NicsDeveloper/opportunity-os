@@ -141,6 +141,8 @@ vagas, descoberta) continuam compartilhados.
 | POST | `/api/auth/logout` | Encerra a sessão |
 | GET  | `/api/auth/me` | Usuário atual (`401` se anônimo) |
 | GET  | `/api/workspace/me` | Workspace + `defaultCandidateProfileId` |
+| GET  | `/api/admin/overview` | **Admin** — contagens, crons dos jobs, execuções recentes |
+| POST | `/api/admin/sweep` | **Admin** — varredura sob demanda (`maxCompanies`, `maxDurationSeconds`), em background |
 
 **Usuário dev (somente Development ou `Dev:SeedDevUser=true`)**
 No startup, em ambiente de desenvolvimento, um usuário local `dev@local` (senha `Dev:SeedPassword`,
@@ -155,6 +157,15 @@ flag explícita.
 **Frontend**: porta de entrada com login/cadastro → onboarding curto (4 passos) que cria o primeiro
 perfil → feed do perfil. O `oos.selectedProfileId` (localStorage) só é usado se pertencer ao
 usuário; senão cai no perfil padrão. Logout limpa a seleção e volta ao login.
+
+**Admin (`AppUser.IsAdmin`)**: o `dev@local` é admin (seed em Development). Aba **"Operação"** no
+frontend (só admin) mostra status do radar e dispara varredura sob demanda com limite de empresas/tempo
+(`POST /api/admin/sweep`, em background). A captura contínua continua no Worker (`continuous-discovery`).
+
+**Relevância (credibilidade do score)**: a detecção de stack (`StackTaxonomy`) casa por **fronteira de
+palavra** (`"java"` ≠ `"javascript"`), e o **título** define a stack primária — uma vaga "C# Developer"
+não vira top match de um perfil Java por uma menção incidental no corpo. A frase "por que combina" do
+card reflete a stack real da vaga (não um ".NET/C#" fixo).
 
 ## Endpoints (Fase 1)
 
