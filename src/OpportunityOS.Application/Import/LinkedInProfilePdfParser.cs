@@ -127,12 +127,20 @@ public sealed class LinkedInProfilePdfParser : ILinkedInProfilePdfParser
             var company = p - 2 >= 0 && !LooksLikePeriod(content[p - 2]) ? content[p - 2] : title;
             var (startText, endText, duration) = SplitPeriod(content[p]);
 
-            // Description: lines after the period up to the next role's company (2 before next anchor).
+            // Company names don't contain sentence commas: "Central Ailos, que atende..." → "Central Ailos".
+            if (company is not null && company.Contains(", ")) company = company.Split(',')[0].Trim();
+
+            // A "title"/"company" that reads like prose is actually description text that leaked in.
+            // Don't present prose as a fact: blank the field, flag it, and keep the prose in the description.
+            var leaked = new List<string>();
+            if (title is not null && LooksLikeProse(title)) { leaked.Add(title); title = null; }
+            if (company is not null && LooksLikeProse(company)) { leaked.Add(company); company = null; }
+
             var descEnd = a + 1 < anchors.Count ? Math.Max(p + 1, anchors[a + 1] - 2) : content.Count;
-            var description = JoinBlock(content.Skip(p + 1).Take(Math.Max(0, descEnd - (p + 1))));
+            var description = JoinBlock(leaked.Concat(content.Skip(p + 1).Take(Math.Max(0, descEnd - (p + 1)))));
 
             if (company is null || title is null)
-                warnings.Add("Uma experiência ficou incompleta; revise empresa/cargo.");
+                warnings.Add("Uma experiência ficou incompleta (empresa/cargo); revise antes de salvar.");
 
             result.Add(new LinkedInExperienceDto(
                 company ?? "(empresa a revisar)", title ?? "(cargo a revisar)",
@@ -165,6 +173,22 @@ public sealed class LinkedInProfilePdfParser : ILinkedInProfilePdfParser
     private static bool IsAnyHeader(string line) => AllHeaders.Any(h => MatchesHeader(line, h));
 
     private static bool IsContentLine(string line) => line.Length > 1 && !IsAnyHeader(line);
+
+    // A company/title is a short label. Prose (description text that leaked in) is long, ends with a
+    // sentence period, or carries connectors. NB: don't use "starts lowercase" — real BR brands are
+    // lowercase (e.g. "americanas s.a.").
+    private static readonly string[] ProseMarkers =
+        { "através", "atraves", "contribu", " que ", "garantindo", "responsável por", "responsavel por", " bem como " };
+    private static bool LooksLikeProse(string line)
+    {
+        var l = line.Trim();
+        if (l.Length > 60) return true;
+        // A trailing '.' only signals a sentence on a long line — short labels like "americanas s.a."
+        // or "JD System Ltda." must NOT be treated as prose.
+        if (l.EndsWith('.') && l.Length > 40) return true;
+        var lower = l.ToLowerInvariant();
+        return ProseMarkers.Any(lower.Contains);
+    }
 
     private static bool LooksLikePeriod(string line)
     {

@@ -125,6 +125,33 @@ public sealed class LinkedInImportTests
         Assert.Contains(".NET", draft.CoreSkills); // ".NET Core" alias → .NET (a core family of this profile)
     }
 
+    [Fact] // company with abbreviation period must NOT be flagged as prose
+    public void Parser_KeepsCompanyEndingInAbbreviation()
+    {
+        var text =
+            """
+            Alex Backend Developer
+            Desenvolvedor .Net | Node | AWS
+            Brasil
+            Resumo
+            Backend com .NET e AWS por vários anos em pagamentos e Open Finance.
+            Experiência
+            americanas s.a.
+            Caixa
+            março de 2016 - março de 2016 (1 mês)
+            Atendimento ao cliente no caixa.
+            Formação acadêmica
+            Estácio
+            Contato
+            a@b.com
+            www.linkedin.com/in/alex
+            """;
+        var p = Parser.Parse(text, Detector.Detect(text), out _);
+        var exp = Assert.Single(p.Experiences);
+        Assert.Equal("americanas s.a.", exp.Company);
+        Assert.Equal("Caixa", exp.Title);
+    }
+
     [Fact] // #15
     public void Mapper_AwsServicesMapToAwsAndCloud()
     {
