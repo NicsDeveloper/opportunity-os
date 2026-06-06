@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using OpportunityOS.Application.AI;
 using OpportunityOS.Application.Discovery;
 using OpportunityOS.Application.Matching;
 using OpportunityOS.Domain.Entities;
@@ -96,7 +97,8 @@ public static class JobEndpoints
             bool? onlyWithoutCurrentEngineVersion, DateTime? minCreatedAtUtc,
             OpportunityOsDbContext db, ICurrentCandidateProfileProvider profiles,
             IJobNormalizer normalizer, IMatchEngine engine,
-            ILatestOpportunityMatchProjection projection, CancellationToken ct) =>
+            ILatestOpportunityMatchProjection projection,
+            IEmbeddingProvider embedder, SemanticMatchOptions semantic, CancellationToken ct) =>
         {
             List<CandidateProfile> targets;
             if (allProfiles == true)
@@ -139,11 +141,23 @@ public static class JobEndpoints
             // upsert resolves them locally (no per-match round-trip).
             await db.LatestOpportunityMatches.Where(p => pids.Contains(p.CandidateProfileId)).LoadAsync(ct);
 
+            // Semantic layer: ensure each target profile has a fresh embedding (compute once per run).
+            if (semantic.Enabled)
+                foreach (var p in targets)
+                    if (EmbeddingTexts.NeedsEmbedding(p.EmbeddingModel, embedder.ModelName)
+                        && await embedder.EmbedAsync(EmbeddingTexts.ForProfile(p), ct) is { } v)
+                        p.SetEmbedding(v, embedder.ModelName);
+
             int rescored = 0, changed = 0, skipped = 0;
             foreach (var job in jobs)
             {
                 var norm = normalizer.Normalize(job);
                 job.ApplyNormalization(norm.Seniority, norm.WorkMode, norm.Language, norm.Skills, norm.Domains);
+
+                // Ensure the job embedding too (only when missing/stale), so the engine can blend.
+                if (semantic.Enabled && EmbeddingTexts.NeedsEmbedding(job.EmbeddingModel, embedder.ModelName)
+                    && await embedder.EmbedAsync(EmbeddingTexts.ForJob(job), ct) is { } jv)
+                    job.SetEmbedding(jv, embedder.ModelName);
                 foreach (var profile in targets)
                 {
                     var hasLatest = latest.TryGetValue((job.Id, profile.Id), out var prev);

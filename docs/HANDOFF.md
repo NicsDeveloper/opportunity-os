@@ -6,6 +6,32 @@
 
 ---
 
+## 0. Atualização — Matching híbrido (semântico + heurístico)
+
+Evolução do motor de relevância: além do heurístico transparente, há agora uma camada **semântica
+opcional** por embeddings. **Off por padrão** (`FeatureFlags:EnableSemanticMatch=false`) — quando
+ligada e perfil+vaga têm embedding, o score mistura a **similaridade de cosseno** com o heurístico;
+as **travas continuam valendo** (gestão/stack excluída/sem core hit não sobem por semântica).
+
+- **`IEmbeddingProvider`** (`Application/AI`): `OpenAiEmbeddingProvider` (real, `text-embedding-3-small`,
+  via HttpClient) quando há `OpenAI:ApiKey`; senão `HashingEmbeddingProvider` (determinístico, offline,
+  hashing-trick FNV-1a sobre unigramas+bigramas, L2-normalizado). **Honesto**: o fallback é um vetor
+  **lexical** (não é semântica de verdade) — o salto vem com um modelo real; o fallback mantém o
+  pipeline funcional/testável sem chave.
+- **Persistência**: `Embedding (real[])` + `EmbeddingModel` em `JobPosting` e `CandidateProfile`
+  (migration `AddEmbeddings`); recomputa só quando o modelo muda (staleness por tag). **Cosseno em C#**
+  (in-app), sem pgvector — escolha deliberada para não mexer na imagem do Postgres; **pgvector fica como
+  otimização de índice** para escala.
+- **Blend** (`HeuristicMatchEngine` + `SemanticMatchOptions`): `overall = (1-w)·heurístico + w·cos·100`
+  (w padrão 0,4), aplicado **antes das travas**; adiciona o sinal à explicação ("Similaridade semântica
+  X%"). Embeddings são populados no caminho de `POST /api/jobs/rescore` quando a flag está ligada.
+- **Testes**: determinismo/normalização do hashing, similar > diferente, blend sobe alinhado / desce
+  ortogonal, e flag-off ignora embeddings. (191 unit / 32 integração verdes.)
+- **Próximos passos** (não nesta fatia): LLM-as-judge no top-N; aprendizado por feedback (re-rank);
+  pgvector quando o volume exigir índice ANN.
+
+---
+
 ## 0. Atualização — LinkedIn PDF Profile Importer
 
 Acelerador **opcional** de onboarding: o usuário envia o PDF exportado do LinkedIn e o sistema

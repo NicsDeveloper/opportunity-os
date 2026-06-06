@@ -1,3 +1,4 @@
+using OpportunityOS.Application.AI;
 using OpportunityOS.Application.Normalization;
 using OpportunityOS.Domain.Entities;
 using OpportunityOS.Domain.Enums;
@@ -20,8 +21,14 @@ public sealed class HeuristicMatchEngine : IMatchEngine
     public const string Version = "heuristic-v2";
 
     private readonly IJobNormalizer _normalizer;
+    private readonly SemanticMatchOptions _semantic;
 
-    public HeuristicMatchEngine(IJobNormalizer normalizer) => _normalizer = normalizer;
+    // semantic is optional so existing callers/tests (heuristic-only) keep working unchanged.
+    public HeuristicMatchEngine(IJobNormalizer normalizer, SemanticMatchOptions? semantic = null)
+    {
+        _normalizer = normalizer;
+        _semantic = semantic ?? new SemanticMatchOptions();
+    }
 
     public MatchResult Evaluate(CandidateProfile profile, JobPosting job)
     {
@@ -46,9 +53,21 @@ public sealed class HeuristicMatchEngine : IMatchEngine
         var location = ScoreLocation(profile, norm.WorkMode, haystack, strengths, risks);
         var language = ScoreLanguage(profile, norm.Language ?? job.Language, risks);
 
-        var overall = (int)Math.Round(
-            tech * 0.50 + role * 0.15 + seniority * 0.10 + domain * 0.10 + location * 0.10 + language * 0.05,
-            MidpointRounding.AwayFromZero);
+        var heuristicOverall =
+            tech * 0.50 + role * 0.15 + seniority * 0.10 + domain * 0.10 + location * 0.10 + language * 0.05;
+        var overall = (int)Math.Round(heuristicOverall, MidpointRounding.AwayFromZero);
+
+        // HYBRID: blend semantic similarity (cosine of profile/job embeddings) when enabled and both
+        // embeddings exist. Applied BEFORE the gates so the caps below still bind (semantic can't lift a
+        // management/non-core role into the top). Heuristic stays the transparent, explainable backbone.
+        if (_semantic.Enabled && profile.Embedding is { Length: > 0 } pe && job.Embedding is { Length: > 0 } je
+            && pe.Length == je.Length)
+        {
+            var w = Math.Clamp(_semantic.SemanticWeight, 0, 1);
+            var sem = VectorMath.Cosine(pe, je) * 100.0;
+            overall = (int)Math.Round(heuristicOverall * (1 - w) + sem * w, MidpointRounding.AwayFromZero);
+            strengths.Add($"Similaridade semântica {Math.Max(0, sem):0}% (perfil × vaga)");
+        }
 
         // GATES (the technical fit must dominate; domain/location/seniority must not lift a role
         // that doesn't actually match the candidate's stack into the top).

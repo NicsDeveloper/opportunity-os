@@ -36,6 +36,9 @@ public sealed class CandidateProfile
     /// <summary>The fallback profile when no candidateProfileId is supplied. Exactly one should be true.</summary>
     public bool IsDefault { get; private set; }
     public List<CandidateExperience> Experiences { get; private set; } = new();
+    /// <summary>Semantic embedding of the profile text (nullable; for the hybrid match). Model tag tracks staleness.</summary>
+    public float[]? Embedding { get; private set; }
+    public string? EmbeddingModel { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
 
@@ -121,6 +124,14 @@ public sealed class CandidateProfile
         PreferredWorkModes = preferredWorkModes?.ToList() ?? new();
         if (minimumScoreToShow is { } min) MinimumScoreToShow = min;
         Experiences = experiences?.ToList() ?? new();
+        UpdatedAtUtc = DateTime.UtcNow;
+    }
+
+    /// <summary>Store the semantic embedding + the model that produced it (for staleness checks).</summary>
+    public void SetEmbedding(float[] embedding, string model)
+    {
+        Embedding = embedding;
+        EmbeddingModel = model;
         UpdatedAtUtc = DateTime.UtcNow;
     }
 

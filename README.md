@@ -161,6 +161,13 @@ flag explícita.
 perfil → feed do perfil. O `oos.selectedProfileId` (localStorage) só é usado se pertencer ao
 usuário; senão cai no perfil padrão. Logout limpa a seleção e volta ao login.
 
+**Matching híbrido (semântico + heurístico, opcional)**: além do motor heurístico transparente, há uma
+camada semântica por **embeddings** (`IEmbeddingProvider`: OpenAI `text-embedding-3-small` quando há
+`OpenAI:ApiKey`, senão um fallback determinístico por hashing). Com `FeatureFlags:EnableSemanticMatch=true`,
+o score mistura a similaridade de cosseno (perfil × vaga) com o heurístico (`Matching:SemanticWeight`,
+padrão 0,4), mantendo as travas. Embeddings ficam em `JobPosting`/`CandidateProfile` (`AddEmbeddings`);
+cosseno é calculado em C# (pgvector é otimização futura). Off por padrão.
+
 **Importar perfil do LinkedIn (onboarding opcional)**: no onboarding o usuário pode enviar o **PDF
 exportado do LinkedIn** em vez de preencher manualmente. O sistema extrai o texto (UglyToad.PdfPig,
 Apache-2.0, sem OCR), detecta o padrão LinkedIn, parseia seções (PT/EN) e propõe um draft editável que

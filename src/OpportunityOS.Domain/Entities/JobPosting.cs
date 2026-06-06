@@ -37,6 +37,16 @@ public sealed class JobPosting
     public string? OriginalJobUrl { get; private set; }
     public string? NormalizedFingerprint { get; private set; }
 
+    /// <summary>Semantic embedding of the job text (nullable; for the hybrid match). Model tag tracks staleness.</summary>
+    public float[]? Embedding { get; private set; }
+    public string? EmbeddingModel { get; private set; }
+
+    public void SetEmbedding(float[] embedding, string model)
+    {
+        Embedding = embedding;
+        EmbeddingModel = model;
+    }
+
     private JobPosting() { }
 
     public JobPosting(

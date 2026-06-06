@@ -39,6 +39,31 @@ public static class DependencyInjection
             options.UseNpgsql(connectionString));
 
         services.AddScoped<IJobNormalizer, JobNormalizer>();
+
+        // Embeddings for semantic relevance: real model when an OpenAI key is present, else the
+        // deterministic hashing fallback (offline, free). Always registered so the pipeline resolves.
+        var openAiEmbedKey = config["OpenAI:ApiKey"];
+        if (!string.IsNullOrWhiteSpace(openAiEmbedKey))
+        {
+            services.AddSingleton(new OpenAiEmbeddingOptions
+            {
+                ApiKey = openAiEmbedKey!,
+                Model = config["OpenAI:EmbeddingModel"] ?? "text-embedding-3-small",
+                Dimensions = config.GetValue("OpenAI:EmbeddingDimensions", 1536)
+            });
+            services.AddHttpClient<IEmbeddingProvider, OpenAiEmbeddingProvider>(ConfigureClient);
+        }
+        else
+        {
+            services.AddSingleton<IEmbeddingProvider, HashingEmbeddingProvider>();
+        }
+
+        // Hybrid match (semantic blend) — off by default; the heuristic + gates always apply.
+        services.AddSingleton(new SemanticMatchOptions
+        {
+            Enabled = config.GetValue("FeatureFlags:EnableSemanticMatch", false),
+            SemanticWeight = config.GetValue("Matching:SemanticWeight", 0.4)
+        });
         services.AddScoped<IMatchEngine, HeuristicMatchEngine>();
         // Default to the non-HTTP "system" caller (Worker/design-time); the API replaces this with an
         // HTTP-backed ICurrentUserContext, so the workspace-scoped profile provider works everywhere.
