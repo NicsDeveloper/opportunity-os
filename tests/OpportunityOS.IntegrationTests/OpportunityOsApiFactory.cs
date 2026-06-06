@@ -31,6 +31,10 @@ public sealed class OpportunityOsApiFactory : WebApplicationFactory<Program>
             // Deterministic Bacen CSV (no network) for integration tests.
             services.RemoveAll<Application.Bacen.IBacenPixParticipantsCsvProvider>();
             services.AddScoped<Application.Bacen.IBacenPixParticipantsCsvProvider, TestBacenCsvProvider>();
+
+            // Deterministic PDF text (no real PDF binary) for the LinkedIn importer tests.
+            services.RemoveAll<Application.Import.IPdfTextExtractor>();
+            services.AddScoped<Application.Import.IPdfTextExtractor, TestPdfTextExtractor>();
         });
     }
 

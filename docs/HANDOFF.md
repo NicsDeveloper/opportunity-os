@@ -6,6 +6,39 @@
 
 ---
 
+## 0. Atualização — LinkedIn PDF Profile Importer
+
+Acelerador **opcional** de onboarding: o usuário envia o PDF exportado do LinkedIn e o sistema
+extrai → detecta → parseia → propõe um `CandidateProfileDraft` editável, que ele revisa e salva como
+`CandidateProfile` no seu workspace. **Sem scraping, sem OAuth do LinkedIn, sem importação por URL** —
+apenas arquivo enviado pelo usuário. Determinístico primeiro; LLM só normaliza (atrás de flag).
+
+- **Entidade** `ProfileImport` (Domínio) → tabela `profile_imports` (migration `AddProfileImport`),
+  por workspace. **Persiste só o `ParsedJson`** (o texto bruto do PDF é processado em memória e
+  descartado — privacidade). Status: Uploaded/Parsed/Failed/Converted/Applied.
+- **Pipeline** (`Application/Import`): `IPdfTextExtractor` (impl `PdfPigTextExtractor` em Infra, via
+  **UglyToad.PdfPig — Apache-2.0**, sem OCR; layout de 2 colunas tratado: coluna principal primeiro,
+  depois sidebar) → `ILinkedInPdfProfileDetector` (score de sinais; <50 rejeita) →
+  `ILinkedInProfilePdfParser` (seções PT/EN; experiências **best-effort, nunca perde texto**) →
+  `ILinkedInProfileToCandidateProfileDraftMapper` (skills via `StackTaxonomy` boundary-safe — `java`
+  ≠ `javascript`; senioridade por duração+headline; domínios por keyword) →
+  `IProfileImportNormalizer` (passthrough por padrão; **LLM conservador** atrás de
+  `FeatureFlags:EnableLinkedInPdfLlmNormalization`, prompt `profile-import-linkedin-v1`, que **só**
+  reclassifica skills/domínios/senioridade/roles/prefs e tem as experiências/identidade **re-enxertadas
+  verbatim** — invenção é estruturalmente impossível).
+- **Endpoints** (`/api/profile-imports`, auth + workspace-scoped): `POST /linkedin-pdf` (multipart,
+  ≤5 MB, valida tipo/extensão), `GET /{id}` (só do próprio workspace → senão 404),
+  `POST /{id}/apply` (cria o perfil a partir do draft revisado; **idempotente**: se já aplicado,
+  retorna o perfil existente; primeiro perfil/`setAsDefault` vira default).
+- **Frontend**: onboarding agora começa com escolha **Importar PDF do LinkedIn (recomendado)** vs
+  **Preencher manualmente**. Fluxo de import: upload → revisão editável (com aviso *"Revise antes de
+  salvar. O sistema pode errar skills, senioridade ou experiências."*) → salvar.
+- **Testes**: 14 unit (detector/parser/mapper sobre fixture **anonimizada**) + 6 integração (401 sem
+  login, 400 não-PDF, upload→draft, isolamento por workspace, apply cria perfil default, apply de
+  import alheio → 404). Integração usa `IPdfTextExtractor` fake (sem binário PDF no repo).
+
+---
+
 ## 0. Atualização — Admin panel + correção de relevância
 
 Última leva (branch `feat/auth-workspace`). Dois temas:

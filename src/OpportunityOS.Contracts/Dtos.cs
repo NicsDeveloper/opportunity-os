@@ -12,6 +12,42 @@ public sealed record AuthMeResponse(Guid Id, string Email, string DisplayName, G
 
 public sealed record AdminSweepRequest(int? MaxCompanies, int? MaxDurationSeconds);
 
+// ---- Profile import (LinkedIn PDF) ----
+
+public sealed record ProfileImportConfidenceDto(int Score, List<string> Signals, List<string> MissingSignals);
+
+public sealed record LinkedInExperienceDto(
+    string Company, string Title, string? Location,
+    string? StartDateText, string? EndDateText, string? DurationText, string? Description);
+
+public sealed record LinkedInEducationDto(string Institution, string? Degree, string? Field, string? PeriodText);
+
+public sealed record LinkedInProfileImportDto(
+    string? FullName, string? Headline, string? Location, string? Email, string? LinkedInUrl, string? Summary,
+    List<string> Skills, List<string> Certifications,
+    List<LinkedInExperienceDto> Experiences, List<LinkedInEducationDto> Education,
+    ProfileImportConfidenceDto Confidence);
+
+public sealed record CandidateExperienceDraftDto(
+    string Company, string Role, string Period, List<string> Technologies, List<string> Achievements);
+
+public sealed record CandidateProfileDraftDto(
+    string DisplayName, string FullName, string Headline, string Summary, string Location,
+    string Seniority, string PreferredLanguage,
+    List<string> CoreSkills, List<string> SecondarySkills, List<string> ExcludedStacks, List<string> Domains,
+    List<string> PreferredRoles, List<string> PreferredContractTypes, List<string> PreferredLocations,
+    List<string> PreferredWorkModes, int MinimumScoreToShow,
+    List<CandidateExperienceDraftDto> Experiences);
+
+public sealed record UploadLinkedInProfilePdfResponse(
+    Guid ImportId, LinkedInProfileImportDto ParsedProfile, CandidateProfileDraftDto Draft, List<string> Warnings);
+
+public sealed record ApplyProfileImportRequest(CandidateProfileDraftDto Draft, bool SetAsDefault);
+
+public sealed record ProfileImportResponse(
+    Guid Id, string Status, string Source, Guid? CandidateProfileId,
+    LinkedInProfileImportDto? ParsedProfile, DateTime CreatedAtUtc);
+
 public sealed record WorkspaceMeResponse(Guid WorkspaceId, string Name, AuthUserResponse User, Guid? DefaultCandidateProfileId);
 
 // ---- Candidate Profile ----

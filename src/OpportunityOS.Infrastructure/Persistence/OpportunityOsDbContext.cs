@@ -14,6 +14,7 @@ public sealed class OpportunityOsDbContext : IdentityDbContext<AppUser, Identity
     public OpportunityOsDbContext(DbContextOptions<OpportunityOsDbContext> options) : base(options) { }
 
     public DbSet<Workspace> Workspaces => Set<Workspace>();
+    public DbSet<ProfileImport> ProfileImports => Set<ProfileImport>();
     public DbSet<CandidateProfile> CandidateProfiles => Set<CandidateProfile>();
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<JobPosting> JobPostings => Set<JobPosting>();
@@ -105,6 +106,19 @@ public sealed class OpportunityOsDbContext : IdentityDbContext<AppUser, Identity
                 .HasConversion(expConverter)
                 .HasColumnType("jsonb")
                 .Metadata.SetValueComparer(expComparer);
+        });
+
+        b.Entity<ProfileImport>(e =>
+        {
+            e.ToTable("profile_imports");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Source).HasConversion<int>();
+            e.Property(x => x.Status).HasConversion<int>();
+            e.Property(x => x.OriginalFileName).IsRequired();
+            e.Property(x => x.ParsedJson).HasColumnType("jsonb");
+            e.HasIndex(x => x.WorkspaceId);
+            e.HasIndex(x => new { x.WorkspaceId, x.Status });
+            e.HasOne<Workspace>().WithMany().HasForeignKey(x => x.WorkspaceId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<Company>(e =>

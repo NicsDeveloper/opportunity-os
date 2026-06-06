@@ -32,6 +32,12 @@ async function del<T>(path: string): Promise<T> {
   return (res.status === 204 ? (undefined as T) : (res.json() as Promise<T>));
 }
 
+async function postForm<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(`/api${path}`, { method: "POST", credentials: "include", body: form });
+  if (!res.ok) throw new ApiError(res.status, await errorText(res));
+  return (res.status === 204 ? (undefined as T) : (res.json() as Promise<T>));
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
@@ -164,6 +170,30 @@ export interface WorkspaceMe {
   defaultCandidateProfileId: string | null;
 }
 
+// ---- LinkedIn PDF import ----
+export interface LinkedInExperience {
+  company: string; title: string; location?: string | null;
+  startDateText?: string | null; endDateText?: string | null; durationText?: string | null; description?: string | null;
+}
+export interface LinkedInParsedProfile {
+  fullName?: string | null; headline?: string | null; location?: string | null; email?: string | null;
+  linkedInUrl?: string | null; summary?: string | null;
+  skills: string[]; certifications: string[]; experiences: LinkedInExperience[];
+  education: { institution: string; degree?: string | null; field?: string | null; periodText?: string | null }[];
+  confidence: { score: number; signals: string[]; missingSignals: string[] };
+}
+export interface CandidateProfileDraft {
+  displayName: string; fullName: string; headline: string; summary: string; location: string;
+  seniority: string; preferredLanguage: string;
+  coreSkills: string[]; secondarySkills: string[]; excludedStacks: string[]; domains: string[];
+  preferredRoles: string[]; preferredContractTypes: string[]; preferredLocations: string[];
+  preferredWorkModes: string[]; minimumScoreToShow: number;
+  experiences: { company: string; role: string; period: string; technologies: string[]; achievements: string[] }[];
+}
+export interface UploadLinkedInPdfResponse {
+  importId: string; parsedProfile: LinkedInParsedProfile; draft: CandidateProfileDraft; warnings: string[];
+}
+
 // Append &candidateProfileId=… (or ?… when first param) when a profile is selected.
 function pid(profileId?: string, first = false) {
   if (!profileId) return "";
@@ -184,6 +214,15 @@ export const api = {
     logout: () => post<void>("/auth/logout"),
   },
   workspaceMe: () => get<WorkspaceMe>("/workspace/me"),
+  profileImports: {
+    uploadLinkedInPdf: (file: File) => {
+      const form = new FormData();
+      form.append("file", file, file.name);
+      return postForm<UploadLinkedInPdfResponse>("/profile-imports/linkedin-pdf", form);
+    },
+    apply: (importId: string, draft: CandidateProfileDraft, setAsDefault: boolean) =>
+      post<Profile>(`/profile-imports/${importId}/apply`, { draft, setAsDefault }),
+  },
   admin: {
     overview: () => get<AdminOverview>("/admin/overview"),
     sweep: (maxCompanies?: number, maxDurationSeconds?: number) =>

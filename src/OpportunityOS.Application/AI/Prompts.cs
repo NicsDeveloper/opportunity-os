@@ -13,6 +13,7 @@ public static class Prompts
     public const string OutreachVersion = "outreach-v1";
     public const string CvTailoringVersion = "cv-tailoring-v1";
     public const string CareerInsightVersion = "career-insight-v1";
+    public const string ProfileImportVersion = "profile-import-linkedin-v1";
 
     private const string NoInvention =
         "Regras invioláveis: não invente experiências do candidato; use apenas fatos do perfil e da vaga; " +

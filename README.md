@@ -143,6 +143,9 @@ vagas, descoberta) continuam compartilhados.
 | GET  | `/api/workspace/me` | Workspace + `defaultCandidateProfileId` |
 | GET  | `/api/admin/overview` | **Admin** — contagens, crons dos jobs, execuções recentes |
 | POST | `/api/admin/sweep` | **Admin** — varredura sob demanda (`maxCompanies`, `maxDurationSeconds`), em background |
+| POST | `/api/profile-imports/linkedin-pdf` | Upload do PDF do LinkedIn (multipart, ≤5 MB) → draft de perfil |
+| GET  | `/api/profile-imports/{id}` | Import do próprio workspace |
+| POST | `/api/profile-imports/{id}/apply` | Cria o `CandidateProfile` a partir do draft revisado (idempotente) |
 
 **Usuário dev (somente Development ou `Dev:SeedDevUser=true`)**
 No startup, em ambiente de desenvolvimento, um usuário local `dev@local` (senha `Dev:SeedPassword`,
@@ -157,6 +160,14 @@ flag explícita.
 **Frontend**: porta de entrada com login/cadastro → onboarding curto (4 passos) que cria o primeiro
 perfil → feed do perfil. O `oos.selectedProfileId` (localStorage) só é usado se pertencer ao
 usuário; senão cai no perfil padrão. Logout limpa a seleção e volta ao login.
+
+**Importar perfil do LinkedIn (onboarding opcional)**: no onboarding o usuário pode enviar o **PDF
+exportado do LinkedIn** em vez de preencher manualmente. O sistema extrai o texto (UglyToad.PdfPig,
+Apache-2.0, sem OCR), detecta o padrão LinkedIn, parseia seções (PT/EN) e propõe um draft editável que
+o usuário **revisa antes de salvar**. Determinístico primeiro; normalização por LLM é opcional
+(`FeatureFlags:EnableLinkedInPdfLlmNormalization`, default off) e estritamente conservadora (nunca
+inventa/altera experiências, empresas, cargos ou datas). Sem scraping, sem OAuth, sem URL — só o
+arquivo enviado. Só o JSON parseado é persistido (privacidade).
 
 **Admin (`AppUser.IsAdmin`)**: o `dev@local` é admin (seed em Development). Aba **"Operação"** no
 frontend (só admin) mostra status do radar e dispara varredura sob demanda com limite de empresas/tempo

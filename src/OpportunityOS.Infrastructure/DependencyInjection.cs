@@ -9,6 +9,7 @@ using OpportunityOS.Application.Auth;
 using OpportunityOS.Application.Bacen;
 using OpportunityOS.Application.Digest;
 using OpportunityOS.Application.Discovery;
+using OpportunityOS.Application.Import;
 using OpportunityOS.Application.Matching;
 using OpportunityOS.Application.Normalization;
 using OpportunityOS.Application.Pipeline;
@@ -17,6 +18,7 @@ using OpportunityOS.Application.Projections;
 using OpportunityOS.Infrastructure.Ai;
 using OpportunityOS.Infrastructure.Auth;
 using OpportunityOS.Infrastructure.Bacen;
+using OpportunityOS.Infrastructure.Import;
 using OpportunityOS.Infrastructure.Email;
 using OpportunityOS.Infrastructure.Persistence;
 using OpportunityOS.Infrastructure.Providers;
@@ -76,6 +78,17 @@ public static class DependencyInjection
 
         services.AddScoped<IOpportunityStore, EfOpportunityStore>();
         services.AddScoped<IOpportunityPipeline, OpportunityPipeline>();
+
+        // LinkedIn PDF profile importer (onboarding). Deterministic parser/mapper; the LLM normalizer
+        // is opt-in via feature flag (default off) and strictly conservative.
+        services.AddScoped<IPdfTextExtractor, PdfPigTextExtractor>();
+        services.AddScoped<ILinkedInPdfProfileDetector, LinkedInPdfProfileDetector>();
+        services.AddScoped<ILinkedInProfilePdfParser, LinkedInProfilePdfParser>();
+        services.AddScoped<ILinkedInProfileToCandidateProfileDraftMapper, LinkedInProfileToCandidateProfileDraftMapper>();
+        if (config.GetValue("FeatureFlags:EnableLinkedInPdfLlmNormalization", false))
+            services.AddScoped<IProfileImportNormalizer, LlmProfileImportNormalizer>();
+        else
+            services.AddScoped<IProfileImportNormalizer, PassthroughProfileImportNormalizer>();
 
         var emailOptions = new EmailOptions();
         config.GetSection("Email").Bind(emailOptions);

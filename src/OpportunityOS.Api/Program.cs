@@ -111,6 +111,7 @@ app.MapGet("/", () => Results.Ok(new { service = "Opportunity OS", status = "ok"
 app.MapAuthEndpoints();
 app.MapWorkspaceEndpoints();
 app.MapAdminEndpoints();
+app.MapProfileImportEndpoints();
 app.MapCandidateProfileEndpoints();
 app.MapCompanyEndpoints();
 app.MapJobEndpoints();

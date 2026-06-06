@@ -707,4 +707,94 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/auth/me")).StatusCode);
     }
+
+    // ---------------- LinkedIn PDF profile import ----------------
+
+    private static async Task<HttpResponseMessage> UploadPdf(
+        HttpClient client, string fileName = "alex.pdf", string contentType = "application/pdf")
+    {
+        using var form = new MultipartFormDataContent();
+        var content = new ByteArrayContent(new byte[] { 0x25, 0x50, 0x44, 0x46, 0x2D }); // "%PDF-"
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+        form.Add(content, "file", fileName);
+        return await client.PostAsync("/api/profile-imports/linkedin-pdf", form);
+    }
+
+    [DbFact]
+    public async Task ProfileImport_Upload_WithoutLogin_Returns401()
+    {
+        await _factory.ResetDatabaseAsync();
+        var anon = _factory.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await UploadPdf(anon)).StatusCode);
+    }
+
+    [DbFact]
+    public async Task ProfileImport_Upload_NonPdf_Returns400()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = await _factory.CreateAuthenticatedClientAsync();
+        var res = await UploadPdf(client, "resume.txt", "text/plain");
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+    }
+
+    [DbFact]
+    public async Task ProfileImport_Upload_Valid_ReturnsImportAndDraft()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = await _factory.CreateAuthenticatedClientAsync();
+
+        var res = await UploadPdf(client);
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var body = await res.Content.ReadFromJsonAsync<UploadLinkedInProfilePdfResponse>();
+        Assert.NotNull(body);
+        Assert.NotEqual(Guid.Empty, body!.ImportId);
+        Assert.Equal("Alex Backend Developer", body.ParsedProfile.FullName);
+        Assert.Contains(".NET", body.Draft.CoreSkills);
+        Assert.DoesNotContain("Java", body.Draft.CoreSkills);
+    }
+
+    [DbFact]
+    public async Task ProfileImport_Get_IsScopedToWorkspace()
+    {
+        await _factory.ResetDatabaseAsync();
+        var a = await _factory.CreateAuthenticatedClientAsync("a@test.local");
+        var b = await _factory.CreateAuthenticatedClientAsync("b@test.local");
+
+        var up = await (await UploadPdf(a)).Content.ReadFromJsonAsync<UploadLinkedInProfilePdfResponse>();
+        Assert.Equal(HttpStatusCode.OK, (await a.GetAsync($"/api/profile-imports/{up!.ImportId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await b.GetAsync($"/api/profile-imports/{up.ImportId}")).StatusCode);
+    }
+
+    [DbFact]
+    public async Task ProfileImport_Apply_CreatesDefaultProfile_AndFeedAccepts()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = await _factory.CreateAuthenticatedClientAsync();
+        var up = await (await UploadPdf(client)).Content.ReadFromJsonAsync<UploadLinkedInProfilePdfResponse>();
+
+        var apply = await client.PostAsJsonAsync($"/api/profile-imports/{up!.ImportId}/apply",
+            new ApplyProfileImportRequest(up.Draft, SetAsDefault: true));
+        Assert.Equal(HttpStatusCode.Created, apply.StatusCode);
+        var profile = await apply.Content.ReadFromJsonAsync<CandidateProfileResponse>();
+        Assert.True(profile!.IsDefault);
+
+        var list = await client.GetFromJsonAsync<List<CandidateProfileResponse>>("/api/candidate-profiles");
+        Assert.Contains(list!, p => p.Id == profile.Id);
+
+        // The new profile is a valid feed scope (200, not 403).
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/matches?candidateProfileId={profile.Id}")).StatusCode);
+    }
+
+    [DbFact]
+    public async Task ProfileImport_Apply_ForeignImport_Returns404()
+    {
+        await _factory.ResetDatabaseAsync();
+        var a = await _factory.CreateAuthenticatedClientAsync("a@test.local");
+        var b = await _factory.CreateAuthenticatedClientAsync("b@test.local");
+        var up = await (await UploadPdf(a)).Content.ReadFromJsonAsync<UploadLinkedInProfilePdfResponse>();
+
+        var res = await b.PostAsJsonAsync($"/api/profile-imports/{up!.ImportId}/apply",
+            new ApplyProfileImportRequest(up.Draft, SetAsDefault: true));
+        Assert.Equal(HttpStatusCode.NotFound, res.StatusCode);
+    }
 }

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./icons";
 import {
-  api, ApiError, type Application, type AuthMe, type BestOpportunity, type Company,
-  type GeneratedMessage, type Profile, type ProfileInput, type Summary,
+  api, ApiError, type Application, type AuthMe, type BestOpportunity, type CandidateProfileDraft,
+  type Company, type GeneratedMessage, type Profile, type ProfileInput, type Summary,
+  type UploadLinkedInPdfResponse,
 } from "./api";
 
 type Section = "oportunidades" | "empresas" | "aplicacoes" | "descobertas" | "relatorios" | "perfis" | "admin";
@@ -51,9 +52,9 @@ function Workspace({ me, onLogout }: { me: AuthMe; onLogout: () => void }) {
     return () => clearInterval(id);
   }, []);
 
-  // No profile yet → onboarding (creates the first CandidateProfile, then the feed appears).
+  // No profile yet → onboarding (import LinkedIn PDF or fill manually), then the feed appears.
   if (profiles.data && list.length === 0)
-    return <Onboarding displayName={me.displayName} notify={notify} onDone={(id) => { selectProfile(id); refresh(); }} onLogout={onLogout} />;
+    return <OnboardingGate displayName={me.displayName} notify={notify} onDone={(id) => { selectProfile(id); refresh(); }} onLogout={onLogout} />;
 
   return (
     <div className="layout">
@@ -126,6 +127,140 @@ function AuthScreen({ onAuthed }: { onAuthed: (me: AuthMe) => void }) {
           {mode === "login"
             ? <>Não tem conta? <button className="link-btn" onClick={() => { setMode("register"); setError(null); }}>Criar conta</button></>
             : <>Já tem conta? <button className="link-btn" onClick={() => { setMode("login"); setError(null); }}>Entrar</button></>}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function OnboardingGate({ displayName, notify, onDone, onLogout }: {
+  displayName: string; notify: (m: string) => void; onDone: (profileId: string) => void; onLogout: () => void;
+}) {
+  const [mode, setMode] = useState<"choice" | "manual" | "import">("choice");
+
+  if (mode === "manual")
+    return <Onboarding displayName={displayName} notify={notify} onDone={onDone} onLogout={onLogout} />;
+  if (mode === "import")
+    return <LinkedInImport notify={notify} onDone={onDone} onManual={() => setMode("manual")} onLogout={onLogout} />;
+
+  return (
+    <div className="auth-shell">
+      <div className="auth-card wide">
+        <div className="auth-brand">Crie seu perfil profissional</div>
+        <p className="auth-sub">Escolha como começar — você poderá revisar e editar tudo depois.</p>
+        <div className="onb-choices">
+          <button className="onb-choice rec" onClick={() => setMode("import")}>
+            <span className="onb-choice-tag">Recomendado</span>
+            <strong>Importar PDF do LinkedIn</strong>
+            <span>Use o PDF exportado do seu LinkedIn para preencher seu perfil automaticamente.</span>
+          </button>
+          <button className="onb-choice" onClick={() => setMode("manual")}>
+            <strong>Preencher manualmente</strong>
+            <span>Informe suas skills, cargos desejados e preferências em poucos passos.</span>
+          </button>
+        </div>
+        <p className="onb-privacy">
+          Seu PDF será usado apenas para montar seu perfil profissional dentro do Opportunity OS.
+          Você poderá revisar tudo antes de salvar.
+        </p>
+        <div className="pf-actions"><button className="link-btn onb-logout" onClick={onLogout}>Sair</button></div>
+      </div>
+    </div>
+  );
+}
+
+function LinkedInImport({ notify, onDone, onManual, onLogout }: {
+  notify: (m: string) => void; onDone: (profileId: string) => void; onManual: () => void; onLogout: () => void;
+}) {
+  const [state, setState] = useState<"idle" | "uploading" | "review" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [resp, setResp] = useState<UploadLinkedInPdfResponse | null>(null);
+  const [draft, setDraft] = useState<CandidateProfileDraft | null>(null);
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const set = (patch: Partial<CandidateProfileDraft>) => setDraft((d) => (d ? { ...d, ...patch } : d));
+
+  const upload = async (file?: File | null) => {
+    if (!file) return;
+    setState("uploading"); setError(null);
+    try {
+      const r = await api.profileImports.uploadLinkedInPdf(file);
+      setResp(r); setDraft(r.draft); setState("review");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Falha ao processar o PDF.");
+      setState("error");
+    }
+  };
+
+  const save = async () => {
+    if (!resp || !draft) return;
+    if (!draft.displayName.trim()) { notify("Dê um nome ao perfil."); return; }
+    setBusy(true);
+    try {
+      const created = await api.profileImports.apply(resp.importId, draft, true);
+      notify("Perfil criado a partir do LinkedIn.");
+      onDone(created.id);
+    } catch (e) { notify("Não foi possível salvar: " + (e instanceof ApiError ? e.message : String(e))); setBusy(false); }
+  };
+
+  if (state === "review" && draft) {
+    return (
+      <div className="auth-shell">
+        <div className="auth-card wide review">
+          <div className="auth-brand">Revise seu perfil</div>
+          <p className="onb-disclaimer">⚠ Revise antes de salvar. O sistema pode errar skills, senioridade ou experiências.</p>
+          {(resp?.warnings ?? []).map((w, i) => <p key={i} className="onb-warning">{w}</p>)}
+
+          <div className="pf-grid">
+            <Field label="Nome do perfil (rótulo)"><input value={draft.displayName} onChange={(e) => set({ displayName: e.target.value })} /></Field>
+            <Field label="Headline"><input value={draft.headline} onChange={(e) => set({ headline: e.target.value })} /></Field>
+            <Field label="Senioridade"><input value={draft.seniority} onChange={(e) => set({ seniority: e.target.value })} /></Field>
+            <Field label="Localização"><input value={draft.location} onChange={(e) => set({ location: e.target.value })} /></Field>
+            <Field label="Core skills (vírgula)"><input value={draft.coreSkills.join(", ")} onChange={(e) => set({ coreSkills: splitCsv(e.target.value) })} /></Field>
+            <Field label="Secondary skills (vírgula)"><input value={draft.secondarySkills.join(", ")} onChange={(e) => set({ secondarySkills: splitCsv(e.target.value) })} /></Field>
+            <Field label="Domínios (vírgula)"><input value={draft.domains.join(", ")} onChange={(e) => set({ domains: splitCsv(e.target.value) })} /></Field>
+            <Field label="Cargos desejados (vírgula)"><input value={draft.preferredRoles.join(", ")} onChange={(e) => set({ preferredRoles: splitCsv(e.target.value) })} /></Field>
+            <Field label="Modelos de trabalho (vírgula)"><input value={draft.preferredWorkModes.join(", ")} onChange={(e) => set({ preferredWorkModes: splitCsv(e.target.value) })} /></Field>
+          </div>
+
+          {draft.experiences.length > 0 && (
+            <div className="review-exp">
+              <div className="field-l">Experiências detectadas (revise)</div>
+              {draft.experiences.map((x, i) => (
+                <div key={i} className="exp-row"><strong>{x.role || "(cargo)"}</strong> · {x.company || "(empresa)"} <span className="muted">{x.period}</span></div>
+              ))}
+            </div>
+          )}
+
+          <div className="pf-actions">
+            <button className="btn primary" disabled={busy} onClick={save}>{busy ? "Salvando…" : "Salvar perfil"}</button>
+            <button className="btn" onClick={onManual}>Editar manualmente</button>
+            <button className="btn ghost" onClick={() => { setState("idle"); setResp(null); setDraft(null); }}>Enviar outro PDF</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="auth-shell">
+      <div className="auth-card wide">
+        <div className="auth-brand">Importar perfil do LinkedIn</div>
+        <p className="auth-sub">
+          Envie o PDF exportado pelo LinkedIn. Vamos extrair suas experiências, skills, resumo e formação
+          para montar seu perfil inicial. Você revisa tudo antes de salvar.
+        </p>
+        <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }}
+          onChange={(e) => upload(e.target.files?.[0])} />
+        {state !== "uploading" && (
+          <button className="btn primary" onClick={() => fileRef.current?.click()}>Selecionar PDF</button>
+        )}
+        {state === "uploading" && <p className="auth-sub">Analisando seu perfil do LinkedIn…</p>}
+        {state === "error" && error && <p className="err">{error}</p>}
+        <p className="auth-switch">
+          Prefere outro caminho? <button className="link-btn" onClick={onManual}>Preencher manualmente</button>
+          {"  ·  "}<button className="link-btn" onClick={onLogout}>Sair</button>
         </p>
       </div>
     </div>
