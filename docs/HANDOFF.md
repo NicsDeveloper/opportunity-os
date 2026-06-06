@@ -6,6 +6,27 @@
 
 ---
 
+## 0. Atualização — LLM-as-judge (re-rank do top-N)
+
+Camada de precisão sobre o feed: o usuário (ou o frontend) pede para a IA **re-pontuar as N melhores
+vagas** do perfil ativo usando o motor autoritativo (`IJobUnderstandingService` + `ICandidateFitAnalysisService`),
+mantendo a explicação por sub-scores e o `EngineVersion="llm-fit-v2"`.
+
+- **Endpoint** `POST /api/matches/llm-rerank?candidateProfileId=&take=10` — auth, **workspace-scoped**
+  via `ICurrentCandidateProfileProvider`. Pega o topo da projeção `LatestOpportunityMatch`, descarta o
+  que já é `llm-fit-v2`, e para cada vaga: understanding (LLM) → fit (LLM) → upsert da projeção +
+  pipeline. Cap: N ∈ [1, 20], padrão 10.
+- **Guarda de orçamento**: `IQueryBudgetManager` com `CostCenter="LlmRerank"` (separado do auto-
+  analyze de descoberta), evita rajada de chamadas e respeita budget diário. Resposta resume
+  `rescored / changed / skippedByBudget / failed / llmConfigured`.
+- **Falha graciosa**: sem chave LLM (`llm.IsConfigured == false`) o endpoint responde **200** com
+  `llmConfigured=false` e nada é feito (transparente; o front mostra a mensagem certa).
+- **Frontend**: botão **"Refinar com IA"** no header da tela Oportunidades; mostra toast com o
+  resultado (vagas re-pontuadas, mudanças, orçamento esgotado, IA não configurada).
+- **Testes**: 401 sem login, 403 perfil de outro workspace, no-op 200 quando não há LLM configurado.
+
+---
+
 ## 0. Atualização — Matching híbrido (semântico + heurístico)
 
 Evolução do motor de relevância: além do heurístico transparente, há agora uma camada **semântica

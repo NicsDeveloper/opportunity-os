@@ -161,6 +161,12 @@ flag explícita.
 perfil → feed do perfil. O `oos.selectedProfileId` (localStorage) só é usado se pertencer ao
 usuário; senão cai no perfil padrão. Logout limpa a seleção e volta ao login.
 
+**LLM-as-judge (re-rank do top-N, sob demanda)**: o botão **"Refinar com IA"** na tela
+Oportunidades chama `POST /api/matches/llm-rerank?candidateProfileId=&take=10`, que re-pontua as N
+melhores vagas do perfil ativo via `understanding+fit` (LLM autoritativo, `EngineVersion=llm-fit-v2`),
+com guarda de orçamento (`IQueryBudgetManager`, cost center `LlmRerank`). Sem chave de LLM responde
+200 + `llmConfigured=false` (no-op transparente). Auth + workspace-scoped (perfil alheio → 403).
+
 **Matching híbrido (semântico + heurístico, opcional)**: além do motor heurístico transparente, há uma
 camada semântica por **embeddings** (`IEmbeddingProvider`: OpenAI `text-embedding-3-small` quando há
 `OpenAI:ApiKey`, senão um fallback determinístico por hashing). Com `FeatureFlags:EnableSemanticMatch=true`,

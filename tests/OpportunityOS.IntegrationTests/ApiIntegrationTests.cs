@@ -785,6 +785,45 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/matches?candidateProfileId={profile.Id}")).StatusCode);
     }
 
+    // ---------------- LLM-as-judge top-N re-rank ----------------
+
+    [DbFact]
+    public async Task LlmRerank_WithoutLogin_Returns401()
+    {
+        await _factory.ResetDatabaseAsync();
+        var anon = _factory.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anon.PostAsync("/api/matches/llm-rerank", null)).StatusCode);
+    }
+
+    [DbFact]
+    public async Task LlmRerank_NoLlmConfigured_NoOpButSucceeds()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = await _factory.CreateAuthenticatedClientAsync();
+        var profileId = await CreateProfile("Dev", ".NET", "C#");
+        var jobId = await SeedJob("Senior Backend (.NET)", "Backend .NET, C#, AWS. Remote, Brazil.");
+        await SeedMatch(jobId, profileId, 80, DateTime.UtcNow);
+        await client.PostAsync("/api/jobs/rebuild-latest-matches", null);
+
+        var res = await client.PostAsync($"/api/matches/llm-rerank?candidateProfileId={profileId}", null);
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var doc = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(doc.GetProperty("llmConfigured").GetBoolean());
+        Assert.Equal(0, doc.GetProperty("rescored").GetInt32());
+    }
+
+    [DbFact]
+    public async Task LlmRerank_ForeignProfile_Returns403()
+    {
+        await _factory.ResetDatabaseAsync();
+        var a = await _factory.CreateAuthenticatedClientAsync("a@test.local");
+        var b = await _factory.CreateAuthenticatedClientAsync("b@test.local");
+        var pb = await CreateProfileWith(b, "B profile");
+
+        var res = await a.PostAsync($"/api/matches/llm-rerank?candidateProfileId={pb}", null);
+        Assert.Equal(HttpStatusCode.Forbidden, res.StatusCode);
+    }
+
     [DbFact]
     public async Task ProfileImport_Apply_ForeignImport_Returns404()
     {

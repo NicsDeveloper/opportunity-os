@@ -257,6 +257,9 @@ export const api = {
     post(`/feedback`, { type, ...body }),
   // Applications board: opportunities already acted on ("já me cadastrei"), per profile.
   applications: (profileId?: string) => get<Application[]>(`/applications${pid(profileId, true)}`),
+  llmRerank: (take = 10, profileId?: string) =>
+    post<{ rescored: number; changed: number; skippedByBudget: number; failed: number; llmConfigured: boolean }>(
+      `/matches/llm-rerank?take=${take}${pid(profileId)}`),
   unapply: (jobId: string, profileId?: string) => del<void>(`/applications/${jobId}${pid(profileId, true)}`),
   // Descobrir mais (B3): bancos/fintechs, consultorias, buscas salvas.
   bacenPreview: (minimumPriority = "High") =>

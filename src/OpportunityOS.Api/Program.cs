@@ -112,6 +112,7 @@ app.MapAuthEndpoints();
 app.MapWorkspaceEndpoints();
 app.MapAdminEndpoints();
 app.MapProfileImportEndpoints();
+app.MapMatchAiRerankEndpoints();
 app.MapCandidateProfileEndpoints();
 app.MapCompanyEndpoints();
 app.MapJobEndpoints();

@@ -486,6 +486,7 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName, profileLabe
   const [showFilters, setShowFilters] = useState(false);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
+  const [refining, setRefining] = useState(false);
   const [prog, setProg] = useState<{ step: number; done?: { n: number; u: number; s: number; e: number } } | null>(null);
   const [page, setPage] = useState(0);
 
@@ -544,6 +545,19 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName, profileLabe
     } finally { setBusy(false); }
   };
 
+  const refineWithAi = async () => {
+    if (refining) return;
+    setRefining(true);
+    try {
+      const r = await api.llmRerank(10, profileId);
+      if (!r.llmConfigured) notify("IA não está configurada (sem chave de LLM).");
+      else if (r.skippedByBudget > 0 && r.rescored === 0) notify("Orçamento da IA esgotado por hoje.");
+      else notify(`IA refinou ${r.rescored} vagas (${r.changed} mudaram).`);
+      onChanged();
+    } catch { notify("Não foi possível refinar agora."); }
+    finally { setRefining(false); }
+  };
+
   return (
     <>
       <header className="hdr">
@@ -575,6 +589,9 @@ function OpportunitiesScreen({ reload, notify, onChanged, firstName, profileLabe
           </div>
           <button className={"btn ghost" + (activeFilters ? " on" : "")} onClick={() => setShowFilters((v) => !v)}>
             <Icon name="filter" size={16} /> Filtros {activeFilters > 0 && <span className="dot-badge">{activeFilters}</span>}
+          </button>
+          <button className="btn sm" disabled={busy || refining} onClick={refineWithAi} title="Re-pontua o topo do seu feed usando o motor de IA (caro; limitado por orçamento).">
+            <Icon name="bolt" size={15} /> {refining ? "Refinando…" : "Refinar com IA"}
           </button>
           <button className="btn primary sm" disabled={busy} onClick={runSearch}>
             <Icon name="bolt" size={15} /> {busy ? "Buscando…" : "Buscar agora"}
