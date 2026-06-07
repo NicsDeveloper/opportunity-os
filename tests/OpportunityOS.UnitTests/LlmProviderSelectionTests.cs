@@ -50,6 +50,28 @@ public sealed class LlmProviderSelectionTests
     }
 
     [Fact]
+    public void GroqKeyPresent_ResolvesGroqThroughOpenAiCompatibleProvider()
+    {
+        var p = Resolve(new() { ["Groq:ApiKey"] = "gsk_test" });
+        // Groq is OpenAI-compatible → reuses OpenAiLlmProvider with the Groq endpoint.
+        var openAi = Assert.IsType<OpenAiLlmProvider>(p);
+        Assert.Equal("llama-3.3-70b-versatile", openAi.ModelName);
+    }
+
+    [Fact]
+    public void Auto_PrefersAnthropic_ThenGroq_ThenOpenAi()
+    {
+        // Both Groq and OpenAI keys present → Groq wins by ordering (free tier first).
+        var p1 = Resolve(new() { ["Groq:ApiKey"] = "gsk_x", ["OpenAI:ApiKey"] = "sk-x" });
+        Assert.IsType<OpenAiLlmProvider>(p1);
+        Assert.Equal("llama-3.3-70b-versatile", p1.ModelName);
+
+        // Anthropic always wins when present.
+        var p2 = Resolve(new() { ["Anthropic:ApiKey"] = "sk-ant", ["Groq:ApiKey"] = "gsk_x" });
+        Assert.IsType<AnthropicLlmProvider>(p2);
+    }
+
+    [Fact]
     public void ExplicitPreference_OverridesAutoDetection()
     {
         // Anthropic key present, but OpenAI explicitly requested.

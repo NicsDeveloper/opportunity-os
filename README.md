@@ -161,6 +161,11 @@ flag explícita.
 perfil → feed do perfil. O `oos.selectedProfileId` (localStorage) só é usado se pertencer ao
 usuário; senão cai no perfil padrão. Logout limpa a seleção e volta ao login.
 
+**Provider LLM (Groq grátis, OpenAI, Anthropic, Ollama local)**: `OpenAiLlmProvider` aceita
+`Endpoint` customizado, então **qualquer serviço OpenAI-compatível** funciona sem código novo. Setar
+`Groq:ApiKey` (free tier sem cartão de crédito) liga o Llama 3.3 70B automaticamente. Ordem do `auto`:
+**Anthropic → Groq → OpenAI → Fake**. Para Ollama local: `Llm:Provider=groq` + `Groq:Endpoint=http://localhost:11434/v1/chat/completions` + `Groq:Model=llama3.1:8b`.
+
 **LLM-as-judge (re-rank do top-N, sob demanda)**: o botão **"Refinar com IA"** na tela
 Oportunidades chama `POST /api/matches/llm-rerank?candidateProfileId=&take=10`, que re-pontua as N
 melhores vagas do perfil ativo via `understanding+fit` (LLM autoritativo, `EngineVersion=llm-fit-v2`),

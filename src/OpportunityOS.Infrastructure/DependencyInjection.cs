@@ -216,10 +216,10 @@ public static class DependencyInjection
     }
 
     /// <summary>
-    /// Selects the LLM provider. Disabled -> not-configured fake (forces heuristic
-    /// fallback). Otherwise honours an explicit <c>Llm:Provider</c> (Anthropic|OpenAI|Fake)
-    /// or auto-detects by the first available API key (Anthropic, then OpenAI),
-    /// falling back to the deterministic fake when no key is present.
+    /// Selects the LLM provider. Disabled -> not-configured fake (forces heuristic fallback).
+    /// Otherwise honours an explicit <c>Llm:Provider</c> (Anthropic|OpenAI|Groq|Fake) or auto-detects
+    /// in this order: Anthropic → Groq (free tier) → OpenAI → Fake. Groq is OpenAI-compatible, so
+    /// it reuses <see cref="OpenAiLlmProvider"/> with the Groq endpoint.
     /// </summary>
     private static void RegisterLlmProvider(IServiceCollection services, IConfiguration config)
     {
@@ -230,13 +230,17 @@ public static class DependencyInjection
         }
 
         var anthropicKey = config["Anthropic:ApiKey"];
+        var groqKey = config["Groq:ApiKey"];
         var openAiKey = config["OpenAI:ApiKey"];
         var preference = (config["Llm:Provider"] ?? "auto").Trim().ToLowerInvariant();
 
         var useAnthropic = preference == "anthropic"
             || (preference == "auto" && !string.IsNullOrWhiteSpace(anthropicKey));
+        var useGroq = preference == "groq"
+            || (preference == "auto" && string.IsNullOrWhiteSpace(anthropicKey) && !string.IsNullOrWhiteSpace(groqKey));
         var useOpenAi = preference == "openai"
-            || (preference == "auto" && string.IsNullOrWhiteSpace(anthropicKey) && !string.IsNullOrWhiteSpace(openAiKey));
+            || (preference == "auto" && string.IsNullOrWhiteSpace(anthropicKey)
+                && string.IsNullOrWhiteSpace(groqKey) && !string.IsNullOrWhiteSpace(openAiKey));
 
         if (useAnthropic)
         {
@@ -246,6 +250,18 @@ public static class DependencyInjection
                 Model = config["Anthropic:Model"] ?? "claude-sonnet-4-6"
             });
             services.AddHttpClient<ILlmProvider, AnthropicLlmProvider>(c => c.Timeout = TimeSpan.FromSeconds(60));
+        }
+        else if (useGroq)
+        {
+            // Groq is OpenAI-compatible — same provider, different endpoint + open-source model.
+            services.AddSingleton(new OpenAiOptions
+            {
+                ApiKey = groqKey ?? string.Empty,
+                Model = config["Groq:Model"] ?? "llama-3.3-70b-versatile",
+                Endpoint = config["Groq:Endpoint"] ?? "https://api.groq.com/openai/v1/chat/completions",
+                ProviderTag = "Groq"
+            });
+            services.AddHttpClient<ILlmProvider, OpenAiLlmProvider>(c => c.Timeout = TimeSpan.FromSeconds(60));
         }
         else if (useOpenAi)
         {

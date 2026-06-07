@@ -6,6 +6,29 @@
 
 ---
 
+## 0. Atualização — Groq como provider LLM (free tier)
+
+Suporte a **Groq** (Llama 3.3 70B, free tier sem cartão) como alternativa gratuita ao OpenAI/Anthropic.
+Como Groq é **OpenAI-compatível**, não há novo provider: `OpenAiLlmProvider` ganhou um `Endpoint`
+configurável e um `ProviderTag` (audit/log) — Groq reusa esse provider com a URL
+`https://api.groq.com/openai/v1/chat/completions`.
+
+- **Seleção** (`DependencyInjection.RegisterLlmProvider`): ordem do `auto` ficou
+  **Anthropic → Groq → OpenAI → Fake** (Groq na frente do OpenAI quando ambos estão configurados, porque
+  é o caminho gratuito). `Llm:Provider=groq` força Groq explicitamente.
+- **Config**: `Groq:ApiKey` (obrigatório), `Groq:Model` (default `llama-3.3-70b-versatile`),
+  `Groq:Endpoint` (default já apontado). Sem chave → fluxo OpenAI/Anthropic/Fake como antes.
+- **Custo**: zero no free tier (~14k req/dia, ~30 req/min). LLM-as-judge respeita o
+  `IQueryBudgetManager` (cost center `LlmRerank`) — o cap de N=10 por refinar funciona bem dentro
+  desse limite.
+- **Testes**: 2 novos casos (Groq sozinho resolve `OpenAiLlmProvider` com modelo Llama; `auto`
+  prefere Anthropic > Groq > OpenAI). 193 unit verdes.
+- **Extensão futura**: o mesmo provider também roda **Ollama** local (basta
+  `Endpoint=http://localhost:11434/v1/chat/completions` + `Model=llama3.1:8b`), **Together.ai**,
+  **DeepSeek** — qualquer serviço OpenAI-compatível, sem código novo.
+
+---
+
 ## 0. Atualização — LLM-as-judge (re-rank do top-N)
 
 Camada de precisão sobre o feed: o usuário (ou o frontend) pede para a IA **re-pontuar as N melhores
