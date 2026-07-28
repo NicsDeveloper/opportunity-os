@@ -27,3 +27,7 @@ appsettings.*.local.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Code / local agent config
+.claude/
+CLAUDE.md
