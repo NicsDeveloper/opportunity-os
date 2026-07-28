@@ -50,18 +50,13 @@ public static class DashboardEndpoints
             var jobsToday = await db.JobPostings.CountAsync(j => j.CreatedAtUtc >= today, ct);
 
             // "Fortes (75+)" must mean the same as the feed: strong AND fresh/active — not
-            // stale/closed postings. Load strong matches + their jobs and filter in memory
-            // (EffectiveDateUtc / IsTalentPool are computed, not SQL-mappable).
+            // stale/closed postings. The latest >=75 matches for this profile come straight from the
+            // projection (no in-memory latest-per-job scan); freshness is filtered below.
             var publishedSince = DateTime.UtcNow.AddDays(-120);
-            // Latest match per job FIRST, then the >=75 gate (a stale high match must not inflate the count).
-            var allScores = await db.OpportunityMatches
-                .Where(m => profileId == null || m.CandidateProfileId == profileId.Value)
-                .Select(m => new { m.JobPostingId, m.OverallScore, m.CreatedAtUtc }).ToListAsync(ct);
-            var strongLatest = allScores
-                .GroupBy(m => m.JobPostingId)
-                .Select(g => g.OrderByDescending(m => m.CreatedAtUtc).First())
-                .Where(m => m.OverallScore >= 75)
-                .ToList();
+            var strongLatest = await db.LatestOpportunityMatches
+                .Where(p => (profileId == null || p.CandidateProfileId == profileId.Value) && p.OverallScore >= 75)
+                .Select(p => new { p.JobPostingId, CreatedAtUtc = p.MatchCreatedAtUtc })
+                .ToListAsync(ct);
             var strongJobIds = strongLatest.Select(m => m.JobPostingId).ToList();
             var strongJobs = await db.JobPostings
                 .Where(j => strongJobIds.Contains(j.Id)).ToDictionaryAsync(j => j.Id, ct);
@@ -94,7 +89,7 @@ public static class DashboardEndpoints
             return Results.Ok(new DashboardSummaryResponse(
                 jobs, jobsToday, matches75, matches75Today, messages, messagesToday,
                 emails, emailsToday, pending, nextInDays));
-        }).WithTags("Dashboard");
+        }).WithTags("Dashboard").RequireAuthorization();
 
         // Best opportunities: latest match per job, enriched with job + company.
         // Relevance + FRESHNESS first: stale postings (likely closed/404) are dropped, and
@@ -116,19 +111,17 @@ public static class DashboardEndpoints
             var profileId = await profiles.ResolveIdAsync(candidateProfileId, ct);
             if (profileId is null) return Results.Ok(Array.Empty<BestOpportunityResponse>());
 
-            // Take the LATEST match per (job, THIS profile) FIRST, then apply the score gate — otherwise a
-            // stale high-scoring match outranks a fresh re-scored (gated) one and the job never drops off.
-            var matches = await db.OpportunityMatches
-                .Where(m => m.CandidateProfileId == profileId.Value)
-                .Select(m => new { m.Id, m.JobPostingId, m.OverallScore, m.CreatedAtUtc })
+            // Read the LATEST match per (job, THIS profile) straight from the projection, filtering by
+            // profile + score AT THE DATABASE (indexed) — no longer loading every match into memory.
+            // The projection is always the latest per (job, profile), so a stale/old match can't leak in.
+            var latestMatchIds = await db.LatestOpportunityMatches
+                .Where(p => p.CandidateProfileId == profileId.Value && p.OverallScore >= min)
+                .Select(p => p.OpportunityMatchId)
                 .ToListAsync(ct);
-            var latestIds = matches
-                .GroupBy(m => m.JobPostingId)
-                .Select(g => g.OrderByDescending(m => m.CreatedAtUtc).First())
-                .Where(m => m.OverallScore >= min)
-                .Select(m => m.Id)
-                .ToHashSet();
-            var latestByJob = await db.OpportunityMatches.Where(m => latestIds.Contains(m.Id)).ToListAsync(ct);
+            if (latestMatchIds.Count == 0) return Results.Ok(Array.Empty<BestOpportunityResponse>());
+
+            // Materialize only those matches (one per job) — needed for rationale/recommendation/strengths.
+            var latestByJob = await db.OpportunityMatches.Where(m => latestMatchIds.Contains(m.Id)).ToListAsync(ct);
             if (latestByJob.Count == 0) return Results.Ok(Array.Empty<BestOpportunityResponse>());
 
             var jobIds = latestByJob.Select(m => m.JobPostingId).ToList();
@@ -259,7 +252,7 @@ public static class DashboardEndpoints
                     job.RequiresManualValidation, job.RealCompanyName, job.SourceName, job.HasSourceDate);
             });
             return Results.Ok(result);
-        }).WithTags("Matches");
+        }).WithTags("Matches").RequireAuthorization();
 
         // Applications board: opportunities the user already acted on ("já me cadastrei"/apliquei
         // or contatei recrutador). These leave the main board (above) and live here so the user
@@ -308,7 +301,7 @@ public static class DashboardEndpoints
                 })
                 .ToList();
             return Results.Ok(result);
-        }).WithTags("Matches");
+        }).WithTags("Matches").RequireAuthorization();
 
         // Undo: move an application back to the main board by removing its Applied/ContactedRecruiter feedback.
         app.MapDelete("/api/applications/{jobId:guid}", async (
@@ -325,7 +318,7 @@ public static class DashboardEndpoints
             db.UserFeedbacks.RemoveRange(toRemove);
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
-        }).WithTags("Matches");
+        }).WithTags("Matches").RequireAuthorization();
 
         // Recent execution runs (audit feed).
         app.MapGet("/api/runs", async (int? take, OpportunityOsDbContext db, CancellationToken ct) =>
@@ -338,17 +331,21 @@ public static class DashboardEndpoints
             return Results.Ok(runs.Select(r => new ExecutionRunResponse(
                 r.Id, r.RunType, r.Status.ToString(), r.StartedAtUtc,
                 r.ItemsProcessed, r.ItemsSucceeded, r.ItemsFailed)));
-        }).WithTags("Runs");
+        }).WithTags("Runs").RequireAuthorization("System");
 
-        // Generated messages (drafts).
-        app.MapGet("/api/messages", async (OpportunityOsDbContext db, CancellationToken ct) =>
+        // Generated messages (drafts) — scoped to THIS workspace's profiles.
+        app.MapGet("/api/messages", async (
+            Application.Auth.ICurrentUserContext user, OpportunityOsDbContext db, CancellationToken ct) =>
         {
+            var ws = await user.GetWorkspaceIdAsync(ct);
+            var profileIds = await db.CandidateProfiles.Where(p => p.WorkspaceId == ws).Select(p => p.Id).ToListAsync(ct);
             var msgs = await db.GeneratedMessages
+                .Where(m => profileIds.Contains(m.CandidateProfileId))
                 .OrderByDescending(m => m.CreatedAtUtc)
                 .Take(200)
                 .ToListAsync(ct);
             return Results.Ok(msgs.Select(m => new GeneratedMessageSummary(
                 m.Id, m.JobPostingId, m.EmailSubject, m.Status.ToString(), m.CreatedAtUtc)));
-        }).WithTags("Messages");
+        }).WithTags("Messages").RequireAuthorization();
     }
 }

@@ -16,16 +16,15 @@ public sealed class EfDigestStore : IDigestStore
 
     public async Task<IReadOnlyList<OpportunityDigestItem>> GetDigestItemsAsync(Guid candidateProfileId, int minScore, CancellationToken ct)
     {
-        // Latest match per job FOR THIS PROFILE FIRST, then the score gate (so a re-scored/gated job drops).
-        var all = await _db.OpportunityMatches
-            .Where(m => m.CandidateProfileId == candidateProfileId)
+        // Latest match per (job, THIS profile) straight from the projection, score-gated AT THE DB
+        // (no in-memory scan of every match). The projection is always the latest, so a re-scored/
+        // gated job correctly drops out.
+        var latestMatchIds = await _db.LatestOpportunityMatches
+            .Where(p => p.CandidateProfileId == candidateProfileId && p.OverallScore >= minScore)
+            .Select(p => p.OpportunityMatchId)
             .ToListAsync(ct);
-        var latestPerJob = all
-            .GroupBy(m => m.JobPostingId)
-            .Select(g => g.OrderByDescending(m => m.CreatedAtUtc).First())
-            .Where(m => m.OverallScore >= minScore)
-            .ToList();
-        if (latestPerJob.Count == 0) return Array.Empty<OpportunityDigestItem>();
+        if (latestMatchIds.Count == 0) return Array.Empty<OpportunityDigestItem>();
+        var latestPerJob = await _db.OpportunityMatches.Where(m => latestMatchIds.Contains(m.Id)).ToListAsync(ct);
 
         var jobIds = latestPerJob.Select(m => m.JobPostingId).ToList();
         var jobs = await _db.JobPostings.Where(j => jobIds.Contains(j.Id)).ToDictionaryAsync(j => j.Id, ct);

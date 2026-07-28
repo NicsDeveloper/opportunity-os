@@ -8,7 +8,7 @@ public static class ConsultingRadarEndpoints
 {
     public static void MapConsultingRadarEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/consulting-radar").WithTags("Consulting Radar");
+        var group = app.MapGroup("/api/consulting-radar").WithTags("Consulting Radar").RequireAuthorization("System");
 
         group.MapPost("/discover", async (ConsultingDiscoverRequest? req, IConsultingRadarService svc, CancellationToken ct) =>
             Results.Ok(await svc.DiscoverAsync(req ?? new ConsultingDiscoverRequest(null, null), ct)));

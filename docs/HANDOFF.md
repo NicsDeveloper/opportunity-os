@@ -6,7 +6,182 @@
 
 ---
 
-## 0. Atualização — Multi-perfil de candidato (pré-auth)
+## 0. Atualização — Groq como provider LLM (free tier)
+
+Suporte a **Groq** (Llama 3.3 70B, free tier sem cartão) como alternativa gratuita ao OpenAI/Anthropic.
+Como Groq é **OpenAI-compatível**, não há novo provider: `OpenAiLlmProvider` ganhou um `Endpoint`
+configurável e um `ProviderTag` (audit/log) — Groq reusa esse provider com a URL
+`https://api.groq.com/openai/v1/chat/completions`.
+
+- **Seleção** (`DependencyInjection.RegisterLlmProvider`): ordem do `auto` ficou
+  **Anthropic → Groq → OpenAI → Fake** (Groq na frente do OpenAI quando ambos estão configurados, porque
+  é o caminho gratuito). `Llm:Provider=groq` força Groq explicitamente.
+- **Config**: `Groq:ApiKey` (obrigatório), `Groq:Model` (default `llama-3.3-70b-versatile`),
+  `Groq:Endpoint` (default já apontado). Sem chave → fluxo OpenAI/Anthropic/Fake como antes.
+- **Custo**: zero no free tier (~14k req/dia, ~30 req/min). LLM-as-judge respeita o
+  `IQueryBudgetManager` (cost center `LlmRerank`) — o cap de N=10 por refinar funciona bem dentro
+  desse limite.
+- **Testes**: 2 novos casos (Groq sozinho resolve `OpenAiLlmProvider` com modelo Llama; `auto`
+  prefere Anthropic > Groq > OpenAI). 193 unit verdes.
+- **Extensão futura**: o mesmo provider também roda **Ollama** local (basta
+  `Endpoint=http://localhost:11434/v1/chat/completions` + `Model=llama3.1:8b`), **Together.ai**,
+  **DeepSeek** — qualquer serviço OpenAI-compatível, sem código novo.
+
+---
+
+## 0. Atualização — LLM-as-judge (re-rank do top-N)
+
+Camada de precisão sobre o feed: o usuário (ou o frontend) pede para a IA **re-pontuar as N melhores
+vagas** do perfil ativo usando o motor autoritativo (`IJobUnderstandingService` + `ICandidateFitAnalysisService`),
+mantendo a explicação por sub-scores e o `EngineVersion="llm-fit-v2"`.
+
+- **Endpoint** `POST /api/matches/llm-rerank?candidateProfileId=&take=10` — auth, **workspace-scoped**
+  via `ICurrentCandidateProfileProvider`. Pega o topo da projeção `LatestOpportunityMatch`, descarta o
+  que já é `llm-fit-v2`, e para cada vaga: understanding (LLM) → fit (LLM) → upsert da projeção +
+  pipeline. Cap: N ∈ [1, 20], padrão 10.
+- **Guarda de orçamento**: `IQueryBudgetManager` com `CostCenter="LlmRerank"` (separado do auto-
+  analyze de descoberta), evita rajada de chamadas e respeita budget diário. Resposta resume
+  `rescored / changed / skippedByBudget / failed / llmConfigured`.
+- **Falha graciosa**: sem chave LLM (`llm.IsConfigured == false`) o endpoint responde **200** com
+  `llmConfigured=false` e nada é feito (transparente; o front mostra a mensagem certa).
+- **Frontend**: botão **"Refinar com IA"** no header da tela Oportunidades; mostra toast com o
+  resultado (vagas re-pontuadas, mudanças, orçamento esgotado, IA não configurada).
+- **Testes**: 401 sem login, 403 perfil de outro workspace, no-op 200 quando não há LLM configurado.
+
+---
+
+## 0. Atualização — Matching híbrido (semântico + heurístico)
+
+Evolução do motor de relevância: além do heurístico transparente, há agora uma camada **semântica
+opcional** por embeddings. **Off por padrão** (`FeatureFlags:EnableSemanticMatch=false`) — quando
+ligada e perfil+vaga têm embedding, o score mistura a **similaridade de cosseno** com o heurístico;
+as **travas continuam valendo** (gestão/stack excluída/sem core hit não sobem por semântica).
+
+- **`IEmbeddingProvider`** (`Application/AI`): `OpenAiEmbeddingProvider` (real, `text-embedding-3-small`,
+  via HttpClient) quando há `OpenAI:ApiKey`; senão `HashingEmbeddingProvider` (determinístico, offline,
+  hashing-trick FNV-1a sobre unigramas+bigramas, L2-normalizado). **Honesto**: o fallback é um vetor
+  **lexical** (não é semântica de verdade) — o salto vem com um modelo real; o fallback mantém o
+  pipeline funcional/testável sem chave.
+- **Persistência**: `Embedding (real[])` + `EmbeddingModel` em `JobPosting` e `CandidateProfile`
+  (migration `AddEmbeddings`); recomputa só quando o modelo muda (staleness por tag). **Cosseno em C#**
+  (in-app), sem pgvector — escolha deliberada para não mexer na imagem do Postgres; **pgvector fica como
+  otimização de índice** para escala.
+- **Blend** (`HeuristicMatchEngine` + `SemanticMatchOptions`): `overall = (1-w)·heurístico + w·cos·100`
+  (w padrão 0,4), aplicado **antes das travas**; adiciona o sinal à explicação ("Similaridade semântica
+  X%"). Embeddings são populados no caminho de `POST /api/jobs/rescore` quando a flag está ligada.
+- **Testes**: determinismo/normalização do hashing, similar > diferente, blend sobe alinhado / desce
+  ortogonal, e flag-off ignora embeddings. (191 unit / 32 integração verdes.)
+- **Próximos passos** (não nesta fatia): LLM-as-judge no top-N; aprendizado por feedback (re-rank);
+  pgvector quando o volume exigir índice ANN.
+
+---
+
+## 0. Atualização — LinkedIn PDF Profile Importer
+
+Acelerador **opcional** de onboarding: o usuário envia o PDF exportado do LinkedIn e o sistema
+extrai → detecta → parseia → propõe um `CandidateProfileDraft` editável, que ele revisa e salva como
+`CandidateProfile` no seu workspace. **Sem scraping, sem OAuth do LinkedIn, sem importação por URL** —
+apenas arquivo enviado pelo usuário. Determinístico primeiro; LLM só normaliza (atrás de flag).
+
+- **Entidade** `ProfileImport` (Domínio) → tabela `profile_imports` (migration `AddProfileImport`),
+  por workspace. **Persiste só o `ParsedJson`** (o texto bruto do PDF é processado em memória e
+  descartado — privacidade). Status: Uploaded/Parsed/Failed/Converted/Applied.
+- **Pipeline** (`Application/Import`): `IPdfTextExtractor` (impl `PdfPigTextExtractor` em Infra, via
+  **UglyToad.PdfPig — Apache-2.0**, sem OCR; layout de 2 colunas tratado: coluna principal primeiro,
+  depois sidebar) → `ILinkedInPdfProfileDetector` (score de sinais; <50 rejeita) →
+  `ILinkedInProfilePdfParser` (seções PT/EN; experiências **best-effort, nunca perde texto**) →
+  `ILinkedInProfileToCandidateProfileDraftMapper` (skills via `StackTaxonomy` boundary-safe — `java`
+  ≠ `javascript`; senioridade por duração+headline; domínios por keyword) →
+  `IProfileImportNormalizer` (passthrough por padrão; **LLM conservador** atrás de
+  `FeatureFlags:EnableLinkedInPdfLlmNormalization`, prompt `profile-import-linkedin-v1`, que **só**
+  reclassifica skills/domínios/senioridade/roles/prefs e tem as experiências/identidade **re-enxertadas
+  verbatim** — invenção é estruturalmente impossível).
+- **Endpoints** (`/api/profile-imports`, auth + workspace-scoped): `POST /linkedin-pdf` (multipart,
+  ≤5 MB, valida tipo/extensão), `GET /{id}` (só do próprio workspace → senão 404),
+  `POST /{id}/apply` (cria o perfil a partir do draft revisado; **idempotente**: se já aplicado,
+  retorna o perfil existente; primeiro perfil/`setAsDefault` vira default).
+- **Frontend**: onboarding agora começa com escolha **Importar PDF do LinkedIn (recomendado)** vs
+  **Preencher manualmente**. Fluxo de import: upload → revisão editável (com aviso *"Revise antes de
+  salvar. O sistema pode errar skills, senioridade ou experiências."*) → salvar.
+- **Testes**: 14 unit (detector/parser/mapper sobre fixture **anonimizada**) + 6 integração (401 sem
+  login, 400 não-PDF, upload→draft, isolamento por workspace, apply cria perfil default, apply de
+  import alheio → 404). Integração usa `IPdfTextExtractor` fake (sem binário PDF no repo).
+
+---
+
+## 0. Atualização — Admin panel + correção de relevância
+
+Última leva (branch `feat/auth-workspace`). Dois temas:
+
+**Painel de operação (admin)**
+- **Papel admin de verdade**: `AppUser.IsAdmin` (migration `AddIsAdmin`); `AdminClaimsPrincipalFactory`
+  injeta a claim `is_admin` no cookie; policy **`Admin`** = `RequireClaim("is_admin","true")`.
+  O seeder promove `dev@local` a admin (Development/flag). `GET /api/auth/me` agora retorna `isAdmin`.
+- **Endpoints** (`RequireAuthorization("Admin")`): `GET /api/admin/overview` (contagens, crons dos jobs
+  recorrentes, execuções recentes) e `POST /api/admin/sweep` (`maxCompanies`, `maxDurationSeconds`) —
+  dispara uma varredura **em segundo plano** (escopo próprio de DI + CTS de timeout) via
+  `IJobDiscoveryService.DiscoverAllAsync(maxCompanies)`. Não-admin → 403.
+- **Varredura limitada**: `JobDiscoveryService.DiscoverAllAsync(maxCompanies)` varre todas as empresas
+  (prioridade primeiro), com cap por nº de empresas e **break por cancelamento** entre empresas
+  (permite time-box). A captura contínua segue no Worker (`continuous-discovery` */15).
+- **Frontend**: aba **"Operação"** só para admin (gate por `me.isAdmin`) — cards de status, agenda dos
+  jobs e form de varredura (máx. empresas / tempo máx.).
+
+**Correção de relevância (credibilidade do score)** — `Application/Matching`:
+- **Bug do substring**: `StackTaxonomy` casava tokens por substring, então `"java"` casava com
+  `"javascript"` (e `"go"` com `"google"`). Uma vaga C#/.NET que citava JavaScript era marcada como
+  família **Java** → técnico 100 num perfil Java. Agora o match é por **fronteira de palavra** (regex
+  com lookarounds alfanuméricos).
+- **Título como stack primária**: se o **título** declara uma família que não é o core do perfil
+  (ex.: "C# Developer" para perfil Java), uma menção do core só no corpo deixa de ser "core hit"
+  (demovida a secundária). Efeito: vaga C# pura caiu de **94 → 45** num perfil Java; vagas C#/.NET
+  passam a ~53–68, não 90+. Vaga que pede Java no próprio título continua alta (legítimo).
+- **Justificativa do card**: `friendlyReason` não é mais hardcoded em ".NET/C#"; reflete a stack real
+  da vaga (`o.skills`).
+- Regressão coberta em `StackTaxonomyTests` (`java` ≠ `javascript`; perfil Java em vaga C# < 60).
+  Após o fix, re-pontuar (`POST /api/jobs/rescore?allProfiles=true`) para corrigir matches já gravados.
+
+---
+
+## 0.0 Atualização — Auth Workspace MVP (login + isolamento)
+
+O sistema passou de multi-perfil **pré-auth** para um **produto logado**. Cada usuário tem um
+`Workspace` privado; seus dados pessoais ficam isolados de outros usuários.
+
+- **Auth**: ASP.NET Core Identity + cookie (`AddIdentity<AppUser, IdentityRole<Guid>>`,
+  `ConfigureApplicationCookie`; 401/403 em vez de redirect). `OpportunityOsDbContext` agora é
+  `IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>`. `AppUser` vive em
+  `Infrastructure/Auth`; `Workspace` é entidade de Domínio (guarda só `UserId: Guid`, sem
+  navegação, p/ não acoplar Domínio ao Identity).
+- **Workspace ownership**: `CandidateProfile.WorkspaceId` (nullable transitório — migration
+  `AddAuthWorkspace`; backfill pelo seeder; tornar `NOT NULL` numa migration futura).
+- **Choke point de isolamento**: `EfCurrentCandidateProfileProvider` agora injeta
+  `ICurrentUserContext` (`Application/Auth`, impl. `HttpCurrentUserContext` na API) e filtra por
+  `WorkspaceId`. Um `candidateProfileId` de outro workspace lança
+  `ForbiddenProfileAccessException` → **403** (middleware em `Program.cs`). Como todos os endpoints
+  pessoais já resolviam o perfil por esse provider, o isolamento propaga sem mudar assinaturas.
+  Endpoints que liam o DB direto (`CandidateProfileEndpoints`, `applications`, `opportunities`,
+  `messages`, `feedback` GET) foram escopados explicitamente ao workspace.
+- **Proteção**: grupos pessoais com `RequireAuthorization()`; grupos de **custo/mutação global**
+  (`jobs` discover/search/rescore, `companies` mutações, `discovery/*`, `bacen/*`,
+  `consulting-radar/*`, `debug/*`, `runs`) com `RequireAuthorization("System")`; leituras globais
+  (`GET /api/jobs|companies`) anônimas. Flag dev `Dev:OpenSystemEndpoints`.
+- **Endpoints novos**: `POST /api/auth/{register,login,logout}`, `GET /api/auth/me`,
+  `GET /api/workspace/me`.
+- **Seeder dev**: `AuthSeeder` cria `dev@local` (Development ou `Dev:SeedDevUser=true`), vincula os
+  perfis pré-auth ao workspace dele e garante 1 default; valida que não sobrou `workspace_id` NULL.
+- **Frontend**: gate de auth em `App.tsx` (`/api/auth/me`), telas Login/Cadastro, onboarding de 4
+  passos (cria o 1º perfil), logout e seletor de perfil validado contra o workspace. `api.ts` usa
+  `credentials:"include"`. UI ajustada ao tema claro (seletor de perfil e inputs `.field` deixaram de
+  herdar fallback escuro → caixa preta) e o feed agora **reseta a paginação ao trocar de perfil**
+  (`profileId` nas deps do reset de página em `OpportunitiesScreen`).
+- **Testes**: unit do provider workspace-scoped; integração com cliente autenticado por cookie
+  (`CreateAuthenticatedClientAsync`) + 401/403/isolamento/troca-de-perfil/logout.
+- **Fora de escopo** (adiado): ProductEvent (§26), CompanyWatchlist, billing/freemium, orgs/times.
+
+---
+
+## 0.1 Atualização — Multi-perfil de candidato (pré-auth)
 
 O sistema deixou de ser fixo no perfil do Nícolas: agora pontua oportunidades para
 **múltiplos `CandidateProfile`** (Backend .NET, Java, Frontend React, Data Engineer seedados).
@@ -91,6 +266,7 @@ Todas com `Id` Guid e setters privados (encapsulamento). Tabelas snake_case; lis
 | `Company` | companies | Name, WebsiteUrl, CareersUrl, LinkedInUrl, Industry, Country, Priority, Source, Tags | `Update`, `MarkScanned`, `SetCareersUrl`, `SetWebsiteUrl`, `AddTag`, `RaisePriorityTo` (sobe sem rebaixar), `MarkSourceOnly` (rebaixa denylist a Low + source-only/noisy-source/do-not-promote) |
 | `JobPosting` | job_postings | CompanyId, ExternalId, **SourceProvider**, Title, Location, WorkMode, Seniority, Language, AbsoluteUrl, DescriptionText/Html, ExtractedSkills/Domains, **Status**, PublishedAtUtc, CreatedAtUtc, UpdatedAtUtc | `RefreshFromSource`, `ApplyNormalization`, `MarkAnalyzed`, `Archive`, `MarkExpired` |
 | `OpportunityMatch` | opportunity_matches | JobPostingId, **CandidateProfileId**, OverallScore + 5 subscores, Recommendation, Strengths/Risks/MissingRequirements, **Rationale**, **EngineVersion** | **imutável** e **específico por perfil** — a mesma vaga tem um match por `CandidateProfile`; `EngineVersion` marca a geração (`heuristic-v2`/`llm-fit-v1`) |
+| `LatestOpportunityMatch` | latest_opportunity_matches | JobPostingId, CandidateProfileId, OpportunityMatchId, OverallScore, Recommendation, EngineVersion, MatchCreatedAtUtc, UpdatedAtUtc | **projeção** (cache) do último match por **(JobPostingId + CandidateProfileId)** — única por esse par. Reconstruível dos `OpportunityMatch`. `From`/`UpdateFrom` (só avança no tempo). Lê o feed/digest sem varrer todos os matches (§5.1) |
 | `Opportunity` | opportunities | JobPostingId, **CandidateProfileId**, RecruiterLeadId?, **Status**, NextFollowUpAtUtc, Notes | `AdvanceTo`, `SetStatusManually`, `SetNotes`, `SetFollowUp`, `LinkRecruiter`, `Create(job, profile)` — **única por (JobPostingId + CandidateProfileId)**; a mesma vaga vira oportunidades distintas para perfis distintos |
 | `GeneratedMessage` | generated_messages | JobPostingId, OpportunityMatchId, **CandidateProfileId**, LinkedInMessage, CoverLetter, EmailSubject/Body, CvTailoringNotes, FollowUpMessage, HumanReviewNotes, Status, PromptVersion, ModelName | `SetStatus` — **específica do perfil** (a mesma vaga gera rascunhos diferentes por perfil) |
 | `ExecutionRun` | execution_runs | RunType, Status, Started/Finished, ItemsProcessed/Succeeded/Failed, ErrorMessage | `RecordSuccess`, `RecordFailure`, `Complete`, `Fail`, `Start` |
@@ -208,6 +384,9 @@ triagem), só promovendo a `JobPosting` o que passa pelos filtros. Alimenta a ab
 - **Técnico**: famílias do perfil (core/secondary/excluded) vs famílias da vaga. Família **core**
   presente na vaga = base alta (72 + bônus por skills do perfil citadas); **secondary** = média
   (~48–68); stack concorrente/desconhecida = baixa; **excluded** = teto 25.
+  - Detecção de família é por **fronteira de palavra** (não substring): `"java"` não casa
+    `"javascript"`. E se o **título** declara uma família ≠ core do perfil, uma menção do core só no
+    corpo NÃO conta como core hit (vaga "C# Developer" não vira top match de um perfil Java). Ver §0.
 - **Cargo**: overlap do título com `PreferredRoles`; título citando a stack core do perfil reforça (≥75).
 - **Senioridade**: alvo do perfil (`Seniority`) → compatível 90, ±1 nível 68, distante 35–50; não informado 65.
 - **Domínio**: overlap com `profile.Domains` (bônus, nunca gate; sem sinal = 50).
@@ -228,6 +407,25 @@ triagem), só promovendo a `JobPosting` o que passa pelos filtros. Alimenta a ab
 
 ---
 
+### 5.1 Projeção `LatestOpportunityMatch` (feed/digest eficientes)
+
+`OpportunityMatch` é **append-only**: cada `rescore`/análise LLM cria um match novo. O feed/digest
+precisam do **último por (job, perfil)** — varrer todos os matches em memória não escala com
+`vagas × perfis × versões`. A tabela `latest_opportunity_matches` mantém **uma linha por
+(JobPostingId + CandidateProfileId)** apontando para o match atual.
+
+- **Sincronização:** todo ponto que cria match chama `ILatestOpportunityMatchProjection.UpsertAsync`
+  (impl `EfLatestOpportunityMatchProjection`): auto-score na descoberta (`EfDiscoveryStore.AddMatchAsync`),
+  `POST /api/jobs/{id}/match`, `POST /api/jobs/rescore`, `POST /api/jobs/{id}/ai/analyze` e
+  `GetOrCreateMatch`. `UpsertAsync` **só avança no tempo** (nunca rebaixa para um match mais antigo) e
+  **nunca cruza perfis**. Não chama `SaveChanges` — commita junto com o match.
+- **Leitura:** `/api/matches`, o `EfDigestStore` e o card "Fortes (75+)" do summary filtram
+  `latest_opportunity_matches` por `CandidateProfileId` (+ score) **no banco** e materializam só os
+  matches resultantes (um por vaga). Índices: único (job, profile); (profile, score); (profile, updatedAt).
+- **Backfill/repair:** no startup (quando a projeção está vazia mas há matches) e via
+  `POST /api/jobs/rebuild-latest-matches` (retorna `processedPairs/created/updated/skipped`). É um
+  **cache derivado** — pode ser reconstruído a qualquer momento.
+
 ## 6. Camada de IA (AI Copilot)
 
 `ILlmProvider` selecionado em runtime (`Llm:Provider` = auto|anthropic|openai|fake):
@@ -237,7 +435,7 @@ triagem), só promovendo a `JobPosting` o que passa pelos filtros. Alimenta a ab
 
 Cinco serviços (cada um com prompt versionado e auditado em `PromptExecutionLog`):
 1. **IJobUnderstandingService** (`job-analysis-v1`) — interpreta a vaga → skills, domínios, senioridade, work mode, idioma, responsabilidades, riscos, resumo.
-2. **ICandidateFitAnalysisService** (`fit-score-v1`) — compara perfil × vaga → `OpportunityMatch` com score + rationale rico. *Técnico (.NET/C#/backend) é prioridade; pagamentos é bônus, não gate; .NET role ⇒ match forte (≥75).*
+2. **ICandidateFitAnalysisService** (`fit-score-v1`) — compara **o perfil selecionado** × vaga → `OpportunityMatch` (com `CandidateProfileId` + `EngineVersion=llm-fit-v1`) com score + rationale rico. *Aderência técnica é o que domina, **relativa à stack do perfil** (core/secondary/excluded): para o perfil Nícolas, .NET/C# é match forte; para o perfil Java, Java/Spring; para React, React/TS; etc. Domínio (ex.: pagamentos) é bônus, não gate.*
 3. **IOutreachDraftService** (`outreach-v1`) — rascunhos: mensagem LinkedIn/direta, cover letter, assunto+corpo de e-mail, follow-up, observações de revisão humana.
 4. **ICvTailoringSuggestionService** (`cv-tailoring-v1`) — sugestões de ajuste de CV (advisory).
 5. **ICareerInsightService** (`career-insight-v1`) — padrões entre várias vagas analisadas.
@@ -248,21 +446,25 @@ Gate: **outreach exige score ≥60** (`MinScoreForOutreach`).
 
 ## 7. Pipeline de oportunidades
 
-`OpportunityPipeline`:
-- **Auto-cria** `Opportunity` quando um match tem score **≥70** (`AutoCreateThreshold`), status inicial `Analyzed`.
-- Ao gerar mensagem, avança a oportunidade — mas o **sistema só pode chegar até `ReadyForHumanReview`**. Daí pra frente (SentManually, AppliedManually, …) é ação humana via API.
+`OpportunityPipeline` (**por perfil** — `FindByJobAsync(jobId, candidateProfileId)`):
+- **Auto-cria** `Opportunity` quando um match tem score **≥70** (`AutoCreateThreshold`), status inicial `Analyzed`, **para o `CandidateProfileId` do match**. A mesma vaga vira oportunidades distintas para perfis distintos (única por `JobPostingId + CandidateProfileId`).
+- Ao gerar mensagem, avança a oportunidade **daquele perfil** — mas o **sistema só pode chegar até `ReadyForHumanReview`**. Daí pra frente (SentManually, AppliedManually, …) é ação humana via API.
 
 ---
 
 ## 8. Digest por e-mail
 
 `EmailDigestService` + `DigestRenderer` → HTML com as **3 melhores** oportunidades "pra aplicar hoje"
-(não um dump). O `EfDigestStore` agora: pega o **último match por vaga ANTES do gate de score**, exclui
-ocultas/aplicadas/expiradas, aplica as **mesmas regras do mural** via `OpportunityHeuristics` (esconde
-internacional quando `IntlDislikes≥3`, empresa real via `BestCompany`, **dedup**), ordena por score e
-pega o **top-3**. Cada item traz empresa, "por que combina" e link **Ver vaga** (+ mensagem sugerida se houver).
-`SmtpEmailSender` (config `Email:Smtp:*`; `From` vazio → usa a conta autenticada, senão o Gmail rejeita).
-Endpoints `GET /api/digest/preview` e `POST /api/digest/send`. Worker manda diariamente às 9h (`send-daily-digest`). Flag `EnableEmailDigest`.
+(não um dump). **O digest é POR PERFIL:** `IDigestStore.GetDigestItemsAsync(candidateProfileId, minScore)`
+pega o **último match por (vaga, perfil) ANTES do gate de score** (filtra `OpportunityMatch`,
+`UserFeedback` ocultas/aplicadas e `GeneratedMessage` **deste perfil**), aplica as **mesmas regras do
+mural** via `OpportunityHeuristics` (esconde internacional quando o perfil tem `IntlDislikes≥3`, empresa
+real via `BestCompany`, **dedup**), ordena por score e pega o **top-3**. A greeting usa o `FullName`
+**daquele** perfil. `SmtpEmailSender` (config `Email:Smtp:*`; `From` vazio → usa a conta autenticada).
+- **Endpoints:** `GET /api/digest/preview?candidateProfileId=` · `POST /api/digest/send?candidateProfileId=`
+  (um perfil; default se omitido) · `POST /api/digest/send-all` (itera **todos** os perfis, cada um com seu
+  `MinimumScoreToShow`).
+- **Worker** (`send-daily-digest`, diário às 9h) chama `SendAllAsync` → **um digest por perfil**. Flag `EnableEmailDigest`.
 
 ---
 
@@ -301,7 +503,7 @@ observadas manualmente (LinkedIn etc.) no radar `Company` para o fluxo atual alc
 
 **Companies** `/api/companies`: `GET /` · `GET /{id}` · `POST /` · `PUT /{id}` · `DELETE /{id}` · `POST /{id}/detect-ats` · `POST /detect-ats-bulk?limit=N` (careers/ATS em lote, §4) · `POST /onboard` · `POST /backfill-websites` · `POST /{id}/discover-website` · `POST /import-csv` · `POST /seed-observed` (seed manual interno, ver §9.1)
 
-**Jobs** `/api/jobs`: `GET /` · `GET /{id}` · `POST /discover` · `POST /search` · `POST /rescore?candidateProfileId=&allProfiles=&take=&minCreatedAtUtc=&engineVersion=&onlyWithoutCurrentEngineVersion=` (re-pontua **por perfil**; default = só 1 perfil, §5) · `POST /{id}/match?candidateProfileId=` · `GET /{id}/match?candidateProfileId=` · `POST /validate-links` · `POST /{id}/archive`
+**Jobs** `/api/jobs`: `GET /` · `GET /{id}` · `POST /discover` · `POST /search` · `POST /rescore?candidateProfileId=&allProfiles=&take=&minCreatedAtUtc=&engineVersion=&onlyWithoutCurrentEngineVersion=` (re-pontua **por perfil**; default = só 1 perfil, §5) · `POST /{id}/match?candidateProfileId=` · `GET /{id}/match?candidateProfileId=` · `POST /rebuild-latest-matches` (reconstrói a projeção `LatestOpportunityMatch`, §5.1) · `POST /validate-links` · `POST /{id}/archive`
 
 **AI Copilot** `/api/jobs/{jobId}/ai` (todos aceitam `?candidateProfileId=`): `POST /analyze` · `POST /generate-outreach` · `POST /suggest-cv-tailoring` — e `POST /api/insights/career`
 
@@ -344,7 +546,7 @@ Irrelevant/HideSimilar **ocultam** do mural; Applied/ContactedRecruiter **movem*
 | `promote-candidates` (PromoteCandidatesJob) | `Jobs:PromotionCron` | `30 */4 * * *` | promove RawJobCandidates → JobPosting (com triagem/dedup) |
 | `bacen-financial-sweep` (BacenFinancialSweepJob) | `Jobs:BacenSweepCron` | `0 6 * * 1` | busca vagas nos bancos/fintechs do radar (condicional por flag) |
 | `consulting-radar` (ConsultingRadarJob) | `Jobs:ConsultingRadarCron` | `0 7 * * 2` | descobre consultorias .NET (condicional por flag) |
-| `send-daily-digest` (SendDailyDigestJob) | `Jobs:DailyDigestCron` | `0 9 * * *` | envia digest |
+| `send-daily-digest` (SendDailyDigestJob) | `Jobs:DailyDigestCron` | `0 9 * * *` | `SendAllAsync` → **um digest por perfil** |
 
 `SearchJobsJob` usa keywords: desenvolvedor .net, desenvolvedor backend c#, engenheiro de software .net, programador c# pleno, vaga .net remoto, desenvolvedor .net fintech, arquiteto .net, desenvolvedor c# sênior.
 
@@ -487,20 +689,22 @@ cd frontend && npm run dev                           # tela em :5173 (proxy → 
   login nem Tenant**. Multi-profile **prepara**, mas **não substitui**, auth/multi-tenancy: a
   próxima fase deve plugar `AppUser`/Identity no `ICurrentCandidateProfileProvider`. A descoberta
   na inicialização auto-pontua só o **perfil default**; os demais dependem de `rescore`.
-- **`/api/matches` precisa da otimização `LatestOpportunityMatch`** (ver §17, débito #1) — com
-  multi-perfil o volume de matches cresce por `vagas × perfis × versões`.
+- **`/api/matches`/digest agora leem a projeção `latest_opportunity_matches`** (não mais todos os
+  matches em memória) — ver §5.1. Falta apenas paginação avançada/cache quando o volume exigir.
 
 ## 17. Débito técnico conhecido (priorizado)
 
-- 🔴 **#1 (PRIORIDADE TÉCNICA) — projeção `LatestOpportunityMatch`.** Hoje `/api/matches` e o
-  digest carregam **todos** os matches e fazem o "latest-per-(job,perfil)" **em memória**. Com
-  multi-perfil isso cresce por `nº vagas × nº perfis × nº versões de score` e degrada rápido.
-  **Recomendado:** uma tabela/projeção `LatestOpportunityMatch` { `JobPostingId`,
-  `CandidateProfileId`, `OpportunityMatchId`, `OverallScore`, `Recommendation`, `EngineVersion`,
-  `CreatedAtUtc`, `UpdatedAtUtc` } com **única por (JobPostingId + CandidateProfileId)**; o
-  `rescore`/auto-score faz **upsert** ao criar um match novo; `/api/matches` e o digest consultam
-  **só a projeção** (filtrável por perfil, paginável no servidor). Deixa o feed estável e previsível.
-- 🟠 **#2 (PRIORIDADE DE PRODUTO) — tracking de RESULTADO** (`ApplicationOutcome` / `ApplicationEvent`
+- ✅ **#1 RESOLVIDO — projeção `LatestOpportunityMatch`.** Existe a tabela
+  `latest_opportunity_matches` { `JobPostingId`, `CandidateProfileId`, `OpportunityMatchId`,
+  `OverallScore`, `Recommendation`, `EngineVersion`, `MatchCreatedAtUtc`, `UpdatedAtUtc` }, **única
+  por (JobPostingId + CandidateProfileId)**. Todo match novo passa por
+  `ILatestOpportunityMatchProjection.UpsertAsync` (auto-score/`/match`/`/rescore`/`/ai/analyze`/
+  promoção); `/api/matches`, o digest e o card "Fortes (75+)" do summary consultam **só a projeção**
+  (filtrável por perfil + score no banco, sem carregar todos os matches). Backfill no startup (quando
+  a projeção está vazia) e via `POST /api/jobs/rebuild-latest-matches`.
+  - **Próximo passo (quando o volume exigir):** paginação avançada no servidor, cache do modelo de
+    aprendizado de feedback e índices adicionais conforme o uso real.
+- 🟠 **#1 (PRIORIDADE DE PRODUTO) — tracking de RESULTADO** (`ApplicationOutcome` / `ApplicationEvent`
   por perfil): `Viewed · DraftCopied · Applied · MessageSent · Replied · InterviewScheduled ·
   InterviewPassed · OfferReceived · Rejected · Archived`. Hoje o sistema só aprende dos **descartes**;
   precisa aprender também do que **gera resposta/entrevista/proposta** — o maior salto de assertividade.

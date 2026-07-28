@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using OpportunityOS.Application.Discovery;
+using OpportunityOS.Application.Projections;
 using OpportunityOS.Domain.Entities;
 using OpportunityOS.Domain.Enums;
 
@@ -8,8 +9,13 @@ namespace OpportunityOS.Infrastructure.Persistence;
 public sealed class EfDiscoveryStore : IDiscoveryStore
 {
     private readonly OpportunityOsDbContext _db;
+    private readonly ILatestOpportunityMatchProjection _latest;
 
-    public EfDiscoveryStore(OpportunityOsDbContext db) => _db = db;
+    public EfDiscoveryStore(OpportunityOsDbContext db, ILatestOpportunityMatchProjection latest)
+    {
+        _db = db;
+        _latest = latest;
+    }
 
     public async Task<IReadOnlyList<Company>> GetCompaniesByPriorityAsync(CancellationToken ct) =>
         await _db.Companies
@@ -50,8 +56,11 @@ public sealed class EfDiscoveryStore : IDiscoveryStore
     public Task<bool> JobHasMatchAsync(Guid jobPostingId, CancellationToken ct) =>
         _db.OpportunityMatches.AnyAsync(m => m.JobPostingId == jobPostingId, ct);
 
-    public async Task AddMatchAsync(OpportunityMatch match, CancellationToken ct) =>
+    public async Task AddMatchAsync(OpportunityMatch match, CancellationToken ct)
+    {
         await _db.OpportunityMatches.AddAsync(match, ct);
+        await _latest.UpsertAsync(match, ct); // keep the latest-match projection in sync
+    }
 
     public Task SaveChangesAsync(CancellationToken ct) => _db.SaveChangesAsync(ct);
 }

@@ -9,10 +9,11 @@ namespace OpportunityOS.Application.AI;
 public static class Prompts
 {
     public const string JobAnalysisVersion = "job-analysis-v1";
-    public const string FitVersion = "fit-score-v1";
+    public const string FitVersion = "fit-score-v2";
     public const string OutreachVersion = "outreach-v1";
     public const string CvTailoringVersion = "cv-tailoring-v1";
     public const string CareerInsightVersion = "career-insight-v1";
+    public const string ProfileImportVersion = "profile-import-linkedin-v1";
 
     private const string NoInvention =
         "Regras invioláveis: não invente experiências do candidato; use apenas fatos do perfil e da vaga; " +
@@ -38,13 +39,15 @@ public static class Prompts
     public static LlmRequest Fit(CandidateProfile profile, JobAnalysisResult analysis) => new(
         SystemPrompt:
             "Você é um avaliador de compatibilidade entre candidato e vaga. " +
-            "PRIORIDADE: aderência técnica ao núcleo do candidato (.NET, C#, ASP.NET Core, backend, APIs, " +
-            "microsserviços, mensageria, cloud). Uma vaga claramente de backend .NET/C# é um match FORTE " +
-            "(technicalScore >= 80 e overallScore >= 75) mesmo fora de pagamentos — pagamentos/PIX/Open Finance/" +
-            "fintech são BÔNUS, não pré-requisito. NÃO rebaixe vagas .NET por não serem de fintech. " +
-            "Penalize de verdade só quando a stack principal é distante (ex.: vaga Java/PHP/Python pura, " +
-            "frontend puro, ou estágio). " +
-            "Trate Pleno e Sênior como igualmente adequados (o candidato busca ambos); não penalize vagas Pleno. " +
+            "PRIORIDADE: aderência técnica às CORE SKILLS DO PERFIL (campo coreSkills do JSON do perfil), " +
+            "sejam elas quais forem — para um perfil .NET isso é .NET/C#/ASP.NET Core; para um perfil Java é " +
+            "Java/Spring; para Frontend é React/TypeScript; para Data Engineer é Python/Airflow/Spark; etc. " +
+            "Uma vaga claramente alinhada às core skills do perfil é um match FORTE (technicalScore >= 80 e " +
+            "overallScore >= 75). Domínios (ex.: pagamentos/PIX/Open Finance/fintech) são BÔNUS quando aderentes " +
+            "ao perfil, NUNCA pré-requisito nem gate. Penalize de verdade só quando a stack principal da vaga é " +
+            "DISTANTE das core skills do perfil (ex.: vaga claramente de outra linguagem/área, ou estágio); " +
+            "respeite o campo excludedStacks do perfil. NÃO assuma .NET como referência global — use sempre o perfil. " +
+            "Trate Pleno e Sênior como igualmente adequados quando o perfil busca ambos; não penalize Pleno nesse caso. " +
             "Escreva 'rationale', 'strengths', 'risks' e 'missingRequirements' dirigindo-se ao candidato em " +
             "SEGUNDA PESSOA ('você', 'seu'); nunca se refira ao candidato pelo nome ou em terceira pessoa. " + NoInvention,
         UserPrompt:

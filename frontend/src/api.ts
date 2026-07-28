@@ -1,32 +1,51 @@
 // Thin API client. All calls go through the Vite dev proxy (/api -> backend).
 
+// credentials:"include" sends the auth cookie on every call (through the Vite proxy).
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`/api${path}`, { headers: { Accept: "application/json" } });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  const res = await fetch(`/api${path}`, { headers: { Accept: "application/json" }, credentials: "include" });
+  if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`);
   return res.json() as Promise<T>;
 }
 async function post<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) throw new ApiError(res.status, await errorText(res));
   return (res.status === 204 ? (undefined as T) : (res.json() as Promise<T>));
 }
 async function put<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) throw new ApiError(res.status, await errorText(res));
   return (res.status === 204 ? (undefined as T) : (res.json() as Promise<T>));
 }
 async function del<T>(path: string): Promise<T> {
-  const res = await fetch(`/api${path}`, { method: "DELETE" });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  const res = await fetch(`/api${path}`, { method: "DELETE", credentials: "include" });
+  if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`);
   return (res.status === 204 ? (undefined as T) : (res.json() as Promise<T>));
+}
+
+async function postForm<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(`/api${path}`, { method: "POST", credentials: "include", body: form });
+  if (!res.ok) throw new ApiError(res.status, await errorText(res));
+  return (res.status === 204 ? (undefined as T) : (res.json() as Promise<T>));
+}
+
+export class ApiError extends Error {
+  constructor(public status: number, message: string) { super(message); }
+}
+async function errorText(res: Response): Promise<string> {
+  try {
+    const body = await res.json() as { error?: string; details?: string[] };
+    return body?.error ?? (body?.details?.join("; ")) ?? `${res.status} ${res.statusText}`;
+  } catch { return `${res.status} ${res.statusText}`; }
 }
 
 export interface Company {
@@ -135,6 +154,46 @@ export interface ProfileInput {
   preferredWorkModes?: string[]; minimumScoreToShow?: number;
 }
 
+// ---- Auth & Workspace ----
+export interface AuthMe { id: string; email: string; displayName: string; workspaceId: string | null; isAdmin: boolean; }
+export interface AdminRun {
+  id: string; runType: string; status: string; startedAtUtc: string; finishedAtUtc: string | null;
+  itemsProcessed: number; itemsSucceeded: number; itemsFailed: number;
+}
+export interface AdminOverview {
+  companies: number; scannable: number; jobs: number; matches: number;
+  runs: AdminRun[]; recurring: { name: string; cron: string; desc: string }[];
+}
+export interface WorkspaceMe {
+  workspaceId: string; name: string;
+  user: { id: string; email: string; displayName: string };
+  defaultCandidateProfileId: string | null;
+}
+
+// ---- LinkedIn PDF import ----
+export interface LinkedInExperience {
+  company: string; title: string; location?: string | null;
+  startDateText?: string | null; endDateText?: string | null; durationText?: string | null; description?: string | null;
+}
+export interface LinkedInParsedProfile {
+  fullName?: string | null; headline?: string | null; location?: string | null; email?: string | null;
+  linkedInUrl?: string | null; summary?: string | null;
+  skills: string[]; certifications: string[]; experiences: LinkedInExperience[];
+  education: { institution: string; degree?: string | null; field?: string | null; periodText?: string | null }[];
+  confidence: { score: number; signals: string[]; missingSignals: string[] };
+}
+export interface CandidateProfileDraft {
+  displayName: string; fullName: string; headline: string; summary: string; location: string;
+  seniority: string; preferredLanguage: string;
+  coreSkills: string[]; secondarySkills: string[]; excludedStacks: string[]; domains: string[];
+  preferredRoles: string[]; preferredContractTypes: string[]; preferredLocations: string[];
+  preferredWorkModes: string[]; minimumScoreToShow: number;
+  experiences: { company: string; role: string; period: string; technologies: string[]; achievements: string[] }[];
+}
+export interface UploadLinkedInPdfResponse {
+  importId: string; parsedProfile: LinkedInParsedProfile; draft: CandidateProfileDraft; warnings: string[];
+}
+
 // Append &candidateProfileId=… (or ?… when first param) when a profile is selected.
 function pid(profileId?: string, first = false) {
   if (!profileId) return "";
@@ -142,6 +201,34 @@ function pid(profileId?: string, first = false) {
 }
 
 export const api = {
+  // Auth: me() resolves null on 401 so the UI can render the login screen instead of throwing.
+  auth: {
+    me: async (): Promise<AuthMe | null> => {
+      try { return await get<AuthMe>("/auth/me"); }
+      catch (e) { if (e instanceof ApiError && e.status === 401) return null; throw e; }
+    },
+    register: (email: string, password: string, displayName?: string) =>
+      post<AuthMe>("/auth/register", { email, password, displayName }),
+    login: (email: string, password: string) =>
+      post<AuthMe>("/auth/login", { email, password }),
+    logout: () => post<void>("/auth/logout"),
+  },
+  workspaceMe: () => get<WorkspaceMe>("/workspace/me"),
+  profileImports: {
+    uploadLinkedInPdf: (file: File) => {
+      const form = new FormData();
+      form.append("file", file, file.name);
+      return postForm<UploadLinkedInPdfResponse>("/profile-imports/linkedin-pdf", form);
+    },
+    apply: (importId: string, draft: CandidateProfileDraft, setAsDefault: boolean) =>
+      post<Profile>(`/profile-imports/${importId}/apply`, { draft, setAsDefault }),
+  },
+  admin: {
+    overview: () => get<AdminOverview>("/admin/overview"),
+    sweep: (maxCompanies?: number, maxDurationSeconds?: number) =>
+      post<{ started: boolean; maxCompanies: number | null; maxDurationSeconds: number }>(
+        "/admin/sweep", { maxCompanies, maxDurationSeconds }),
+  },
   profile: () => get<Profile>("/candidate-profile"),
   // Multi-profile: list, create, edit, and move the default anchor.
   profiles: () => get<Profile[]>("/candidate-profiles"),
@@ -170,6 +257,9 @@ export const api = {
     post(`/feedback`, { type, ...body }),
   // Applications board: opportunities already acted on ("já me cadastrei"), per profile.
   applications: (profileId?: string) => get<Application[]>(`/applications${pid(profileId, true)}`),
+  llmRerank: (take = 10, profileId?: string) =>
+    post<{ rescored: number; changed: number; skippedByBudget: number; failed: number; llmConfigured: boolean }>(
+      `/matches/llm-rerank?take=${take}${pid(profileId)}`),
   unapply: (jobId: string, profileId?: string) => del<void>(`/applications/${jobId}${pid(profileId, true)}`),
   // Descobrir mais (B3): bancos/fintechs, consultorias, buscas salvas.
   bacenPreview: (minimumPriority = "High") =>

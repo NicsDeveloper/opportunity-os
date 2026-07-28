@@ -12,7 +12,9 @@ public static class CompanyEndpoints
 {
     public static void MapCompanyEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/companies").WithTags("Companies");
+        // Companies are GLOBAL, but onboarding/seed/ATS-detection are cost-bearing or mutate global
+        // state, so the group requires "System"; the read GETs opt back out via AllowAnonymous.
+        var group = app.MapGroup("/api/companies").WithTags("Companies").RequireAuthorization("System");
 
         // Internal dev command: seed companies observed manually on LinkedIn into the radar
         // (no new feature/entity; reuses Company + the existing discovery flow). Idempotent.
@@ -27,13 +29,13 @@ public static class CompanyEndpoints
                 .ThenBy(c => c.Name)
                 .ToListAsync(ct);
             return Results.Ok(companies.Select(c => c.ToResponse()));
-        });
+        }).AllowAnonymous();
 
         group.MapGet("/{id:guid}", async (Guid id, OpportunityOsDbContext db, CancellationToken ct) =>
         {
             var company = await db.Companies.FindAsync([id], ct);
             return company is null ? Results.NotFound() : Results.Ok(company.ToResponse());
-        });
+        }).AllowAnonymous();
 
         group.MapPost("/", async (CompanyRequest req, OpportunityOsDbContext db, CancellationToken ct) =>
         {

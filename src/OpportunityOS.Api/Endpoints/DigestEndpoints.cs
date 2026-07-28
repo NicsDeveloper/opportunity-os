@@ -8,7 +8,7 @@ public static class DigestEndpoints
 {
     public static void MapDigestEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/digest").WithTags("Digest");
+        var group = app.MapGroup("/api/digest").WithTags("Digest").RequireAuthorization();
 
         // Render the digest (for the requested or default profile) without sending anything.
         group.MapGet("/preview", async (
@@ -36,11 +36,12 @@ public static class DigestEndpoints
         });
 
         // Send a digest for every profile (what the daily job does). One result per profile.
+        // System-level: it operates across ALL workspaces, so it is not a personal action.
         group.MapPost("/send-all", async (IEmailDigestService digest, CancellationToken ct) =>
         {
             var results = await digest.SendAllAsync(ct);
             return Results.Ok(results.Select(r =>
                 new DigestSendResponse(r.Sent, r.Reason, r.ItemCount, r.ExecutionRunId)).ToList());
-        });
+        }).RequireAuthorization("System");
     }
 }

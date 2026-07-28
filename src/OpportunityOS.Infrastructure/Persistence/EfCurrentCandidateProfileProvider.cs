@@ -1,44 +1,74 @@
 using Microsoft.EntityFrameworkCore;
+using OpportunityOS.Application.Auth;
 using OpportunityOS.Application.Profiles;
 using OpportunityOS.Domain.Entities;
 
 namespace OpportunityOS.Infrastructure.Persistence;
 
 /// <summary>
-/// EF resolution of the current candidate profile: explicit id -> IsDefault -> most recent.
-/// No global mutable "active" state — the selected profile is supplied per request.
+/// EF resolution of the current candidate profile, SCOPED TO THE CALLER'S WORKSPACE.
+/// An explicit id wins only when it belongs to the caller's workspace — otherwise a
+/// <see cref="ForbiddenProfileAccessException"/> is thrown (mapped to HTTP 403) so cross-tenant
+/// access is rejected, never silently downgraded. With no explicit id we fall back to the
+/// workspace's default (IsDefault) profile, then its most recent.
 /// </summary>
 public sealed class EfCurrentCandidateProfileProvider : ICurrentCandidateProfileProvider
 {
     private readonly OpportunityOsDbContext _db;
+    private readonly ICurrentUserContext _user;
 
-    public EfCurrentCandidateProfileProvider(OpportunityOsDbContext db) => _db = db;
+    public EfCurrentCandidateProfileProvider(OpportunityOsDbContext db, ICurrentUserContext user)
+    {
+        _db = db;
+        _user = user;
+    }
 
     public async Task<CandidateProfile?> GetAsync(Guid? candidateProfileId, CancellationToken ct)
     {
-        if (candidateProfileId is { } id)
+        var workspaceId = await _user.GetWorkspaceIdAsync(ct);
+        if (workspaceId is null)
         {
-            var explicitProfile = await _db.CandidateProfiles.FindAsync([id], ct);
-            if (explicitProfile is not null) return explicitProfile;
+            // No workspace context: an explicit id can't be proven to belong to the caller.
+            if (candidateProfileId is { } orphanId) throw new ForbiddenProfileAccessException(orphanId);
+            return null;
         }
 
-        return await _db.CandidateProfiles
-            .OrderByDescending(p => p.IsDefault)
-            .ThenByDescending(p => p.CreatedAtUtc)
-            .FirstOrDefaultAsync(ct);
+        if (candidateProfileId is { } id)
+        {
+            var explicitProfile = await _db.CandidateProfiles
+                .FirstOrDefaultAsync(p => p.Id == id && p.WorkspaceId == workspaceId, ct);
+            if (explicitProfile is null) throw new ForbiddenProfileAccessException(id);
+            return explicitProfile;
+        }
+
+        return await DefaultForWorkspace(workspaceId.Value).FirstOrDefaultAsync(ct);
     }
 
     public async Task<Guid?> ResolveIdAsync(Guid? candidateProfileId, CancellationToken ct)
     {
-        if (candidateProfileId is { } id &&
-            await _db.CandidateProfiles.AnyAsync(p => p.Id == id, ct))
-            return id;
+        var workspaceId = await _user.GetWorkspaceIdAsync(ct);
+        if (workspaceId is null)
+        {
+            if (candidateProfileId is { } orphanId) throw new ForbiddenProfileAccessException(orphanId);
+            return null;
+        }
 
-        var resolved = await _db.CandidateProfiles
-            .OrderByDescending(p => p.IsDefault)
-            .ThenByDescending(p => p.CreatedAtUtc)
+        if (candidateProfileId is { } id)
+        {
+            var owned = await _db.CandidateProfiles
+                .AnyAsync(p => p.Id == id && p.WorkspaceId == workspaceId, ct);
+            if (!owned) throw new ForbiddenProfileAccessException(id);
+            return id;
+        }
+
+        return await DefaultForWorkspace(workspaceId.Value)
             .Select(p => (Guid?)p.Id)
             .FirstOrDefaultAsync(ct);
-        return resolved;
     }
+
+    private IQueryable<CandidateProfile> DefaultForWorkspace(Guid workspaceId) =>
+        _db.CandidateProfiles
+            .Where(p => p.WorkspaceId == workspaceId)
+            .OrderByDescending(p => p.IsDefault)
+            .ThenByDescending(p => p.CreatedAtUtc);
 }

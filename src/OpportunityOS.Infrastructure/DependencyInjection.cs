@@ -2,17 +2,23 @@ using System.Net.Http.Headers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using OpportunityOS.Application.AI;
+using OpportunityOS.Application.Auth;
 using OpportunityOS.Application.Bacen;
 using OpportunityOS.Application.Digest;
 using OpportunityOS.Application.Discovery;
+using OpportunityOS.Application.Import;
 using OpportunityOS.Application.Matching;
 using OpportunityOS.Application.Normalization;
 using OpportunityOS.Application.Pipeline;
 using OpportunityOS.Application.Profiles;
+using OpportunityOS.Application.Projections;
 using OpportunityOS.Infrastructure.Ai;
+using OpportunityOS.Infrastructure.Auth;
 using OpportunityOS.Infrastructure.Bacen;
+using OpportunityOS.Infrastructure.Import;
 using OpportunityOS.Infrastructure.Email;
 using OpportunityOS.Infrastructure.Persistence;
 using OpportunityOS.Infrastructure.Providers;
@@ -33,8 +39,37 @@ public static class DependencyInjection
             options.UseNpgsql(connectionString));
 
         services.AddScoped<IJobNormalizer, JobNormalizer>();
+
+        // Embeddings for semantic relevance: real model when an OpenAI key is present, else the
+        // deterministic hashing fallback (offline, free). Always registered so the pipeline resolves.
+        var openAiEmbedKey = config["OpenAI:ApiKey"];
+        if (!string.IsNullOrWhiteSpace(openAiEmbedKey))
+        {
+            services.AddSingleton(new OpenAiEmbeddingOptions
+            {
+                ApiKey = openAiEmbedKey!,
+                Model = config["OpenAI:EmbeddingModel"] ?? "text-embedding-3-small",
+                Dimensions = config.GetValue("OpenAI:EmbeddingDimensions", 1536)
+            });
+            services.AddHttpClient<IEmbeddingProvider, OpenAiEmbeddingProvider>(ConfigureClient);
+        }
+        else
+        {
+            services.AddSingleton<IEmbeddingProvider, HashingEmbeddingProvider>();
+        }
+
+        // Hybrid match (semantic blend) — off by default; the heuristic + gates always apply.
+        services.AddSingleton(new SemanticMatchOptions
+        {
+            Enabled = config.GetValue("FeatureFlags:EnableSemanticMatch", false),
+            SemanticWeight = config.GetValue("Matching:SemanticWeight", 0.4)
+        });
         services.AddScoped<IMatchEngine, HeuristicMatchEngine>();
+        // Default to the non-HTTP "system" caller (Worker/design-time); the API replaces this with an
+        // HTTP-backed ICurrentUserContext, so the workspace-scoped profile provider works everywhere.
+        services.TryAddScoped<ICurrentUserContext, SystemUserContext>();
         services.AddScoped<ICurrentCandidateProfileProvider, EfCurrentCandidateProfileProvider>();
+        services.AddScoped<ILatestOpportunityMatchProjection, EfLatestOpportunityMatchProjection>();
         services.AddSingleton<ISourceClassifierService, SourceClassifierService>();
         services.AddSingleton<ICompanyNameResolver, CompanyNameResolver>();
         services.AddSingleton<IJobFingerprintService, JobFingerprintService>();
@@ -68,6 +103,17 @@ public static class DependencyInjection
 
         services.AddScoped<IOpportunityStore, EfOpportunityStore>();
         services.AddScoped<IOpportunityPipeline, OpportunityPipeline>();
+
+        // LinkedIn PDF profile importer (onboarding). Deterministic parser/mapper; the LLM normalizer
+        // is opt-in via feature flag (default off) and strictly conservative.
+        services.AddScoped<IPdfTextExtractor, PdfPigTextExtractor>();
+        services.AddScoped<ILinkedInPdfProfileDetector, LinkedInPdfProfileDetector>();
+        services.AddScoped<ILinkedInProfilePdfParser, LinkedInProfilePdfParser>();
+        services.AddScoped<ILinkedInProfileToCandidateProfileDraftMapper, LinkedInProfileToCandidateProfileDraftMapper>();
+        if (config.GetValue("FeatureFlags:EnableLinkedInPdfLlmNormalization", false))
+            services.AddScoped<IProfileImportNormalizer, LlmProfileImportNormalizer>();
+        else
+            services.AddScoped<IProfileImportNormalizer, PassthroughProfileImportNormalizer>();
 
         var emailOptions = new EmailOptions();
         config.GetSection("Email").Bind(emailOptions);
@@ -170,10 +216,10 @@ public static class DependencyInjection
     }
 
     /// <summary>
-    /// Selects the LLM provider. Disabled -> not-configured fake (forces heuristic
-    /// fallback). Otherwise honours an explicit <c>Llm:Provider</c> (Anthropic|OpenAI|Fake)
-    /// or auto-detects by the first available API key (Anthropic, then OpenAI),
-    /// falling back to the deterministic fake when no key is present.
+    /// Selects the LLM provider. Disabled -> not-configured fake (forces heuristic fallback).
+    /// Otherwise honours an explicit <c>Llm:Provider</c> (Anthropic|OpenAI|Groq|Fake) or auto-detects
+    /// in this order: Anthropic → Groq (free tier) → OpenAI → Fake. Groq is OpenAI-compatible, so
+    /// it reuses <see cref="OpenAiLlmProvider"/> with the Groq endpoint.
     /// </summary>
     private static void RegisterLlmProvider(IServiceCollection services, IConfiguration config)
     {
@@ -184,13 +230,17 @@ public static class DependencyInjection
         }
 
         var anthropicKey = config["Anthropic:ApiKey"];
+        var groqKey = config["Groq:ApiKey"];
         var openAiKey = config["OpenAI:ApiKey"];
         var preference = (config["Llm:Provider"] ?? "auto").Trim().ToLowerInvariant();
 
         var useAnthropic = preference == "anthropic"
             || (preference == "auto" && !string.IsNullOrWhiteSpace(anthropicKey));
+        var useGroq = preference == "groq"
+            || (preference == "auto" && string.IsNullOrWhiteSpace(anthropicKey) && !string.IsNullOrWhiteSpace(groqKey));
         var useOpenAi = preference == "openai"
-            || (preference == "auto" && string.IsNullOrWhiteSpace(anthropicKey) && !string.IsNullOrWhiteSpace(openAiKey));
+            || (preference == "auto" && string.IsNullOrWhiteSpace(anthropicKey)
+                && string.IsNullOrWhiteSpace(groqKey) && !string.IsNullOrWhiteSpace(openAiKey));
 
         if (useAnthropic)
         {
@@ -200,6 +250,18 @@ public static class DependencyInjection
                 Model = config["Anthropic:Model"] ?? "claude-sonnet-4-6"
             });
             services.AddHttpClient<ILlmProvider, AnthropicLlmProvider>(c => c.Timeout = TimeSpan.FromSeconds(60));
+        }
+        else if (useGroq)
+        {
+            // Groq is OpenAI-compatible — same provider, different endpoint + open-source model.
+            services.AddSingleton(new OpenAiOptions
+            {
+                ApiKey = groqKey ?? string.Empty,
+                Model = config["Groq:Model"] ?? "llama-3.3-70b-versatile",
+                Endpoint = config["Groq:Endpoint"] ?? "https://api.groq.com/openai/v1/chat/completions",
+                ProviderTag = "Groq"
+            });
+            services.AddHttpClient<ILlmProvider, OpenAiLlmProvider>(c => c.Timeout = TimeSpan.FromSeconds(60));
         }
         else if (useOpenAi)
         {

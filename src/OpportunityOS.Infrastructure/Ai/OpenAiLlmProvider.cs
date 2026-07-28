@@ -9,15 +9,20 @@ public sealed class OpenAiOptions
 {
     public string ApiKey { get; set; } = string.Empty;
     public string Model { get; set; } = "gpt-4.1-mini";
+    /// <summary>OpenAI-compatible Chat Completions endpoint. Override for Groq/Ollama/Together/DeepSeek.</summary>
+    public string Endpoint { get; set; } = "https://api.openai.com/v1/chat/completions";
+    /// <summary>Friendly tag shown in audit logs/UI (e.g. "OpenAI", "Groq").</summary>
+    public string ProviderTag { get; set; } = "OpenAI";
 }
 
 /// <summary>
-/// OpenAI Chat Completions provider. Only active when an API key is present
-/// (otherwise <see cref="FakeLlmProvider"/> is registered instead).
+/// OpenAI-compatible Chat Completions provider. Drives OpenAI itself by default, but also any
+/// service that mirrors the same API (Groq, Ollama, Together.ai, DeepSeek, ...) — just point
+/// <see cref="OpenAiOptions.Endpoint"/> at it. Only active when an API key is present (otherwise
+/// <see cref="FakeLlmProvider"/> is registered instead).
 /// </summary>
 public sealed class OpenAiLlmProvider : ILlmProvider
 {
-    private const string Endpoint = "https://api.openai.com/v1/chat/completions";
 
     private readonly HttpClient _http;
     private readonly OpenAiOptions _options;
@@ -36,7 +41,7 @@ public sealed class OpenAiLlmProvider : ILlmProvider
     public async Task<LlmResponse> CompleteAsync(LlmRequest request, CancellationToken ct)
     {
         if (!IsConfigured)
-            return LlmResponse.Fail(ModelName, request.PromptVersion, "OpenAI API key not configured");
+            return LlmResponse.Fail(ModelName, request.PromptVersion, $"{_options.ProviderTag} API key not configured");
 
         var payload = new Dictionary<string, object?>
         {
@@ -51,7 +56,7 @@ public sealed class OpenAiLlmProvider : ILlmProvider
         if (request.JsonMode)
             payload["response_format"] = new { type = "json_object" };
 
-        using var httpReq = new HttpRequestMessage(HttpMethod.Post, Endpoint)
+        using var httpReq = new HttpRequestMessage(HttpMethod.Post, _options.Endpoint)
         {
             Content = JsonContent.Create(payload)
         };
@@ -63,7 +68,7 @@ public sealed class OpenAiLlmProvider : ILlmProvider
             var body = await response.Content.ReadAsStringAsync(ct);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("OpenAI returned {Status}", (int)response.StatusCode);
+                _logger.LogWarning("{Provider} returned {Status}", _options.ProviderTag, (int)response.StatusCode);
                 return LlmResponse.Fail(ModelName, request.PromptVersion, $"HTTP {(int)response.StatusCode}: {Truncate(body)}");
             }
 
@@ -80,7 +85,7 @@ public sealed class OpenAiLlmProvider : ILlmProvider
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "OpenAI call failed");
+            _logger.LogError(ex, "{Provider} call failed", _options.ProviderTag);
             return LlmResponse.Fail(ModelName, request.PromptVersion, ex.Message);
         }
     }

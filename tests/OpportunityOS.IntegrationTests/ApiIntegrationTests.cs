@@ -18,7 +18,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     public async Task Company_Crud_RoundTrips()
     {
         await _factory.ResetDatabaseAsync();
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
 
         var create = await client.PostAsJsonAsync("/api/companies", new CompanyRequest(
             "Nubank", "https://nubank.com.br", "https://boards.greenhouse.io/nubank", null,
@@ -44,7 +44,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     public async Task DiscoverEndpoint_PersistsJobs_AndDedupesOnSecondRun()
     {
         await _factory.ResetDatabaseAsync();
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
 
         await client.PostAsJsonAsync("/api/companies", new CompanyRequest(
             "Acme", null, "https://boards.greenhouse.io/acme", null, "Fintech", "Brazil",
@@ -71,7 +71,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     public async Task AiAnalyze_PersistsMatch_AndPromptLog_ThenOutreachDraft()
     {
         await _factory.ResetDatabaseAsync();
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
 
         await client.PostAsJsonAsync("/api/candidate-profile", new CandidateProfileRequest(
             "Nícolas Serrano", "Desenvolvedor .NET Backend", "Backend .NET / pagamentos",
@@ -109,7 +109,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     public async Task Outreach_BelowScoreGate_Returns422()
     {
         await _factory.ResetDatabaseAsync();
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
 
         await client.PostAsJsonAsync("/api/candidate-profile", new CandidateProfileRequest(
             "Nícolas", "Backend", "x", "Brasil", "Pleno", "pt-BR",
@@ -136,7 +136,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     public async Task AiAnalyze_AutoCreatesOpportunity_ThenManualStatusAndFollowUp()
     {
         await _factory.ResetDatabaseAsync();
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
 
         await client.PostAsJsonAsync("/api/candidate-profile", new CandidateProfileRequest(
             "Nícolas", "Backend .NET", "x", "Brasil", "Pleno/Sênior", "pt-BR",
@@ -170,7 +170,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     public async Task Recruiter_Crud_RoundTrips()
     {
         await _factory.ResetDatabaseAsync();
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
         var companyId = await CreateCompany();
 
         var create = await client.PostAsJsonAsync("/api/recruiters", new RecruiterRequest(
@@ -190,7 +190,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     public async Task Digest_Preview_ListsAnalyzedOpportunity_AndSendSkipsWithoutSmtp()
     {
         await _factory.ResetDatabaseAsync();
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
 
         await client.PostAsJsonAsync("/api/candidate-profile", new CandidateProfileRequest(
             "Nícolas", "Backend .NET", "x", "Brasil", "Pleno/Sênior", "pt-BR",
@@ -217,7 +217,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     public async Task Bacen_Import_ThenPromote_AreIdempotent()
     {
         await _factory.ResetDatabaseAsync();
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
 
         // First import: 4 institutions created.
         var imp1 = await (await client.PostAsync("/api/bacen/pix-participants/import", null))
@@ -253,13 +253,75 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
         Assert.Contains(companies, c => c.Source == "Bacen" && c.Priority == "Strategic"); // 99PAY/BTG
     }
 
+    // Insert a match directly (bypassing the API/projection) with a controlled CreatedAtUtc — to
+    // simulate pre-projection data and out-of-order arrivals.
+    private async Task SeedMatch(Guid jobId, Guid profileId, int score, DateTime createdAt)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<Infrastructure.Persistence.OpportunityOsDbContext>();
+        var m = new Domain.Entities.OpportunityMatch(
+            jobId, profileId, score, score, 0, 0, 0, 0, Domain.Enums.MatchRecommendation.Apply,
+            new[] { "s" }, Array.Empty<string>(), Array.Empty<string>(), "r", "heuristic-test");
+        typeof(Domain.Entities.OpportunityMatch)
+            .GetProperty(nameof(Domain.Entities.OpportunityMatch.CreatedAtUtc))!.SetValue(m, createdAt);
+        db.OpportunityMatches.Add(m);
+        await db.SaveChangesAsync();
+    }
+
+    [DbFact]
+    public async Task Backfill_RebuildsProjection_AndFeedReadsIt()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = await _factory.CreateAuthenticatedClientAsync();
+
+        var a = await CreateProfile("Dev A", ".NET", "C#", "AWS");
+        var jobId = await SeedJob("Senior Backend (.NET)", "Backend .NET, C#, AWS. Remote, Brazil.");
+        await SeedMatch(jobId, a, 90, DateTime.UtcNow); // match exists but projection does NOT
+
+        // Feed reads the projection -> empty until we backfill.
+        Assert.Empty(await Matches(client, a));
+
+        var rebuild = await (await client.PostAsync("/api/jobs/rebuild-latest-matches", null))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(1, rebuild.GetProperty("processedPairs").GetInt32());
+        Assert.Equal(1, rebuild.GetProperty("created").GetInt32());
+
+        Assert.Contains(await Matches(client, a), m => m.JobPostingId == jobId);
+    }
+
+    [DbFact]
+    public async Task Feed_UsesLatestProjection_NotStaleHighMatch()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = await _factory.CreateAuthenticatedClientAsync();
+
+        var a = await CreateProfile("Dev A", ".NET", "C#", "AWS");
+        var jobId = await SeedJob("Senior Backend (.NET)", "Backend .NET, C#, AWS. Remote, Brazil.");
+        // Old strong match (90) then a NEWER weak one (20). The feed must use the latest (20).
+        await SeedMatch(jobId, a, 90, DateTime.UtcNow.AddMinutes(-10));
+        await SeedMatch(jobId, a, 20, DateTime.UtcNow);
+        await client.PostAsync("/api/jobs/rebuild-latest-matches", null);
+
+        // minScore 60: the latest score is 20 -> the job must NOT appear (no stale-high leak).
+        var feed = await client.GetFromJsonAsync<List<BestOpportunityResponse>>(
+            $"/api/matches?minScore=60&take=200&candidateProfileId={a}");
+        Assert.DoesNotContain(feed!, m => m.JobPostingId == jobId);
+
+        // minScore 0: it appears, with the LATEST score (20).
+        var all = await Matches(client, a);
+        var row = Assert.Single(all.Where(m => m.JobPostingId == jobId));
+        Assert.Equal(20, row.OverallScore);
+    }
+
     private async Task<Guid> SeedJob(string title, string description)
     {
         var companyResp = await CreateCompany();
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<Infrastructure.Persistence.OpportunityOsDbContext>();
+        // Unique external id so a single test can seed multiple distinct jobs (provider+ext is unique).
+        var ext = "ext-" + Guid.NewGuid().ToString("N")[..8];
         var job = new Domain.Entities.JobPosting(
-            companyResp, "ext", "Test", title, "https://example.com/j", description,
+            companyResp, ext, "Test", title, $"https://example.com/{ext}", description,
             location: "Remote", language: "en");
         db.JobPostings.Add(job);
         await db.SaveChangesAsync();
@@ -268,7 +330,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
 
     private async Task<Guid> CreateCompany()
     {
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
         var resp = await client.PostAsJsonAsync("/api/companies", new CompanyRequest(
             "Acme", null, null, null, "Fintech", "Brazil", Priority: 3, Tags: null));
         var company = await resp.Content.ReadFromJsonAsync<CompanyResponse>();
@@ -279,7 +341,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     public async Task MatchEndpoint_PersistsHighScoreForFintechDotNetJob()
     {
         await _factory.ResetDatabaseAsync();
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
 
         // Profile required by the match endpoint.
         await client.PostAsJsonAsync("/api/candidate-profile", new CandidateProfileRequest(
@@ -324,7 +386,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
 
     private async Task<Guid> CreateProfile(string fullName, params string[] coreSkills)
     {
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
         var resp = await client.PostAsJsonAsync("/api/candidate-profile", new CandidateProfileRequest(
             fullName, "headline", "summary", "Brasil", "Pleno/Sênior", "pt-BR",
             CoreSkills: coreSkills.ToList(), SecondarySkills: null, Domains: null, PreferredRoles: null,
@@ -337,7 +399,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     public async Task SameJob_TwoProfiles_ProduceDistinctMatchesAndOpportunities()
     {
         await _factory.ResetDatabaseAsync();
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
 
         var dotnet = await CreateProfile("DotNet Dev", ".NET", "C#", "ASP.NET Core", "AWS", "Kafka");
         var react = await CreateProfile("React Dev", "React", "TypeScript", "Next.js", "CSS");
@@ -378,7 +440,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     public async Task Feedback_HidesJob_OnlyForThatProfile()
     {
         await _factory.ResetDatabaseAsync();
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
 
         // Two .NET profiles so the same job is strong for BOTH boards.
         var a = await CreateProfile("Dev A", ".NET", "C#", "ASP.NET Core", "AWS");
@@ -405,7 +467,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     public async Task Applications_AreScopedPerProfile()
     {
         await _factory.ResetDatabaseAsync();
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
 
         var a = await CreateProfile("Dev A", ".NET", "C#", "AWS");
         var b = await CreateProfile("Dev B", ".NET", "C#", "AWS");
@@ -425,7 +487,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     public async Task MatchesWithoutProfile_FallBackToDefault()
     {
         await _factory.ResetDatabaseAsync();
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
 
         // One profile, made default via the plural set-default endpoint.
         var only = await CreateProfile("Only Dev", ".NET", "C#", "AWS");
@@ -446,7 +508,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     public async Task Rescore_SingleProfile_DoesNotMatchOthers_AllProfiles_Does()
     {
         await _factory.ResetDatabaseAsync();
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
 
         var a = await CreateProfile("Dev A", ".NET", "C#", "AWS");
         var b = await CreateProfile("Dev B", "Java", "Spring Boot", "AWS");
@@ -468,7 +530,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     public async Task GeneratedMessage_IsTiedToTheProfile_ItWasDraftedFor()
     {
         await _factory.ResetDatabaseAsync();
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
 
         var a = await CreateProfile("Dev A", ".NET", "C#", "ASP.NET Core", "AWS", "Kafka");
         var jobId = await SeedJob(
@@ -488,7 +550,7 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
     public async Task DebugProfileScores_ShowsDistinctScoresPerProfile()
     {
         await _factory.ResetDatabaseAsync();
-        var client = _factory.CreateClient();
+        var client = await _factory.CreateAuthenticatedClientAsync();
 
         var dotnet = await CreateProfile("DotNet Dev", ".NET", "C#", "ASP.NET Core", "AWS");
         var react = await CreateProfile("React Dev", "React", "TypeScript", "Next.js");
@@ -504,5 +566,274 @@ public sealed class ApiIntegrationTests : IClassFixture<OpportunityOsApiFactory>
                           e => e.GetProperty("score").GetInt32());
         Assert.True(scores["DotNet Dev"] > scores["React Dev"],
             $".NET ({scores["DotNet Dev"]}) should beat React ({scores["React Dev"]}) on a .NET job");
+    }
+
+    // ---------------- Auth Workspace MVP: auth, workspace, isolation ----------------
+
+    private static async Task<Guid> CreateProfileWith(HttpClient client, string label)
+    {
+        var resp = await client.PostAsJsonAsync("/api/candidate-profiles", new CandidateProfileRequest(
+            label, "headline", "summary", "Brasil", "Pleno/Sênior", "pt-BR",
+            CoreSkills: new() { ".NET", "C#" }, SecondarySkills: null, Domains: null, PreferredRoles: null,
+            PreferredContractTypes: null, PreferredLocations: null, Experiences: null, DisplayName: label));
+        resp.EnsureSuccessStatusCode();
+        var p = await resp.Content.ReadFromJsonAsync<CandidateProfileResponse>();
+        return p!.Id;
+    }
+
+    [DbFact]
+    public async Task Register_CreatesUserAndWorkspace()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = await _factory.CreateAuthenticatedClientAsync("newuser@test.local");
+
+        var me = await client.GetFromJsonAsync<JsonElement>("/api/auth/me");
+        Assert.Equal("newuser@test.local", me.GetProperty("email").GetString());
+        var workspaceId = me.GetProperty("workspaceId").GetGuid();
+        Assert.NotEqual(Guid.Empty, workspaceId);
+
+        var ws = await client.GetFromJsonAsync<JsonElement>("/api/workspace/me");
+        Assert.Equal(workspaceId, ws.GetProperty("workspaceId").GetGuid());
+    }
+
+    [DbFact]
+    public async Task ProtectedEndpoints_Return401_WithoutLogin()
+    {
+        await _factory.ResetDatabaseAsync();
+        var anon = _factory.CreateClient();
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anon.GetAsync("/api/auth/me")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anon.GetAsync("/api/candidate-profiles")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anon.GetAsync("/api/matches")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anon.GetAsync("/api/applications")).StatusCode);
+    }
+
+    [DbFact]
+    public async Task CandidateProfiles_AreScopedToWorkspace()
+    {
+        await _factory.ResetDatabaseAsync();
+        var a = await _factory.CreateAuthenticatedClientAsync("a@test.local");
+        var b = await _factory.CreateAuthenticatedClientAsync("b@test.local");
+
+        var pa = await CreateProfileWith(a, "A profile");
+        var pb = await CreateProfileWith(b, "B profile");
+
+        var aList = await a.GetFromJsonAsync<List<CandidateProfileResponse>>("/api/candidate-profiles");
+        Assert.Equal(new[] { pa }, aList!.Select(p => p.Id));
+
+        var bList = await b.GetFromJsonAsync<List<CandidateProfileResponse>>("/api/candidate-profiles");
+        Assert.Equal(new[] { pb }, bList!.Select(p => p.Id));
+    }
+
+    [DbFact]
+    public async Task Matches_WithForeignProfile_Returns403()
+    {
+        await _factory.ResetDatabaseAsync();
+        var a = await _factory.CreateAuthenticatedClientAsync("a@test.local");
+        var b = await _factory.CreateAuthenticatedClientAsync("b@test.local");
+        var pb = await CreateProfileWith(b, "B profile");
+
+        var res = await a.GetAsync($"/api/matches?candidateProfileId={pb}");
+        Assert.Equal(HttpStatusCode.Forbidden, res.StatusCode);
+    }
+
+    [DbFact]
+    public async Task Feedback_WithForeignProfile_Returns403()
+    {
+        await _factory.ResetDatabaseAsync();
+        var a = await _factory.CreateAuthenticatedClientAsync("a@test.local");
+        var b = await _factory.CreateAuthenticatedClientAsync("b@test.local");
+        var pb = await CreateProfileWith(b, "B profile");
+
+        var res = await a.PostAsJsonAsync("/api/feedback",
+            new FeedbackRequest("Irrelevant", Guid.NewGuid(), null, null, pb));
+        Assert.Equal(HttpStatusCode.Forbidden, res.StatusCode);
+    }
+
+    [DbFact]
+    public async Task Applications_ReturnOnlyOwnWorkspace()
+    {
+        await _factory.ResetDatabaseAsync();
+        var a = await _factory.CreateAuthenticatedClientAsync("a@test.local");
+        var b = await _factory.CreateAuthenticatedClientAsync("b@test.local");
+        var pa = await CreateProfileWith(a, "A profile");
+        var pb = await CreateProfileWith(b, "B profile");
+        var jobId = await SeedJob("Senior Backend (.NET)", "Backend .NET, C#, AWS. Remote, Brazil.");
+
+        // A marks the job as applied for its own profile.
+        var fb = await a.PostAsJsonAsync("/api/feedback", new FeedbackRequest("Applied", jobId, null, null, pa));
+        fb.EnsureSuccessStatusCode();
+
+        var aApps = await a.GetFromJsonAsync<List<ApplicationResponse>>($"/api/applications?candidateProfileId={pa}");
+        Assert.Contains(aApps!, x => x.JobPostingId == jobId);
+
+        // B sees nothing — different workspace.
+        var bApps = await b.GetFromJsonAsync<List<ApplicationResponse>>($"/api/applications?candidateProfileId={pb}");
+        Assert.Empty(bApps!);
+    }
+
+    [DbFact]
+    public async Task SwitchingProfile_ChangesFeed()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = await _factory.CreateAuthenticatedClientAsync("switch@test.local");
+        var p1 = await CreateProfileWith(client, "P1");
+        var p2 = await CreateProfileWith(client, "P2");
+        var job1 = await SeedJob("Backend A (.NET)", "Backend .NET, C#, AWS. Remote, Brazil.");
+        var job2 = await SeedJob("Backend B (.NET)", "Backend .NET, C#, AWS. Remote, Brazil.");
+        await SeedMatch(job1, p1, 90, DateTime.UtcNow);
+        await SeedMatch(job2, p2, 90, DateTime.UtcNow);
+        await client.PostAsync("/api/jobs/rebuild-latest-matches", null);
+
+        var feed1 = await Matches(client, p1);
+        Assert.Contains(feed1, m => m.JobPostingId == job1);
+        Assert.DoesNotContain(feed1, m => m.JobPostingId == job2);
+
+        var feed2 = await Matches(client, p2);
+        Assert.Contains(feed2, m => m.JobPostingId == job2);
+        Assert.DoesNotContain(feed2, m => m.JobPostingId == job1);
+    }
+
+    [DbFact]
+    public async Task Logout_EndsSession()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = await _factory.CreateAuthenticatedClientAsync("logout@test.local");
+
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/auth/me")).StatusCode);
+
+        var logout = await client.PostAsync("/api/auth/logout", null);
+        Assert.Equal(HttpStatusCode.NoContent, logout.StatusCode);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/auth/me")).StatusCode);
+    }
+
+    // ---------------- LinkedIn PDF profile import ----------------
+
+    private static async Task<HttpResponseMessage> UploadPdf(
+        HttpClient client, string fileName = "alex.pdf", string contentType = "application/pdf")
+    {
+        using var form = new MultipartFormDataContent();
+        var content = new ByteArrayContent(new byte[] { 0x25, 0x50, 0x44, 0x46, 0x2D }); // "%PDF-"
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+        form.Add(content, "file", fileName);
+        return await client.PostAsync("/api/profile-imports/linkedin-pdf", form);
+    }
+
+    [DbFact]
+    public async Task ProfileImport_Upload_WithoutLogin_Returns401()
+    {
+        await _factory.ResetDatabaseAsync();
+        var anon = _factory.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await UploadPdf(anon)).StatusCode);
+    }
+
+    [DbFact]
+    public async Task ProfileImport_Upload_NonPdf_Returns400()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = await _factory.CreateAuthenticatedClientAsync();
+        var res = await UploadPdf(client, "resume.txt", "text/plain");
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+    }
+
+    [DbFact]
+    public async Task ProfileImport_Upload_Valid_ReturnsImportAndDraft()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = await _factory.CreateAuthenticatedClientAsync();
+
+        var res = await UploadPdf(client);
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var body = await res.Content.ReadFromJsonAsync<UploadLinkedInProfilePdfResponse>();
+        Assert.NotNull(body);
+        Assert.NotEqual(Guid.Empty, body!.ImportId);
+        Assert.Equal("Alex Backend Developer", body.ParsedProfile.FullName);
+        Assert.Contains(".NET", body.Draft.CoreSkills);
+        Assert.DoesNotContain("Java", body.Draft.CoreSkills);
+    }
+
+    [DbFact]
+    public async Task ProfileImport_Get_IsScopedToWorkspace()
+    {
+        await _factory.ResetDatabaseAsync();
+        var a = await _factory.CreateAuthenticatedClientAsync("a@test.local");
+        var b = await _factory.CreateAuthenticatedClientAsync("b@test.local");
+
+        var up = await (await UploadPdf(a)).Content.ReadFromJsonAsync<UploadLinkedInProfilePdfResponse>();
+        Assert.Equal(HttpStatusCode.OK, (await a.GetAsync($"/api/profile-imports/{up!.ImportId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await b.GetAsync($"/api/profile-imports/{up.ImportId}")).StatusCode);
+    }
+
+    [DbFact]
+    public async Task ProfileImport_Apply_CreatesDefaultProfile_AndFeedAccepts()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = await _factory.CreateAuthenticatedClientAsync();
+        var up = await (await UploadPdf(client)).Content.ReadFromJsonAsync<UploadLinkedInProfilePdfResponse>();
+
+        var apply = await client.PostAsJsonAsync($"/api/profile-imports/{up!.ImportId}/apply",
+            new ApplyProfileImportRequest(up.Draft, SetAsDefault: true));
+        Assert.Equal(HttpStatusCode.Created, apply.StatusCode);
+        var profile = await apply.Content.ReadFromJsonAsync<CandidateProfileResponse>();
+        Assert.True(profile!.IsDefault);
+
+        var list = await client.GetFromJsonAsync<List<CandidateProfileResponse>>("/api/candidate-profiles");
+        Assert.Contains(list!, p => p.Id == profile.Id);
+
+        // The new profile is a valid feed scope (200, not 403).
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/matches?candidateProfileId={profile.Id}")).StatusCode);
+    }
+
+    // ---------------- LLM-as-judge top-N re-rank ----------------
+
+    [DbFact]
+    public async Task LlmRerank_WithoutLogin_Returns401()
+    {
+        await _factory.ResetDatabaseAsync();
+        var anon = _factory.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anon.PostAsync("/api/matches/llm-rerank", null)).StatusCode);
+    }
+
+    [DbFact]
+    public async Task LlmRerank_NoLlmConfigured_NoOpButSucceeds()
+    {
+        await _factory.ResetDatabaseAsync();
+        var client = await _factory.CreateAuthenticatedClientAsync();
+        var profileId = await CreateProfile("Dev", ".NET", "C#");
+        var jobId = await SeedJob("Senior Backend (.NET)", "Backend .NET, C#, AWS. Remote, Brazil.");
+        await SeedMatch(jobId, profileId, 80, DateTime.UtcNow);
+        await client.PostAsync("/api/jobs/rebuild-latest-matches", null);
+
+        var res = await client.PostAsync($"/api/matches/llm-rerank?candidateProfileId={profileId}", null);
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var doc = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(doc.GetProperty("llmConfigured").GetBoolean());
+        Assert.Equal(0, doc.GetProperty("rescored").GetInt32());
+    }
+
+    [DbFact]
+    public async Task LlmRerank_ForeignProfile_Returns403()
+    {
+        await _factory.ResetDatabaseAsync();
+        var a = await _factory.CreateAuthenticatedClientAsync("a@test.local");
+        var b = await _factory.CreateAuthenticatedClientAsync("b@test.local");
+        var pb = await CreateProfileWith(b, "B profile");
+
+        var res = await a.PostAsync($"/api/matches/llm-rerank?candidateProfileId={pb}", null);
+        Assert.Equal(HttpStatusCode.Forbidden, res.StatusCode);
+    }
+
+    [DbFact]
+    public async Task ProfileImport_Apply_ForeignImport_Returns404()
+    {
+        await _factory.ResetDatabaseAsync();
+        var a = await _factory.CreateAuthenticatedClientAsync("a@test.local");
+        var b = await _factory.CreateAuthenticatedClientAsync("b@test.local");
+        var up = await (await UploadPdf(a)).Content.ReadFromJsonAsync<UploadLinkedInProfilePdfResponse>();
+
+        var res = await b.PostAsJsonAsync($"/api/profile-imports/{up!.ImportId}/apply",
+            new ApplyProfileImportRequest(up.Draft, SetAsDefault: true));
+        Assert.Equal(HttpStatusCode.NotFound, res.StatusCode);
     }
 }

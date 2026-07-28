@@ -9,7 +9,7 @@ public static class BacenEndpoints
 {
     public static void MapBacenEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/bacen/pix-participants").WithTags("Bacen");
+        var group = app.MapGroup("/api/bacen/pix-participants").WithTags("Bacen").RequireAuthorization("System");
 
         // Import the official CSV into BacenInstitution (raw radar).
         group.MapPost("/import", async (IBacenRadarService svc, CancellationToken ct) =>

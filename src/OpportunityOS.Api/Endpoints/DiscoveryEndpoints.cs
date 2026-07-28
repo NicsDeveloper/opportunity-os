@@ -11,7 +11,8 @@ public static class DiscoveryEndpoints
 {
     public static void MapDiscoveryEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/discovery").WithTags("Discovery (Firehose)");
+        // The whole discovery firehose is cost-bearing / system area → requires "System".
+        var group = app.MapGroup("/api/discovery").WithTags("Discovery (Firehose)").RequireAuthorization("System");
 
         group.MapPost("/campaigns", async (CreateCampaignRequest req, IFirehoseService svc, CancellationToken ct) =>
         {

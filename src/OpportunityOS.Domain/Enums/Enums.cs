@@ -142,6 +142,22 @@ public enum JobVerificationStatus
     Expired = 6
 }
 
+// ---------- Profile import (LinkedIn PDF onboarding) ----------
+
+public enum ProfileImportSource
+{
+    LinkedInPdf = 1
+}
+
+public enum ProfileImportStatus
+{
+    Uploaded = 1,
+    Parsed = 2,
+    Failed = 3,
+    Converted = 4,
+    Applied = 5
+}
+
 public enum UserFeedbackType
 {
     Relevant = 1,

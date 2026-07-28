@@ -1,19 +1,25 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using OpportunityOS.Domain.Entities;
+using OpportunityOS.Infrastructure.Auth;
 
 namespace OpportunityOS.Infrastructure.Persistence;
 
-public sealed class OpportunityOsDbContext : DbContext
+public sealed class OpportunityOsDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
 {
     public OpportunityOsDbContext(DbContextOptions<OpportunityOsDbContext> options) : base(options) { }
 
+    public DbSet<Workspace> Workspaces => Set<Workspace>();
+    public DbSet<ProfileImport> ProfileImports => Set<ProfileImport>();
     public DbSet<CandidateProfile> CandidateProfiles => Set<CandidateProfile>();
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<JobPosting> JobPostings => Set<JobPosting>();
     public DbSet<OpportunityMatch> OpportunityMatches => Set<OpportunityMatch>();
+    public DbSet<LatestOpportunityMatch> LatestOpportunityMatches => Set<LatestOpportunityMatch>();
     public DbSet<ExecutionRun> ExecutionRuns => Set<ExecutionRun>();
     public DbSet<GeneratedMessage> GeneratedMessages => Set<GeneratedMessage>();
     public DbSet<PromptExecutionLog> PromptExecutionLogs => Set<PromptExecutionLog>();
@@ -30,7 +36,25 @@ public sealed class OpportunityOsDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        // Identity tables (AspNetUsers/Roles/...). Must run first so our overrides apply on top.
+        base.OnModelCreating(b);
+
         var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+
+        b.Entity<AppUser>(e =>
+        {
+            e.Property(x => x.DisplayName).HasMaxLength(200);
+        });
+
+        b.Entity<Workspace>(e =>
+        {
+            e.ToTable("workspaces");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).IsRequired();
+            // One workspace per user in the MVP.
+            e.HasIndex(x => x.UserId).IsUnique();
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
 
         // Value converters/comparers for List<string> stored as jsonb.
         var stringListConverter = new ValueConverter<List<string>, string>(
@@ -50,6 +74,12 @@ public sealed class OpportunityOsDbContext : DbContext
             e.Property(x => x.IsDefault).HasDefaultValue(false);
             e.Property(x => x.MinimumScoreToShow).HasDefaultValue(60);
             e.HasIndex(x => x.IsDefault);
+            // Workspace ownership — transitional nullable column (see AddAuthWorkspace migration);
+            // the auth seeder backfills it, a later migration tightens it to NOT NULL.
+            e.Property(x => x.WorkspaceId);
+            e.HasIndex(x => x.WorkspaceId);
+            e.HasIndex(x => new { x.WorkspaceId, x.IsDefault });
+            e.HasOne<Workspace>().WithMany().HasForeignKey(x => x.WorkspaceId).OnDelete(DeleteBehavior.Cascade);
             foreach (var prop in new[]
                      {
                          nameof(CandidateProfile.CoreSkills), nameof(CandidateProfile.SecondarySkills),
@@ -76,6 +106,19 @@ public sealed class OpportunityOsDbContext : DbContext
                 .HasConversion(expConverter)
                 .HasColumnType("jsonb")
                 .Metadata.SetValueComparer(expComparer);
+        });
+
+        b.Entity<ProfileImport>(e =>
+        {
+            e.ToTable("profile_imports");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Source).HasConversion<int>();
+            e.Property(x => x.Status).HasConversion<int>();
+            e.Property(x => x.OriginalFileName).IsRequired();
+            e.Property(x => x.ParsedJson).HasColumnType("jsonb");
+            e.HasIndex(x => x.WorkspaceId);
+            e.HasIndex(x => new { x.WorkspaceId, x.Status });
+            e.HasOne<Workspace>().WithMany().HasForeignKey(x => x.WorkspaceId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<Company>(e =>
@@ -122,6 +165,23 @@ public sealed class OpportunityOsDbContext : DbContext
             e.HasIndex(x => x.JobPostingId);
             // Latest match for a (job, profile) pair — covers the per-profile feed/digest queries.
             e.HasIndex(x => new { x.JobPostingId, x.CandidateProfileId, x.CreatedAtUtc });
+        });
+
+        b.Entity<LatestOpportunityMatch>(e =>
+        {
+            e.ToTable("latest_opportunity_matches");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Recommendation).HasConversion<int>();
+            e.Property(x => x.EngineVersion).IsRequired();
+            // The projection's identity: exactly one current match per (job, profile).
+            e.HasIndex(x => new { x.JobPostingId, x.CandidateProfileId }).IsUnique();
+            e.HasIndex(x => new { x.CandidateProfileId, x.OverallScore });
+            e.HasIndex(x => new { x.CandidateProfileId, x.UpdatedAtUtc });
+            e.HasIndex(x => x.OpportunityMatchId);
+            // Relationships (the projection points at a job, a profile and the underlying match).
+            e.HasOne<JobPosting>().WithMany().HasForeignKey(x => x.JobPostingId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<CandidateProfile>().WithMany().HasForeignKey(x => x.CandidateProfileId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<OpportunityMatch>().WithMany().HasForeignKey(x => x.OpportunityMatchId).OnDelete(DeleteBehavior.Restrict);
         });
 
         b.Entity<ExecutionRun>(e =>

@@ -1,3 +1,4 @@
+using OpportunityOS.Application.AI;
 using OpportunityOS.Application.Normalization;
 using OpportunityOS.Domain.Entities;
 using OpportunityOS.Domain.Enums;
@@ -20,8 +21,14 @@ public sealed class HeuristicMatchEngine : IMatchEngine
     public const string Version = "heuristic-v2";
 
     private readonly IJobNormalizer _normalizer;
+    private readonly SemanticMatchOptions _semantic;
 
-    public HeuristicMatchEngine(IJobNormalizer normalizer) => _normalizer = normalizer;
+    // semantic is optional so existing callers/tests (heuristic-only) keep working unchanged.
+    public HeuristicMatchEngine(IJobNormalizer normalizer, SemanticMatchOptions? semantic = null)
+    {
+        _normalizer = normalizer;
+        _semantic = semantic ?? new SemanticMatchOptions();
+    }
 
     public MatchResult Evaluate(CandidateProfile profile, JobPosting job)
     {
@@ -38,17 +45,29 @@ public sealed class HeuristicMatchEngine : IMatchEngine
         var risks = new List<string>();
         var missing = new List<string>();
 
-        var tech = ScoreTechnical(profile, sig, jobFamilies, titleLower, titleHasCore, haystack, strengths, risks, missing,
-            out var managerial, out var coreHit);
+        var tech = ScoreTechnical(profile, sig, jobFamilies, titleFamilies, titleLower, titleHasCore, haystack,
+            strengths, risks, missing, out var managerial, out var coreHit);
         var role = ScoreRole(profile, job.Title, titleLower, titleHasCore, strengths, risks);
         var seniority = ScoreSeniority(profile, norm.Seniority, strengths, risks);
         var domain = ScoreDomain(profile, haystack, strengths);
         var location = ScoreLocation(profile, norm.WorkMode, haystack, strengths, risks);
         var language = ScoreLanguage(profile, norm.Language ?? job.Language, risks);
 
-        var overall = (int)Math.Round(
-            tech * 0.50 + role * 0.15 + seniority * 0.10 + domain * 0.10 + location * 0.10 + language * 0.05,
-            MidpointRounding.AwayFromZero);
+        var heuristicOverall =
+            tech * 0.50 + role * 0.15 + seniority * 0.10 + domain * 0.10 + location * 0.10 + language * 0.05;
+        var overall = (int)Math.Round(heuristicOverall, MidpointRounding.AwayFromZero);
+
+        // HYBRID: blend semantic similarity (cosine of profile/job embeddings) when enabled and both
+        // embeddings exist. Applied BEFORE the gates so the caps below still bind (semantic can't lift a
+        // management/non-core role into the top). Heuristic stays the transparent, explainable backbone.
+        if (_semantic.Enabled && profile.Embedding is { Length: > 0 } pe && job.Embedding is { Length: > 0 } je
+            && pe.Length == je.Length)
+        {
+            var w = Math.Clamp(_semantic.SemanticWeight, 0, 1);
+            var sem = VectorMath.Cosine(pe, je) * 100.0;
+            overall = (int)Math.Round(heuristicOverall * (1 - w) + sem * w, MidpointRounding.AwayFromZero);
+            strengths.Add($"Similaridade semântica {Math.Max(0, sem):0}% (perfil × vaga)");
+        }
 
         // GATES (the technical fit must dominate; domain/location/seniority must not lift a role
         // that doesn't actually match the candidate's stack into the top).
@@ -79,7 +98,7 @@ public sealed class HeuristicMatchEngine : IMatchEngine
 
     private static int ScoreTechnical(
         CandidateProfile profile, ProfileStackSignature sig, HashSet<StackFamily> jobFamilies,
-        string titleLower, bool titleHasCore, string haystack,
+        HashSet<StackFamily> titleFamilies, string titleLower, bool titleHasCore, string haystack,
         List<string> strengths, List<string> risks, List<string> missing,
         out bool managerial, out bool coreHit)
     {
@@ -103,13 +122,26 @@ public sealed class HeuristicMatchEngine : IMatchEngine
         // How many of the candidate's own skills (core + secondary) literally appear in the posting.
         var supporting = CountSkillOverlap(profile, haystack);
 
+        // The TITLE is the strongest signal of the role's PRIMARY stack. If the title names a stack
+        // family that isn't the candidate's core (e.g. "C# Developer" for a Java profile), the role's
+        // primary stack is foreign — a body mention of the core stack is incidental, not a core hit.
+        var titleDeclaresForeignCore = sig.Core.Count > 0 && titleFamilies.Count > 0
+            && !titleFamilies.Overlaps(sig.Core);
+
         int score;
-        if (coreFamilies.Count > 0)
+        if (coreFamilies.Count > 0 && !titleDeclaresForeignCore)
         {
             coreHit = true;
             score = 72 + Math.Min(supporting * 6, 28);
             strengths.Add($"Stack principal do perfil presente na vaga ({FamilyLabels(coreFamilies)})");
             if (supporting > 2) strengths.Add("Várias skills do perfil citadas na vaga");
+        }
+        else if (coreFamilies.Count > 0 && titleDeclaresForeignCore)
+        {
+            // Primary stack of the role differs from the candidate's core; their core appears only in the body.
+            score = 50 + Math.Min(supporting * 5, 18);
+            risks.Add($"Stack principal da vaga é outra ({FamilyLabels(titleFamilies.ToList())}); seu core aparece só como secundário");
+            missing.Add("A vaga não é primariamente da sua stack principal");
         }
         else if (secondaryFamilies.Count > 0)
         {
